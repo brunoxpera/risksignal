@@ -18,14 +18,27 @@ GO_ARCH_LINT ?= go-arch-lint
 GO_ARCH_LINT_BIN := $(or $(shell command -v $(GO_ARCH_LINT) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(GO_ARCH_LINT))
 COMPOSE ?= docker compose
 
+# Build metadata (WP-1a.07): injected into every binary at link time and
+# served by GET /version. VERSION defaults to dev like the buildinfo package
+# itself; override with e.g. `make VERSION=0.1.0`. GIT_COMMIT and BUILD_TIME
+# are read from the environment at make time; the fallback "unknown" keeps
+# the build reproducible when git or date is unavailable (the buildinfo
+# defaults say the same).
+VERSION ?= dev
+GIT_COMMIT := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)
+BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)
+GO_LDFLAGS := -X github.com/xpera/risksignal/internal/platform/buildinfo.Version=$(VERSION) \
+	-X github.com/xpera/risksignal/internal/platform/buildinfo.Commit=$(GIT_COMMIT) \
+	-X github.com/xpera/risksignal/internal/platform/buildinfo.BuildTime=$(BUILD_TIME)
+
 .PHONY: build test test-arch lint lint-arch generate migrate up down verify-connectivity
 
-## build: compile all three binaries into bin/
+## build: compile all three binaries into bin/ with build metadata injected
 build:
 	mkdir -p bin
-	$(GO) build -o bin/risksignal-server ./cmd/risksignal-server
-	$(GO) build -o bin/risksignal-worker ./cmd/risksignal-worker
-	$(GO) build -o bin/risksignal ./cmd/risksignal
+	$(GO) build -ldflags '$(GO_LDFLAGS)' -o bin/risksignal-server ./cmd/risksignal-server
+	$(GO) build -ldflags '$(GO_LDFLAGS)' -o bin/risksignal-worker ./cmd/risksignal-worker
+	$(GO) build -ldflags '$(GO_LDFLAGS)' -o bin/risksignal ./cmd/risksignal
 
 ## test: run the architecture-gate negative test, then the unit test suite
 test: test-arch
