@@ -1,0 +1,49 @@
+# RiskSignal — Git ignore rules
+# Keep this file maintained: any repo-irrelevant file or folder belongs here.
+
+# --- Prompts ------------------------------------------------------------
+# Working notes handed to the orchestrator. Not part of the shipped docs.
+docs/prompts/
+
+# --- OS ------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- Editors / IDEs -------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+
+# --- Go -------------------------------------------------------------------
+# Compiled binaries and test binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/dist/
+/build/
+
+# Coverage output
+coverage.out
+*.coverprofile
+coverage.html
+
+# --- Environment / secrets ------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Logs -----------------------------------------------------------------
+*.log
+
+# --- Local tooling --------------------------------------------------------
+# Node (if a toolchain is added later)
+node_modules/
