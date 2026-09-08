@@ -42,7 +42,12 @@ code 0.
 
     make test
 
-Runs `go test ./...`.
+Runs the architecture-gate negative test (`make test-arch`), then
+`go test ./...`. The negative test proves the arch gate rejects a forbidden
+import; see `testdata/arch-gate/verify-arch-gate.sh`. To run only that
+negative test:
+
+    make test-arch
 
 ### Local environment
 
@@ -55,5 +60,9 @@ in WP-1a.04.
 
 ### Lint and generate
 
-    make lint      # gofmt check (fails on unformatted files) plus go vet
+    make lint      # architecture gate (go-arch-lint check) plus gofmt check plus go vet
     make generate  # run code generators
+
+To run only the architecture gate:
+
+    make lint-arch
