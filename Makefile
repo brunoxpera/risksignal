@@ -1,5 +1,6 @@
 # RiskSignal — build and development targets (WP-1a.01 skeleton; WP-1a.03 compose
-# environment; WP-1a.11 arch gate; WP-1a.12 CI pipeline stages 1-2).
+# environment; WP-1a.11 arch gate; WP-1a.12 CI pipeline stages 1-2; WP-1a.13
+# images, SBOM, scans and signing groundwork).
 #
 # Go 1.27 is pinned by ADR-008 and declared in go.mod; use a matching toolchain.
 # sqlc is pinned to v1.31.1 (ADR-009; the sqlc.yaml comment says the same) and
@@ -7,10 +8,16 @@
 # `go install`.
 # go-arch-lint is pinned to v1.19.0, golangci-lint to v2.13.2, gitleaks to
 # 8.30.1 and go-licenses to v1.6.0 (docs/plan/orchestrator-decisions.md, D-005).
-# All of them are resolved from PATH first, then from GOPATH/bin — the default
-# destination of `go install`. The CI pipeline (WP-1a.12) runs the same stage
-# sequence as `make ci-lint` / `make ci-test` / `make ci-build`, so every stage
-# is verifiable without GitHub.
+# The WP-1a.13 supply-chain tooling is pinned the same way: cyclonedx-gomod
+# v1.12.0, govulncheck v1.8.0 and cosign v2.6.5 via `go install`; syft v1.51.1
+# and grype v0.118.0 as checksum-verified GitHub release binaries (a `go install`
+# build of the anchore tools does not stamp the version). All of them are
+# resolved from PATH first, then from GOPATH/bin — the default destination of
+# `go install`.
+# The CI pipeline (WP-1a.12) runs the same stage sequence as `make ci-lint` /
+# `make ci-test` / `make ci-build`, so every stage is verifiable without GitHub;
+# the WP-1a.13 image job (`make image` / `make sbom` / `make scan` / `make sign`)
+# mirrors the CI image job and reproduces it locally.
 # `make` requires tabs in recipes — do not re-indent with spaces.
 
 GO ?= go
@@ -27,6 +34,21 @@ GITLEAKS_VERSION := 8.30.1
 GITLEAKS_BIN := $(or $(shell command -v $(GITLEAKS) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(GITLEAKS))
 GO_LICENSES ?= go-licenses
 GO_LICENSES_BIN := $(or $(shell command -v $(GO_LICENSES) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(GO_LICENSES))
+CYCLONEDX_GOMOD ?= cyclonedx-gomod
+CYCLONEDX_GOMOD_VERSION := v1.12.0
+CYCLONEDX_GOMOD_BIN := $(or $(shell command -v $(CYCLONEDX_GOMOD) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(CYCLONEDX_GOMOD))
+GOVULNCHECK ?= govulncheck
+GOVULNCHECK_VERSION := v1.8.0
+GOVULNCHECK_BIN := $(or $(shell command -v $(GOVULNCHECK) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(GOVULNCHECK))
+SYFT ?= syft
+SYFT_VERSION := 1.51.1
+SYFT_BIN := $(or $(shell command -v $(SYFT) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(SYFT))
+GRYPE ?= grype
+GRYPE_VERSION := 0.118.0
+GRYPE_BIN := $(or $(shell command -v $(GRYPE) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(GRYPE))
+COSIGN ?= cosign
+COSIGN_VERSION := v2.6.5
+COSIGN_BIN := $(or $(shell command -v $(COSIGN) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(COSIGN))
 COMPOSE ?= docker compose
 
 # Build metadata (WP-1a.07): injected into every binary at link time and
@@ -42,8 +64,21 @@ GO_LDFLAGS := -X github.com/xpera/risksignal/internal/platform/buildinfo.Version
 	-X github.com/xpera/risksignal/internal/platform/buildinfo.Commit=$(GIT_COMMIT) \
 	-X github.com/xpera/risksignal/internal/platform/buildinfo.BuildTime=$(BUILD_TIME)
 
+# Image names and artifact locations (WP-1a.13): the production images are
+# named risksignal/server and risksignal/worker — the names a future registry
+# (ghcr.io/xpera/...) would carry — and tagged with VERSION (dev by default),
+# like the binaries. SBOMs and scan reports land under dist/, which is
+# git-ignored together with bin/ (CI uploads them as workflow artifacts).
+IMAGE_SERVER := risksignal/server
+IMAGE_WORKER := risksignal/worker
+IMAGE_TAG := $(VERSION)
+ARTIFACT_DIR := dist
+SBOM_DIR := $(ARTIFACT_DIR)/sbom
+SCAN_DIR := $(ARTIFACT_DIR)/scan
+
 .PHONY: build test test-arch lint lint-arch generate migrate up down verify-connectivity \
-	ci-lint ci-test ci-build check-gofmt vet lint-golangci lint-licenses lint-secrets up-db
+	ci-lint ci-test ci-build check-gofmt vet lint-golangci lint-licenses lint-secrets up-db \
+	image sbom scan sign
 
 ## build: compile all three binaries into bin/ with build metadata injected
 build:
@@ -78,6 +113,90 @@ ci-test: up-db
 ## ci-build: WP-1a.12 build stage — `make build` is the definition of the
 ##           stage (three binaries with build metadata).
 ci-build: build
+
+## image: build the production container images (WP-1a.13) from the
+##        deploy/server and deploy/worker Containerfiles — multi-stage, non-root
+##        distroless runtime pinned by digest. The WP-1a.07 build metadata
+##        (VERSION / GIT_COMMIT / BUILD_TIME) is injected through build args
+##        into the same -ldflags -X variables that `make build` uses, so the
+##        image binary answers /version (server) and reports the version in
+##        the worker heartbeat like a locally built binary. Override with e.g.
+##        `make VERSION=0.1.0 image`.
+image:
+	@command -v docker >/dev/null 2>&1 || { echo "docker not found on PATH — install Docker Desktop or the docker CLI and start the daemon"; exit 2; }
+	docker build --build-arg VERSION=$(VERSION) --build-arg GIT_COMMIT=$(GIT_COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) -t $(IMAGE_SERVER):$(IMAGE_TAG) -f deploy/server/Containerfile .
+	docker build --build-arg VERSION=$(VERSION) --build-arg GIT_COMMIT=$(GIT_COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) -t $(IMAGE_WORKER):$(IMAGE_TAG) -f deploy/worker/Containerfile .
+
+## sbom: generate the software bills of materials (WP-1a.13, concept ch. 17.3
+##       stage 5): the Go module SBOM with cyclonedx-gomod and one
+##       container-image SBOM per production image with syft — all CycloneDX
+##       JSON. Requires the images (depends on image; docker layer caching
+##       keeps rebuilds incremental). Artifacts land in dist/sbom/.
+sbom: image
+	@if [ ! -x "$(CYCLONEDX_GOMOD_BIN)" ]; then \
+		echo "cyclonedx-gomod not found (looked at PATH and $$($(GO) env GOPATH)/bin)."; \
+		echo "Install the pinned version: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@$(CYCLONEDX_GOMOD_VERSION)"; \
+		exit 2; \
+	fi
+	@if [ ! -x "$(SYFT_BIN)" ]; then \
+		echo "syft not found (looked at PATH and $$($(GO) env GOPATH)/bin)."; \
+		echo "Install the pinned version from the checksum-verified GitHub release (see docs/plan/orchestrator-decisions.md, D-005)."; \
+		exit 2; \
+	fi
+	mkdir -p $(SBOM_DIR)
+	$(CYCLONEDX_GOMOD_BIN) mod -json -output $(SBOM_DIR)/module.cdx.json .
+	$(SYFT_BIN) scan -q -o cyclonedx-json=$(SBOM_DIR)/server.cdx.json $(IMAGE_SERVER):$(IMAGE_TAG)
+	$(SYFT_BIN) scan -q -o cyclonedx-json=$(SBOM_DIR)/worker.cdx.json $(IMAGE_WORKER):$(IMAGE_TAG)
+	@echo "SBOMs written to $(SBOM_DIR)/:"
+	@ls -1 $(SBOM_DIR)
+
+## scan: vulnerability scans (WP-1a.13, concept ch. 17.3 stage 5): govulncheck
+##       over the Go module dependencies and grype over both production
+##       images. Both fail the build on findings by default: govulncheck exits
+##       non-zero on any vulnerability that affects the build, grype runs with
+##       --fail-on high (high and critical fail). Reports are printed and kept
+##       in dist/scan/.
+scan: image
+	@if [ ! -x "$(GOVULNCHECK_BIN)" ]; then \
+		echo "govulncheck not found (looked at PATH and $$($(GO) env GOPATH)/bin)."; \
+		echo "Install the pinned version: go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)"; \
+		exit 2; \
+	fi
+	@if [ ! -x "$(GRYPE_BIN)" ]; then \
+		echo "grype not found (looked at PATH and $$($(GO) env GOPATH)/bin)."; \
+		echo "Install the pinned version from the checksum-verified GitHub release (see docs/plan/orchestrator-decisions.md, D-005)."; \
+		exit 2; \
+	fi
+	mkdir -p $(SCAN_DIR)
+	@echo "== govulncheck (Go module) =="; \
+	$(GOVULNCHECK_BIN) ./... >$(SCAN_DIR)/govulncheck.log 2>&1; \
+	rc=$$?; cat $(SCAN_DIR)/govulncheck.log; exit $$rc
+	@echo "== grype $(IMAGE_SERVER):$(IMAGE_TAG) =="; \
+	GRYPE_CHECK_FOR_APP_UPDATE=false $(GRYPE_BIN) --fail-on high $(IMAGE_SERVER):$(IMAGE_TAG) >$(SCAN_DIR)/grype-server.log 2>&1; \
+	rc=$$?; cat $(SCAN_DIR)/grype-server.log; exit $$rc
+	@echo "== grype $(IMAGE_WORKER):$(IMAGE_TAG) =="; \
+	GRYPE_CHECK_FOR_APP_UPDATE=false $(GRYPE_BIN) --fail-on high $(IMAGE_WORKER):$(IMAGE_TAG) >$(SCAN_DIR)/grype-worker.log 2>&1; \
+	rc=$$?; cat $(SCAN_DIR)/grype-worker.log; exit $$rc
+
+## sign: cosign keyless signing groundwork (WP-1a.13, concept ch. 17.3 stage 6
+##       and ch. 4.4 step 1). Verifies the pinned cosign binary and prints the
+##       intended keyless flow; it deliberately signs nothing — there is no
+##       registry and no real release yet. The full flow is documented in
+##       docs/plan/release-signing.md.
+sign:
+	@if [ ! -x "$(COSIGN_BIN)" ]; then \
+		echo "cosign not found (looked at PATH and $$($(GO) env GOPATH)/bin)."; \
+		echo "Install the pinned version: go install github.com/sigstore/cosign/v2/cmd/cosign@$(COSIGN_VERSION)"; \
+		exit 2; \
+	fi
+	@echo "== cosign (pinned $(COSIGN_VERSION)) =="; \
+	$(COSIGN_BIN) version
+	@echo
+	@echo "Signing skeleton (no signatures produced — release-time step only):"
+	@echo "  keyless: cosign sign --yes ghcr.io/xpera/risksignal/server@<digest>"
+	@echo "           (release CI job grants id-token: write; GitHub OIDC issuer)"
+	@echo "  verify:  cosign verify --certificate-identity '...' --certificate-oidc-issuer \"https://token.actions.githubusercontent.com\" ghcr.io/xpera/risksignal/server@<digest>"
+	@echo "See docs/plan/release-signing.md for the details."
 
 ## up-db: start only the compose db service and wait until it is healthy.
 ##        Idempotent; used by ci-test. Compose v2's --wait honours the
