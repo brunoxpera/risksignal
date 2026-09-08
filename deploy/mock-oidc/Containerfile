@@ -3,7 +3,8 @@
 # RiskSignal mock OIDC provider — development image (WP-1a.03, D-003).
 # Multi-stage: Go 1.27 build (ADR-008, tag carries the major/minor) on
 # golang:1.27, minimal Alpine runtime (busybox wget backs the compose
-# healthcheck). Dev/test tool; hardened production image is WP-1a.13.
+# healthcheck). Dev/test tool only — never deployed; the hardened
+# production images (server/worker) are WP-1a.13.
 
 FROM golang:1.27 AS build
 WORKDIR /src
