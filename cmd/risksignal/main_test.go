@@ -50,13 +50,13 @@ func newTestDB(t *testing.T) string {
 		t.Skipf("integration database unavailable: %v", err)
 	}
 	if err := admin.PingContext(ctx); err != nil {
-		admin.Close()
+		_ = admin.Close()
 		t.Skipf("integration database not reachable (set RISKSIGNAL_TEST_DATABASE_URL): %v", err)
 	}
 
 	name := fmt.Sprintf("risksignal_it_%d", time.Now().UnixNano())
 	if _, err := admin.ExecContext(ctx, `CREATE DATABASE "`+name+`"`); err != nil {
-		admin.Close()
+		_ = admin.Close()
 		t.Fatalf("create test database: %v", err)
 	}
 	t.Cleanup(func() {

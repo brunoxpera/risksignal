@@ -73,7 +73,7 @@ func TestCLIMigrateExitCodesAgainstRealDatabase(t *testing.T) {
 	}
 
 	// The text form of the same command stays human-readable.
-	code, stdout, stderr = runCLI(t, env, "maintenance", "migrate", "--dry-run")
+	code, stdout, _ = runCLI(t, env, "maintenance", "migrate", "--dry-run")
 	if code != exitOK {
 		t.Fatalf("text dry run exit code = %d, want 0", code)
 	}

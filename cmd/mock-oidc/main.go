@@ -38,6 +38,8 @@ func run() error {
 		return fmt.Errorf("create mock OIDC server: %w", err)
 	}
 
+	// #nosec G102 — deliberate container-internal contract (see file header):
+	// compose publishes this listener to the host loopback only.
 	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", listenAddr, err)

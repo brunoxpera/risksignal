@@ -47,13 +47,13 @@ func newTestDB(t *testing.T) string {
 		t.Skipf("integration database unavailable: %v", err)
 	}
 	if err := admin.PingContext(ctx); err != nil {
-		admin.Close()
+		_ = admin.Close()
 		t.Skipf("integration database not reachable (set RISKSIGNAL_TEST_DATABASE_URL): %v", err)
 	}
 
 	name := fmt.Sprintf("risksignal_it_%d", time.Now().UnixNano())
 	if _, err := admin.ExecContext(ctx, `CREATE DATABASE "`+name+`"`); err != nil {
-		admin.Close()
+		_ = admin.Close()
 		t.Fatalf("create test database: %v", err)
 	}
 	t.Cleanup(func() {
@@ -227,7 +227,7 @@ CREATE TABLE first_table (id BIGINT NOT NULL);
 	// no-op. Without the advisory lock both would collide (second CREATE
 	// TABLE fails) or one would double-apply.
 	appliedA, appliedB := len(oa.res.Applied), len(ob.res.Applied)
-	if !(appliedA == 2 && appliedB == 0) && !(appliedA == 0 && appliedB == 2) {
+	if (appliedA != 2 || appliedB != 0) && (appliedA != 0 || appliedB != 2) {
 		t.Fatalf("applied counts = %d and %d, want exactly one runner applying both migrations", appliedA, appliedB)
 	}
 	// The blocked runner waits for the lock (goose re-probes every 5s), so
@@ -281,7 +281,7 @@ func TestRecoversUnloggedAppliedMigration(t *testing.T) {
 	if _, err := db.ExecContext(ctx2, "DELETE FROM schema_migration_log WHERE version = 2"); err != nil {
 		t.Fatalf("simulate lost log row: %v", err)
 	}
-	db.Close()
+	_ = db.Close()
 
 	// The next run heals: version 2 is re-recorded from goose's
 	// bookkeeping, and only then is its checksum protected again.

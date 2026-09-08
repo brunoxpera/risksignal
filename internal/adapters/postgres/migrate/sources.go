@@ -158,7 +158,7 @@ func pendingMigrations(srcs []source, gooseApplied map[int64]time.Time) ([]Pendi
 				"migration %q (version %d) is older than the highest applied version %d but was never applied — refusing to migrate out of order",
 				s.Path, s.Version, maxApplied)
 		}
-		pending = append(pending, PendingMigration{Version: s.Version, Path: s.Path})
+		pending = append(pending, PendingMigration(s))
 	}
 	return pending, nil
 }
