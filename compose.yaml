@@ -11,9 +11,11 @@
 #   mail  127.0.0.1:8025   Mailpit UI/API
 #   oidc  127.0.0.1:9000   mock OIDC provider (cmd/mock-oidc)
 #
-# server and worker are buildable skeletons that validate their configuration
-# and exit 0 until WP-1a.05/WP-1a.06/WP-1a.10 give them long-running
-# behaviour; db, mail and oidc are the services that must stay up.
+# server has served HTTP through the WP-1a.06 middleware chain since WP-1a.06
+# (it binds its loopback default, 127.0.0.1:8080, inside the container; no host
+# port is published); worker still validates its configuration and exits 0 until
+# WP-1a.10 gives it the scheduler loop. db, mail and oidc are the services that
+# must stay up.
 
 name: risksignal
 

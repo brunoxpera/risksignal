@@ -1,0 +1,120 @@
+// Package httpapi adapts inbound HTTP requests to the application layer
+// (implementation concept ch. 3.2 "Repository-Struktur"). The generated API
+// code of ADR-011 will land in httpapi/gen; this package holds the
+// hand-written HTTP scaffolding.
+//
+// WP-1a.06 ("HTTP scaffolding and middleware chain") provides the middleware
+// chain every request passes through. Routing stays on the standard library
+// http.ServeMux (ADR-008 — no router framework), and the cross-cutting
+// concerns of concept ch. 12.3 ("Sicherheitskontrollen") are composed here as
+// an explicit chain: correlation ID, access log, panic recovery, security
+// headers, a restrictive content security policy, CORS off by default and a
+// body size limit.
+package httpapi
+
+import (
+	"net/http"
+	"strings"
+)
+
+// Middleware wraps an http.Handler with cross-cutting behaviour. It is the
+// building block of the WP-1a.06 chain (ADR-008: middleware chaining as a
+// small in-repository building block).
+type Middleware func(http.Handler) http.Handler
+
+// Chain composes middlewares into one. They run in the given order, outermost
+// first: Chain(a, b, c)(h) serves a(b(c(h))). An empty chain returns h
+// unchanged.
+func Chain(middlewares ...Middleware) Middleware {
+	return func(next http.Handler) http.Handler {
+		for i := len(middlewares) - 1; i >= 0; i-- {
+			next = middlewares[i](next)
+		}
+		return next
+	}
+}
+
+// Logger is the minimal logging surface the HTTP layer needs. WP-1a.06 emits
+// plain text lines; WP-1a.08 ("Strukturierte Logs") swaps the implementation
+// for structured, redacting logging without touching the middleware call
+// sites.
+type Logger interface {
+	Printf(format string, v ...any)
+}
+
+// MaxBodyBytes caps request bodies accepted by NewHandler (concept ch. 12.3:
+// strict input limits). One MiB covers the JSON payloads of the planned API;
+// bulk uploads, if any later work package defines them, get their own
+// documented limit.
+const MaxBodyBytes int64 = 1 << 20 // 1 MiB
+
+// NewHandler wraps h with the complete WP-1a.06 middleware chain, outermost
+// first. Every request — matched or not — passes through the whole chain, so
+// a 404 from an as-yet empty ServeMux still carries a correlation ID, the
+// security headers and an access log line.
+func NewHandler(h http.Handler, logger Logger) http.Handler {
+	return Chain(
+		CorrelationID,
+		AccessLog(logger),
+		RecoverPanic(logger),
+		SecurityHeaders,
+		ContentSecurityPolicy,
+		CORSDisabled,
+		LimitBody(MaxBodyBytes),
+	)(h)
+}
+
+// statusRecorder records the first response status while writing through to
+// the wrapped ResponseWriter. The access log needs the final status, and the
+// panic recovery needs to know whether the handler already started answering.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int // 0 until the handler writes a status
+}
+
+// WriteHeader keeps the first status: later calls are superfluous (net/http
+// would log and ignore them anyway) and must not overwrite what is already on
+// the wire.
+func (w *statusRecorder) WriteHeader(code int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// Write records the implicit 200 when the handler writes a body without an
+// explicit status.
+func (w *statusRecorder) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+// Unwrap lets http.ResponseController reach the real ResponseWriter, keeping
+// optional interfaces (Flusher, Hijacker, ...) available through the chain.
+func (w *statusRecorder) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// statusCode returns the recorded status. When the handler wrote nothing the
+// server answers 200 implicitly, so 200 is the honest value to log.
+func (w *statusRecorder) statusCode() int {
+	if w.status == 0 {
+		return http.StatusOK
+	}
+	return w.status
+}
+
+// sanitizeLogField neutralises log injection (concept ch. 12.3: "Log-Injektion
+// werden neutralisiert"): control characters in request-derived values are
+// replaced so a crafted path or panic value can never forge a log line.
+func sanitizeLogField(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return '?'
+		}
+		return r
+	}, s)
+}

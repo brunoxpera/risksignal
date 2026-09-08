@@ -42,7 +42,10 @@ precedence. `database.url` and `oidc.issuer` are mandatory; the local
 authentication bypass (`RISKSIGNAL_AUTH_BYPASS_ENABLED`) is accepted in
 `local` mode only (TR-010). On invalid configuration the binary prints the
 problem and exits 1; on success it prints a provenance summary (sources, no
-secret values) and exits 0. Example:
+secret values). The worker and the CLI then exit 0; `risksignal-server`
+keeps running and serves HTTP on `http.addr` through the WP-1a.06
+middleware chain (ADR-008), shutting down cleanly on SIGINT/SIGTERM.
+Example:
 
     RISKSIGNAL_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/risksignal \
     RISKSIGNAL_OIDC_ISSUER=https://auth.local.example/ \
