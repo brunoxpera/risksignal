@@ -1,0 +1,114 @@
+# RiskSignal — CI pipeline stages 1–2 (WP-1a.12; implementation concept
+# ch. 17.1/17.3, D-002 GitHub Actions, D-005 quality/security toolchain).
+#
+# Stage layout (concept ch. 17.3 stages 1 and 2):
+#   lint  — gofmt check, go vet, static analysis incl. gosec (golangci-lint),
+#           architecture gate (go-arch-lint, WP-1a.11), licence check
+#           (go-licenses), secret scan (gitleaks)
+#   test  — race-enabled unit and integration tests against a short-lived,
+#           real PostgreSQL 16 service container (concept ch. 17.1:
+#           integration tests run against a real, short-lived instance)
+#   build — `make build`: the three binaries with build metadata
+#
+# The pipeline is deterministic: every tool is pinned to the exact version
+# recorded in docs/plan/orchestrator-decisions.md (D-005) and each job
+# mirrors the local make target of the same stage (`make ci-lint` /
+# `make ci-test` / `make ci-build`), so a failure reproduces without GitHub.
+# The three jobs run in parallel.
+#
+# Notes:
+# - actions/checkout and actions/setup-go are pinned by tag, not SHA;
+#   supply-chain hardening of the actions themselves is deferred to
+#   WP-1a.13 (signing/provenance groundwork). Tool versions are pinned
+#   exactly; go-version-file keeps the Go version on ADR-008 (go.mod).
+# - gitleaks scans the full git history of the pushed ref; the only
+#   allowlist entry is the synthetic redaction fixture
+#   (internal/platform/logging/redact_test.go, see .gitleaks.toml).
+# - The repository has no remote yet: this workflow runs from the first
+#   push to GitHub.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint (stage 1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt check
+        run: test -z "$(gofmt -l .)"
+      - name: go vet
+        run: go vet ./...
+      - name: static analysis incl. gosec (golangci-lint)
+        env:
+          GOLANGCI_LINT_VERSION: v2.13.2
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}
+          "$(go env GOPATH)/bin/golangci-lint" run
+      - name: architecture gate (go-arch-lint, WP-1a.11)
+        env:
+          GO_ARCH_LINT_VERSION: v1.19.0
+        run: |
+          go install github.com/fe3dback/go-arch-lint@${GO_ARCH_LINT_VERSION}
+          "$(go env GOPATH)/bin/go-arch-lint" check
+      - name: licence check (go-licenses)
+        env:
+          GO_LICENSES_VERSION: v1.6.0
+        run: |
+          go install github.com/google/go-licenses@${GO_LICENSES_VERSION}
+          "$(go env GOPATH)/bin/go-licenses" check --ignore github.com/xpera/risksignal ./...
+      - name: secret scan (gitleaks)
+        env:
+          GITLEAKS_VERSION: v8.30.1
+        run: |
+          go install github.com/gitleaks/gitleaks/v8@${GITLEAKS_VERSION}
+          "$(go env GOPATH)/bin/gitleaks" detect --source .
+
+  test:
+    name: test (stage 2)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.15-alpine
+        env:
+          POSTGRES_USER: risksignal
+          POSTGRES_PASSWORD: risksignal
+          POSTGRES_DB: risksignal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U risksignal -d risksignal"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: race-enabled test suite
+        env:
+          RISKSIGNAL_TEST_DATABASE_URL: postgres://risksignal:risksignal@localhost:5432/risksignal?sslmode=disable
+        run: go test -race ./...
+
+  build:
+    name: build (stage 3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build the three binaries
+        run: make build

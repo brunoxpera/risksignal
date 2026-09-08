@@ -100,6 +100,25 @@ negative test:
 
     make test-arch
 
+### CI pipeline stages 1–2 (WP-1a.12)
+
+The CI pipeline (`.github/workflows/ci.yml`, GitHub Actions) runs three
+parallel jobs — lint, test, build — and every stage is reproducible locally
+without GitHub:
+
+    make ci-lint    # gofmt check, go vet, golangci-lint (incl. gosec), go-arch-lint,
+                    # go-licenses check, gitleaks detect
+    make ci-test    # go test -race ./... against the compose PostgreSQL (starts it)
+    make ci-build   # make build
+
+The tools are pinned to the versions recorded in
+`docs/plan/orchestrator-decisions.md` (D-005): golangci-lint v2.13.2,
+gitleaks 8.30.1, go-licenses v1.6.0, go-arch-lint v1.19.0. Their
+configuration lives in `.golangci.yml`, `.gitleaks.toml` and
+`.go-arch-lint.yml` in the repository root. `make ci-test` starts the
+compose `db` service (with `postgres:16`) first so the integration tests
+run against a real database instead of skipping.
+
 ### Local environment
 
     make up
@@ -123,6 +142,7 @@ change, without touching the database:
 ### Lint and generate
 
     make lint      # architecture gate (go-arch-lint check) plus gofmt check plus go vet
+    make ci-lint   # complete WP-1a.12 lint stage (see above)
     make generate  # run code generators
 
 To run only the architecture gate:
