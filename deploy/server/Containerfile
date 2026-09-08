@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1
+
+# RiskSignal server — minimal development image (WP-1a.03).
+# Multi-stage: Go 1.27 build (ADR-008, tag carries the major/minor) on
+# golang:1.27, minimal Alpine runtime. The hardened production image with
+# SBOM and scan gates is WP-1a.13.
+
+FROM golang:1.27 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/risksignal-server ./cmd/risksignal-server
+
+FROM alpine:3.24.1
+RUN apk add --no-cache ca-certificates
+COPY --from=build /out/risksignal-server /usr/local/bin/risksignal-server
+ENTRYPOINT ["risksignal-server"]

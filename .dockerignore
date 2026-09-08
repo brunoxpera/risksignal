@@ -1,0 +1,16 @@
+# RiskSignal — Docker build context exclusions.
+# Keep the context small and free of secrets; source under cmd/, internal/,
+# api/, db/ and web/ stays available for multi-stage builds (db/ holds the
+# migrations that are embedded into the binaries later, ADR-010).
+
+.git
+bin/
+dist/
+build/
+docs/
+testdata/
+coverage.out
+.env
+.env.*
+*.log
+.DS_Store
