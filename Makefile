@@ -2,12 +2,18 @@
 # environment; WP-1a.11 arch gate).
 #
 # Go 1.27 is pinned by ADR-008 and declared in go.mod; use a matching toolchain.
+# sqlc is pinned to v1.31.1 (ADR-009; the sqlc.yaml comment says the same) and
+# resolved from PATH first, then from GOPATH/bin — the default destination of
+# `go install`.
 # go-arch-lint is pinned to v1.19.0 (docs/plan/orchestrator-decisions.md, D-005).
 # The binary is resolved from PATH first, then from GOPATH/bin — the default
 # destination of `go install`.
 # `make` requires tabs in recipes — do not re-indent with spaces.
 
 GO ?= go
+SQLC ?= sqlc
+SQLC_VERSION := v1.31.1
+SQLC_BIN := $(or $(shell command -v $(SQLC) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(SQLC))
 GO_ARCH_LINT ?= go-arch-lint
 GO_ARCH_LINT_BIN := $(or $(shell command -v $(GO_ARCH_LINT) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(GO_ARCH_LINT))
 COMPOSE ?= docker compose
@@ -50,8 +56,23 @@ lint-arch:
 	fi
 	$(GO_ARCH_LINT_BIN) check
 
-## generate: run code generators
+## generate: regenerate the sqlc query code (ADR-009, pinned sqlc version),
+##            then run go:generate directives. sqlc reads the schema from the
+##            migration files (db/migrations) and the queries from db/queries;
+##            generated code lands in internal/adapters/postgres/gen and is
+##            committed (CI regenerates and fails on a diff, ADR-009).
 generate:
+	@if [ ! -x "$(SQLC_BIN)" ]; then \
+		echo "sqlc not found (looked at PATH and $$($(GO) env GOPATH)/bin)."; \
+		echo "Install the pinned version: go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)"; \
+		exit 2; \
+	fi
+	@if [ "$$($(SQLC_BIN) version)" != "$(SQLC_VERSION)" ]; then \
+		echo "sqlc $$($(SQLC_BIN) version) in use, pinned version is $(SQLC_VERSION)."; \
+		echo "Install the pinned version: go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)"; \
+		exit 2; \
+	fi
+	$(SQLC_BIN) generate
 	$(GO) generate ./...
 
 ## migrate: run the schema migrations (WP-1a.04) against the compose database.

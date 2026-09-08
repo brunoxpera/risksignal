@@ -1,0 +1,25 @@
+# RiskSignal — sqlc configuration (ADR-009, WP-1a.05).
+#
+# Queries are plain SQL files under db/queries, compiled into typed Go code
+# by sqlc (pinned to v1.31.1, see Makefile). The schema comes from the goose
+# migration files under db/migrations: migrations are authoritative (ADR-010),
+# so sqlc reads them to derive types. Build order: write the migration, then
+# run `make generate`.
+#
+# Generated code (internal/adapters/postgres/gen) is committed; CI regenerates
+# and fails on a diff (ADR-009). It is covered by the architecture gate as part
+# of internal/adapters/** and therefore never imported by internal/domain.
+version: "2"
+
+sql:
+  - engine: "postgresql"
+    schema: "db/migrations"
+    queries: "db/queries"
+    gen:
+      go:
+        package: "gen"
+        out: "internal/adapters/postgres/gen"
+        # pgx/v5 without database/sql (ADR-009): generated code talks to
+        # pgxpool and pgx.Tx directly, giving access to batching and native
+        # PostgreSQL types. The database/sql default is deliberately avoided.
+        sql_package: "pgx/v5"

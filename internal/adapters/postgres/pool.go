@@ -1,0 +1,69 @@
+// Package postgres is the PostgreSQL data-access home of the adapters layer
+// (WP-1a.05, ADR-009): the pgx connection pool every persistence adapter
+// opens, the transaction boundary helper that enforces the concept ch. 5.1
+// rule (one domain command, one transaction), and the sqlc-generated query
+// code in the gen subpackage.
+//
+// Access is pgx/v5 directly, without database/sql (ADR-009). The schema is
+// owned by the migrate package (WP-1a.04, ADR-010): this package only reads
+// and writes what the migrations produced, never DDL.
+package postgres
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Pool defaults (WP-1a.05). They are constants of this package so every
+// caller gets the same behaviour; a config knob can be added later if a
+// deployment needs different values.
+const (
+	// connectTimeout bounds establishing a single connection, including the
+	// TCP/TLS handshake and the startup ping. pgxpool keeps it as the
+	// per-connection default for the whole lifetime of the pool.
+	connectTimeout = 5 * time.Second
+
+	// minConns keeps the given number of connections warm. 1 avoids the
+	// cold-start latency of the first query after idle time while staying
+	// cheap for the MVP's single-instance deployments.
+	minConns int32 = 1
+
+	// maxConns caps the pool. pgxpool's own default would scale with the
+	// host CPU count; an explicit cap keeps database load predictable and
+	// is the starting point for the tuning in concept ch. 17.3.
+	maxConns int32 = 10
+)
+
+// OpenPool opens a pgx connection pool for databaseURL and verifies with a
+// startup ping that the database is reachable, so configuration errors
+// surface at construction time — the same behaviour migrate.Open has
+// (WP-1a.04). The caller owns the pool and must Close it for a clean
+// shutdown: pool.Close() waits for in-flight queries, then closes every
+// connection (concept ch. 5.2: no work is cut off mid-transaction).
+func OpenPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	if databaseURL == "" {
+		return nil, fmt.Errorf("postgres: database url is empty")
+	}
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: parse database url: %w", err)
+	}
+	cfg.ConnConfig.ConnectTimeout = connectTimeout
+	cfg.MinConns = minConns
+	cfg.MaxConns = maxConns
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: create pool: %w", err)
+	}
+	// Startup health check. Each connection attempt is bounded by
+	// connectTimeout; the overall attempt by ctx.
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres: connect to database: %w", err)
+	}
+	return pool, nil
+}
