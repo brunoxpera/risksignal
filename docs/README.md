@@ -4,8 +4,8 @@ The authoritative documents are the **functional concept v0.2** and the
 **implementation concept v0.2**. Where they conflict, the functional concept prevails
 until a documented change has been agreed.
 
-The implementation concept (v0.2) lives in `docs/concept/`. The functional concept is
-**not yet in this repository** and should be added — see `docs/concept/README.md`.
+The implementation concept (v0.2) and the functional concept v0.2
+(`fachkonzept-v0.2.md`) both live in `docs/concept/`.
 
 ## Language
 
@@ -17,7 +17,7 @@ the concept document itself, which is maintained in German.
 
 | Path | Contents |
 |---|---|
-| `docs/concept/` | The implementation concept v0.2 (Markdown, German); v0.1 is archive, the change log is history |
+| `docs/concept/` | The implementation concept v0.2 and the functional concept v0.2 (Markdown, German); v0.1 is archive, the change log is history |
 | `docs/adr/` | Architecture decision records from ADR-008 onwards (ADR-001 to 007 live in implementation concept ch. 1.2) |
 | `docs/plan/` | Iteration plan and work packages |
 | `docs/prompts/` | Prompts handed to the implementation orchestrator |
