@@ -37,13 +37,17 @@ const (
 	maxConns int32 = 10
 )
 
-// OpenPool opens a pgx connection pool for databaseURL and verifies with a
-// startup ping that the database is reachable, so configuration errors
-// surface at construction time — the same behaviour migrate.Open has
-// (WP-1a.04). The caller owns the pool and must Close it for a clean
-// shutdown: pool.Close() waits for in-flight queries, then closes every
-// connection (concept ch. 5.2: no work is cut off mid-transaction).
-func OpenPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+// NewPool opens a pgx connection pool for databaseURL without requiring the
+// database to be reachable right now: pgx connects lazily, so the pool is
+// usable even while the database is down and every operation — Ping
+// included — recovers on its own once the database is back. WP-1a.07 uses
+// this for the server: readiness is what reports a down database (red
+// /health/ready, green /health/live), the server must not refuse to start
+// because of it (concept ch. 16.3). The caller owns the pool and must Close
+// it for a clean shutdown: pool.Close() waits for in-flight queries, then
+// closes every connection (concept ch. 5.2: no work is cut off
+// mid-transaction).
+func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if databaseURL == "" {
 		return nil, fmt.Errorf("postgres: database url is empty")
 	}
@@ -58,6 +62,19 @@ func OpenPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: create pool: %w", err)
+	}
+	return pool, nil
+}
+
+// OpenPool opens a pgx connection pool for databaseURL and verifies with a
+// startup ping that the database is reachable, so configuration errors
+// surface at construction time — the same behaviour migrate.Open has
+// (WP-1a.04). Callers that must keep running while the database is down
+// (the server's readiness probes, WP-1a.07) use NewPool instead.
+func OpenPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	pool, err := NewPool(ctx, databaseURL)
+	if err != nil {
+		return nil, err
 	}
 	// Startup health check. Each connection attempt is bounded by
 	// connectTimeout; the overall attempt by ctx.
