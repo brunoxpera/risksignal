@@ -1,7 +1,8 @@
-# RiskSignal — CI pipeline stages 1–2 (WP-1a.12; implementation concept
-# ch. 17.1/17.3, D-002 GitHub Actions, D-005 quality/security toolchain).
+# RiskSignal — CI pipeline (WP-1a.12 stages 1–3, WP-1a.13 stages 4–6;
+# implementation concept ch. 17.1/17.3, D-002 GitHub Actions, D-005
+# quality/security toolchain).
 #
-# Stage layout (concept ch. 17.3 stages 1 and 2):
+# Stage layout (concept ch. 17.3):
 #   lint  — gofmt check, go vet, static analysis incl. gosec (golangci-lint),
 #           architecture gate (go-arch-lint, WP-1a.11), licence check
 #           (go-licenses), secret scan (gitleaks)
@@ -9,23 +10,33 @@
 #           real PostgreSQL 16 service container (concept ch. 17.1:
 #           integration tests run against a real, short-lived instance)
 #   build — `make build`: the three binaries with build metadata
+#   image — stages 4–6 (WP-1a.13, runs after lint/test/build): production
+#           container images with the WP-1a.07 build metadata (`make image`),
+#           SBOMs (`make sbom`: cyclonedx-gomod module SBOM + syft image
+#           SBOMs), vulnerability scans (`make scan`: govulncheck, then grype
+#           --fail-on high on both images) and the cosign keyless signing
+#           skeleton (`make sign` — signs nothing)
 #
 # The pipeline is deterministic: every tool is pinned to the exact version
 # recorded in docs/plan/orchestrator-decisions.md (D-005) and each job
 # mirrors the local make target of the same stage (`make ci-lint` /
-# `make ci-test` / `make ci-build`), so a failure reproduces without GitHub.
-# The three jobs run in parallel.
+# `make ci-test` / `make ci-build` / `make image` / `make sbom` /
+# `make scan` / `make sign`), so a failure reproduces without GitHub.
 #
 # Notes:
-# - actions/checkout and actions/setup-go are pinned by tag, not SHA;
-#   supply-chain hardening of the actions themselves is deferred to
-#   WP-1a.13 (signing/provenance groundwork). Tool versions are pinned
-#   exactly; go-version-file keeps the Go version on ADR-008 (go.mod).
+# - The repository has no remote yet: this workflow stays inert until the
+#   first push to GitHub, and the image job additionally has no registry to
+#   push to — the images stay on the runner, SBOMs and scan reports are
+#   uploaded as workflow artifacts. Pushing and real (keyless) signing are
+#   release-stage work; the intended flow is recorded in
+#   docs/plan/release-signing.md.
+# - actions/checkout, actions/setup-go and actions/upload-artifact are pinned
+#   by tag, not SHA; SHA-pinning the marketplace actions is deferred to the
+#   release hardening (I6). The image job deliberately does not grant
+#   id-token: write — keyless signing would need it at release time only.
 # - gitleaks scans the full git history of the pushed ref; the only
 #   allowlist entry is the synthetic redaction fixture
 #   (internal/platform/logging/redact_test.go, see .gitleaks.toml).
-# - The repository has no remote yet: this workflow runs from the first
-#   push to GitHub.
 
 name: ci
 
@@ -112,3 +123,54 @@ jobs:
           go-version-file: go.mod
       - name: build the three binaries
         run: make build
+
+  image:
+    name: image, sbom and scans (stages 4-6, WP-1a.13)
+    runs-on: ubuntu-latest
+    needs: [lint, test, build]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install SBOM, scan and signing tooling (pinned, D-005)
+        env:
+          CYCLONEDX_GOMOD_VERSION: v1.12.0
+          GOVULNCHECK_VERSION: v1.8.0
+          SYFT_VERSION: 1.51.1
+          GRYPE_VERSION: 0.118.0
+          COSIGN_VERSION: v2.6.5
+        run: |
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@${CYCLONEDX_GOMOD_VERSION}
+          go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
+          go install github.com/sigstore/cosign/v2/cmd/cosign@${COSIGN_VERSION}
+          gobin="$(go env GOPATH)/bin"
+          # syft/grype: checksum-verified GitHub release binaries — a `go
+          # install` build of the anchore tools does not stamp the version.
+          curl -fsSL -o /tmp/syft_${SYFT_VERSION}_linux_amd64.tar.gz https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz
+          curl -fsSL -o /tmp/syft_${SYFT_VERSION}_checksums.txt https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_checksums.txt
+          (cd /tmp && grep " syft_${SYFT_VERSION}_linux_amd64.tar.gz$" syft_${SYFT_VERSION}_checksums.txt | sha256sum -c -)
+          tar -xzf /tmp/syft_${SYFT_VERSION}_linux_amd64.tar.gz -C "${gobin}" syft
+          curl -fsSL -o /tmp/grype_${GRYPE_VERSION}_linux_amd64.tar.gz https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_linux_amd64.tar.gz
+          curl -fsSL -o /tmp/grype_${GRYPE_VERSION}_checksums.txt https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_checksums.txt
+          (cd /tmp && grep " grype_${GRYPE_VERSION}_linux_amd64.tar.gz$" grype_${GRYPE_VERSION}_checksums.txt | sha256sum -c -)
+          tar -xzf /tmp/grype_${GRYPE_VERSION}_linux_amd64.tar.gz -C "${gobin}" grype
+          echo "${gobin}" >> "${GITHUB_PATH}"
+      - name: build the production images (stage 4)
+        run: make image
+      - name: generate SBOMs (stage 5a)
+        run: make sbom
+      - name: vulnerability scans (stage 5b)
+        run: make scan
+      - name: cosign keyless signing skeleton (stage 6, signs nothing)
+        run: make sign
+      - name: upload SBOMs and scan reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-and-scan-reports
+          path: |
+            dist/sbom/
+            dist/scan/
+          if-no-files-found: error
