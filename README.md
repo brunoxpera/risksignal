@@ -41,11 +41,11 @@ and `RISKSIGNAL_*` environment variables, with environment variables taking
 precedence. `database.url` and `oidc.issuer` are mandatory; the local
 authentication bypass (`RISKSIGNAL_AUTH_BYPASS_ENABLED`) is accepted in
 `local` mode only (TR-010). On invalid configuration the binary prints the
-problem and exits 1; on success it prints a provenance summary (sources, no
-secret values). The worker and the CLI then exit 0; `risksignal-server`
-keeps running and serves HTTP on `http.addr` through the WP-1a.06
-middleware chain (ADR-008), shutting down cleanly on SIGINT/SIGTERM.
-Example:
+problem and exits 1 (the CLI classifies it as validation and exits 2, see
+"CLI commands and exit codes"); on success it prints a provenance summary
+(sources, no secret values) and exits 0. `risksignal-server` then keeps
+running and serves HTTP on `http.addr` through the WP-1a.06 middleware
+chain (ADR-008), shutting down cleanly on SIGINT/SIGTERM. Example:
 
     RISKSIGNAL_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/risksignal \
     RISKSIGNAL_OIDC_ISSUER=https://auth.local.example/ \
@@ -90,3 +90,65 @@ change, without touching the database:
 To run only the architecture gate:
 
     make lint-arch
+
+## CLI commands and exit codes
+
+`bin/risksignal` is the administrative CLI (command model per concept
+ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
+
+- `maintenance migrate [--dry-run]` — apply pending schema migrations
+  through the checksum-guarded runner (WP-1a.04, ADR-010); `--dry-run`
+  verifies checksums and reports what would change without touching the
+  database.
+- `maintenance retention`, `maintenance recompute` — recognised but not yet
+  implemented; they print "not yet implemented" and exit 1.
+- `diagnose config` — the WP-1a.02 provenance report: source of every
+  configuration leaf, never the content of a secret-capable value.
+- `diagnose connectivity` — TCP-dial the database host:port from
+  `database.url`. Proves reachability only, never credentials or schema
+  state.
+- `diagnose health` — process and configuration state plus the database
+  connectivity probe.
+- `help` — usage text.
+
+Exit codes are part of the automation contract — branch on them, never on
+parsed output:
+
+| Code | Class | Meaning |
+|---|---|---|
+| 0 | success | command completed |
+| 1 | generic/unknown | runtime failure without a more specific class; not-yet-implemented commands |
+| 2 | validation | unknown command/subcommand, invalid or missing arguments, invalid configuration |
+| 3 | authentication | reserved — OIDC authentication lands in a later iteration and is not exercised yet |
+| 4 | authorisation | reserved — permission checks land later |
+| 5 | conflict | state conflict, e.g. an applied migration was modified (ADR-010) |
+| 6 | infrastructure | database host unreachable, connection failures |
+
+With `--output json` every command prints exactly one machine-readable
+envelope on stdout and nothing else (success and failure alike):
+
+    {
+      "schema_version": 1,
+      "command": "diagnose config",
+      "exit_code": 0,
+      "status": "ok",
+      "result": { ... },
+      "error": null
+    }
+
+The envelope keys are fixed and schema-stable: `schema_version`, `command`,
+`exit_code`, `status` (`ok` or `error`), `result` (command payload, `null`
+on error) and `error` (`null` on success, otherwise `{"class": ...,
+"message": ...}` using the class vocabulary above). Human-readable text
+remains the default output; help output is always human-oriented. Examples:
+
+    RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+      bin/risksignal diagnose config --output json
+    bin/risksignal badcmd; echo $?        # 2 (validation)
+    RISKSIGNAL_DATABASE_URL=postgres://u:p@127.0.0.1:1/rs \
+      bin/risksignal diagnose connectivity; echo $?   # 6 (infrastructure)
+
+The CLI is strictly non-interactive: it never prompts and never reads
+hidden defaults from a terminal. Destructive maintenance commands require
+complete parameters (an explicit `--yes` once implemented), never a
+terminal dialogue.
