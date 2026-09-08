@@ -119,6 +119,29 @@ configuration lives in `.golangci.yml`, `.gitleaks.toml` and
 compose `db` service (with `postgres:16`) first so the integration tests
 run against a real database instead of skipping.
 
+### Images, SBOM and scans (WP-1a.13)
+
+The production container images build multi-stage from `deploy/server/` and
+`deploy/worker/` Containerfiles: Go 1.27 build stage (ADR-008) onto a
+non-root `distroless/static-debian12` runtime pinned by digest, with the
+same build metadata as the binaries (WP-1a.07) injected via build args.
+`make VERSION=1.2.3 image` tags them `risksignal/server:1.2.3` and
+`risksignal/worker:1.2.3`; a future registry (ghcr.io/xpera/...) would
+carry those names.
+
+    make image   # build both production images
+    make sbom    # CycloneDX SBOMs: module (cyclonedx-gomod) + both images (syft) -> dist/sbom/
+    make scan    # govulncheck on the module, grype --fail-on high on both images -> dist/scan/
+    make sign    # cosign keyless signing skeleton — verifies the tool, signs nothing
+
+Tooling is pinned in `docs/plan/orchestrator-decisions.md` (D-005):
+cyclonedx-gomod v1.12.0, govulncheck v1.8.0, syft v1.51.1, grype v0.118.0,
+cosign v2.6.5. The CI image job (stages 4–6) mirrors these targets and
+uploads the SBOMs and scan reports as workflow artifacts. There is no
+GitHub remote and no registry yet, so that job runs only after the first
+push, and real (keyless) signing happens at release time — the intended
+flow is documented in `docs/plan/release-signing.md`.
+
 ### Local environment
 
     make up

@@ -29,6 +29,11 @@ record. Binding decisions (ADR-001..ADR-015) are *not* restated here; they live 
 | golangci-lint | 2.13.2 | `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest` (2026-09-09, DEV-013; resolved to v2.13.2; module path carries `/v2` since v2) | `~/go/bin/golangci-lint` (GOPATH/bin; not on PATH — the Makefile resolves it) |
 | gitleaks | 8.30.1 | pre-existing Homebrew install (verified 2026-09-09, DEV-013; CI installs `go install github.com/gitleaks/gitleaks/v8@v8.30.1`) | `/usr/local/bin/gitleaks` |
 | go-licenses | 1.6.0 | `go install github.com/google/go-licenses@latest` (2026-09-09, DEV-013; resolved to v1.6.0; no `version` subcommand — pinned via `go install`) | `~/go/bin/go-licenses` (GOPATH/bin; not on PATH — the Makefile resolves it) |
+| cyclonedx-gomod | 1.12.0 | `go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@latest` (2026-09-09, DEV-014; resolved to v1.12.0) | `~/go/bin/cyclonedx-gomod` (GOPATH/bin; not on PATH — the Makefile resolves it) |
+| govulncheck | 1.8.0 | `go install golang.org/x/vuln/cmd/govulncheck@latest` (2026-09-09, DEV-014; resolved to v1.8.0) | `~/go/bin/govulncheck` (GOPATH/bin; not on PATH — the Makefile resolves it) |
+| cosign | 2.6.5 | `go install github.com/sigstore/cosign/v2/cmd/cosign@latest` (2026-09-09, DEV-014; resolved to v2.6.5) | `~/go/bin/cosign` (GOPATH/bin; not on PATH — the Makefile resolves it) |
+| syft | 1.51.1 | GitHub release tarball, checksum-verified (2026-09-09, DEV-014; `go install` builds it without the stamped version, so the release binary is used locally and in CI) | `~/go/bin/syft` (GOPATH/bin; not on PATH — the Makefile resolves it) |
+| grype | 0.118.0 | GitHub release tarball, checksum-verified (2026-09-09, DEV-014; same rationale as syft) | `~/go/bin/grype` (GOPATH/bin; not on PATH — the Makefile resolves it) |
 | Docker | 29.6.2 | pre-existing | — |
 | Docker Compose | 5.3.1 | pre-existing | — |
 | make | 3.81 | pre-existing | — |
@@ -96,8 +101,11 @@ and `.go-arch-lint.yml` carry the per-tool configuration.
 | Vulnerability scan (Go) | `govulncheck` | not installed — WP-1a.13 |
 | Secret scan | `gitleaks` | **8.30.1** (pre-existing Homebrew, verified 2026-09-09, DEV-013; allowlist in `.gitleaks.toml`) |
 | Licence check | `go-licenses` (google) | **v1.6.0** (2026-09-09, DEV-013) |
-| SBOM (module) | `cyclonedx-gomod` | not installed — WP-1a.13 |
-| SBOM + image scan | `syft` + `grype` | not installed — WP-1a.13 |
+| SBOM (Go module) | `cyclonedx-gomod` | **v1.12.0** (2026-09-09, DEV-014; CycloneDX JSON, `make sbom`) |
+| SBOM (container images) | `syft` | **v1.51.1** (2026-09-09, DEV-014; CycloneDX JSON of both production images, `make sbom`) |
+| Vulnerability scan (Go deps) | `govulncheck` | **v1.8.0** (2026-09-09, DEV-014; fails on any vulnerability affecting the build) |
+| Vulnerability scan (images) | `grype` | **v0.118.0** (2026-09-09, DEV-014; `--fail-on high`, i.e. high/critical fail the gate) |
+| Signing (keyless, groundwork only) | `cosign` | **v2.6.5** (2026-09-09, DEV-014; v2 module path — cosign v3.1.3 is the newest release, but the `go install`-pinnable v2 line ends at v2.6.5; no real signing yet, see `docs/plan/release-signing.md`) |
 | Architecture check | `go-arch-lint` (fe3dback) | **v1.19.0** (2026-09-08, DEV-002); declarative YAML dependency rules in `.go-arch-lint.yml`; the WP-1a.11 / TR-001 gate |
 
 **WP-1a.12 wiring (DEV-013):** the lint stage runs gofmt → `go vet` →
@@ -107,6 +115,22 @@ against a `postgres:16` service container; the build stage runs `make build`.
 GitHub Actions runs the stages as three parallel jobs
 (`.github/workflows/ci.yml`, D-002); `make ci-lint` / `make ci-test` /
 `make ci-build` reproduce each stage locally.
+
+**WP-1a.13 wiring (DEV-014):** the production container images (server and
+worker) build multi-stage from `golang:1.27` onto a digest-pinned, non-root
+`gcr.io/distroless/static-debian12:nonroot` runtime
+(`deploy/server/Containerfile`, `deploy/worker/Containerfile`; index digest
+`sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab`,
+resolved 2026-09-09) and carry the WP-1a.07 build metadata via build args.
+The image job (`.github/workflows/ci.yml`, stages 4–6) runs after
+lint/test/build and mirrors `make image` → `make sbom` (module SBOM via
+cyclonedx-gomod, image SBOMs via syft) → `make scan` (govulncheck, then grype
+`--fail-on high` on both images) → `make sign` (cosign keyless skeleton, no
+signatures). SBOMs and scan reports land under `dist/` and are uploaded as
+workflow artifacts. The job stays inert until the repository is pushed to
+GitHub (D-002: no remote yet); there is no registry, so images never leave
+the runner — pushing and signing are release-stage work (I6);
+`docs/plan/release-signing.md` records the intended keyless flow.
 
 **Rationale:** standard-of-care, all free/open-source, all deterministic (no paid
 service). `gosec`/`govulncheck`/`gitleaks` cover the security rows of TR-013/17.3;
@@ -139,3 +163,4 @@ are treated as best-available evidence (kickoff §2a).
 | 2026-09-08 | Installed Go 1.27.1 + sqlc 1.31.1 + goose 3.28.0 + oapi-codegen 2.8.0; recorded D-001..D-005 | Accepted (defaults) |
 | 2026-09-09 | DEV-013/WP-1a.12: installed golangci-lint v2.13.2 + go-licenses v1.6.0; gitleaks 8.30.1 (pre-existing Homebrew) verified; `.golangci.yml`, `.gitleaks.toml`, `ci-lint`/`ci-test`/`ci-build` targets and `.github/workflows/ci.yml` landed; D-005 rows pinned | Accepted (defaults) |
 | 2026-09-08 | DEV-002/WP-1a.11: installed go-arch-lint v1.19.0; `.go-arch-lint.yml` gate + `lint-arch`/`test-arch` targets landed; D-005 row pinned | Accepted (defaults) |
+| 2026-09-09 | DEV-014/WP-1a.13: production Containerfiles (distroless non-root, digest-pinned) with build-metadata injection; cyclonedx-gomod v1.12.0 + govulncheck v1.8.0 + syft v1.51.1 + grype v0.118.0 + cosign v2.6.5 installed and pinned; `image`/`sbom`/`scan`/`sign` targets, CI image job and keyless-signing groundwork (`docs/plan/release-signing.md`) landed; D-005 rows pinned | Accepted (defaults) |
