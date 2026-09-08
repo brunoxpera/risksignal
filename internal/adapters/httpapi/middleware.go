@@ -13,6 +13,7 @@
 package httpapi
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -34,14 +35,6 @@ func Chain(middlewares ...Middleware) Middleware {
 	}
 }
 
-// Logger is the minimal logging surface the HTTP layer needs. WP-1a.06 emits
-// plain text lines; WP-1a.08 ("Strukturierte Logs") swaps the implementation
-// for structured, redacting logging without touching the middleware call
-// sites.
-type Logger interface {
-	Printf(format string, v ...any)
-}
-
 // MaxBodyBytes caps request bodies accepted by NewHandler (concept ch. 12.3:
 // strict input limits). One MiB covers the JSON payloads of the planned API;
 // bulk uploads, if any later work package defines them, get their own
@@ -51,8 +44,9 @@ const MaxBodyBytes int64 = 1 << 20 // 1 MiB
 // NewHandler wraps h with the complete WP-1a.06 middleware chain, outermost
 // first. Every request — matched or not — passes through the whole chain, so
 // a 404 from an as-yet empty ServeMux still carries a correlation ID, the
-// security headers and an access log line.
-func NewHandler(h http.Handler, logger Logger) http.Handler {
+// security headers and a structured access log record (WP-1a.08: the logger
+// is a *log/slog.Logger from internal/platform/logging).
+func NewHandler(h http.Handler, logger *slog.Logger) http.Handler {
 	return Chain(
 		CorrelationID,
 		AccessLog(logger),

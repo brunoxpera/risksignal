@@ -16,7 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -48,9 +48,11 @@ func testConfig(dbURL string) *config.Config {
 	}
 }
 
-// discardLogger keeps the middleware chain quiet in tests.
-func discardLogger() *log.Logger {
-	return log.New(io.Discard, "", 0)
+// discardLogger keeps the middleware chain quiet in tests. The chain takes a
+// structured *slog.Logger since WP-1a.08; discarding output keeps the log
+// assertions of the httpapi package, not here.
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 // closedAddr returns a host:port on which nothing listens. A listener is

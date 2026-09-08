@@ -9,15 +9,18 @@
 // middleware chain on http.addr, and shuts down gracefully on SIGINT/SIGTERM.
 // WP-1a.07: it registers the System endpoints — GET /health/live, GET
 // /health/ready and GET /version (concept ch. 10.2, 16.3) — and opens the
-// database pool whose reachability the readiness endpoint reports. The
-// generated API routes land in I1b (ADR-011).
+// database pool whose reachability the readiness endpoint reports. WP-1a.08:
+// all process and request logging goes through the structured, redacting
+// logger of internal/platform/logging (JSON in demo/production, text
+// locally), carrying the uniform fields of concept ch. 16.1. The generated
+// API routes land in I1b (ADR-011).
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -34,6 +37,7 @@ import (
 	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
 	"github.com/xpera/risksignal/internal/platform/buildinfo"
 	"github.com/xpera/risksignal/internal/platform/config"
+	"github.com/xpera/risksignal/internal/platform/logging"
 )
 
 // shutdownGracePeriod is how long the server waits for in-flight requests
@@ -42,8 +46,6 @@ import (
 const shutdownGracePeriod = 10 * time.Second
 
 func main() {
-	logger := log.New(os.Stderr, "risksignal-server ", log.LstdFlags)
-
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "risksignal-server: invalid configuration:\n%v\n", err)
@@ -51,8 +53,14 @@ func main() {
 	}
 	fmt.Print(cfg.Summary())
 
+	logger := logging.New(logging.Options{
+		Service:     "risksignal-server",
+		Version:     buildinfo.Current().Version,
+		Environment: cfg.Env,
+	})
+
 	if err := serve(cfg, logger); err != nil {
-		logger.Printf("fatal: %v", err)
+		logger.Error("fatal", slog.Any("error", err))
 		os.Exit(1)
 	}
 }
@@ -60,7 +68,7 @@ func main() {
 // serve runs the HTTP server on cfg.HTTP.Addr until a shutdown signal ends
 // the process cleanly. It returns nil after a graceful shutdown, and an error
 // for anything else (bind failure, serve failure, shutdown timeout).
-func serve(cfg *config.Config, logger *log.Logger) error {
+func serve(cfg *config.Config, logger *slog.Logger) error {
 	// The pool is lazy (postgres.NewPool, WP-1a.05/1a.07): pgx connects only
 	// when a probe or query needs it, so a database that is down at startup
 	// must not kill the server. Readiness reports the state instead — red
@@ -77,7 +85,9 @@ func serve(cfg *config.Config, logger *log.Logger) error {
 		Handler:           newHandler(cfg, pool, logger),
 		ReadHeaderTimeout: 5 * time.Second, // slow-header protection
 		IdleTimeout:       60 * time.Second,
-		ErrorLog:          logger, // net/http internals (e.g. panics that escape the chain)
+		// net/http internals (e.g. panics that escape the chain) go through
+		// the same redacting handler as everything else (WP-1a.08).
+		ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
 	// Listen first so a bind failure is reported synchronously; "listening"
@@ -86,7 +96,7 @@ func serve(cfg *config.Config, logger *log.Logger) error {
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", cfg.HTTP.Addr, err)
 	}
-	logger.Printf("listening on %s", ln.Addr())
+	logger.Info("listening", slog.String("addr", ln.Addr().String()))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -101,14 +111,14 @@ func serve(cfg *config.Config, logger *log.Logger) error {
 		}
 		return fmt.Errorf("serve: %w", err)
 	case <-ctx.Done():
-		logger.Printf("shutdown signal received; draining in-flight requests (grace period %s)",
-			shutdownGracePeriod)
+		logger.Info("shutdown signal received; draining in-flight requests",
+			slog.String("grace_period", shutdownGracePeriod.String()))
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGracePeriod)
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}
-		logger.Printf("shutdown complete")
+		logger.Info("shutdown complete")
 		return nil
 	}
 }
@@ -117,8 +127,10 @@ func serve(cfg *config.Config, logger *log.Logger) error {
 // WP-1a.06 middleware chain (correlation ID, access log, panic recovery,
 // security headers, CSP, CORS off, body limit). WP-1a.07 registers the
 // System endpoints of concept ch. 10.2 on the ServeMux; every other path
-// still 404s — through the same chain. The generated API routes land in I1b.
-func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger httpapi.Logger) http.Handler {
+// still 404s — through the same chain, whose access log writes one
+// structured record per request (WP-1a.08). The generated API routes land in
+// I1b.
+func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /health/live", httpapi.LiveHandler())
 	mux.Handle("GET /health/ready", httpapi.ReadyHandler(readinessProbes(cfg, pool)))

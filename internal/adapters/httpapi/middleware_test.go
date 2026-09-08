@@ -4,19 +4,28 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/xpera/risksignal/internal/platform/logging"
 )
 
-// testLogger returns a logger writing to an in-memory buffer, so tests can
-// assert on the access log and panic log output.
-func testLogger(t *testing.T) (*log.Logger, *bytes.Buffer) {
+// testLogger returns a structured local-mode logger writing to an in-memory
+// buffer, so tests can assert on the access log and panic log records. Local
+// mode renders text records — one line per record — which keeps the
+// substring assertions below readable.
+func testLogger(t *testing.T) (*slog.Logger, *bytes.Buffer) {
 	t.Helper()
 	var buf bytes.Buffer
-	return log.New(&buf, "", 0), &buf
+	return logging.New(logging.Options{
+		Service:     "risksignal-server-test",
+		Version:     "test",
+		Environment: "local",
+		Writer:      &buf,
+	}), &buf
 }
 
 func TestChainAppliesOutermostFirst(t *testing.T) {
@@ -116,12 +125,16 @@ func TestRecoverPanicNeutral500(t *testing.T) {
 	}
 
 	logged := buf.String()
-	for _, want := range []string{"panic request_id=" + inbound, "boom: secret internals", "goroutine "} {
+	for _, want := range []string{
+		"msg=panic", "level=ERROR",
+		"correlation_id=" + inbound,
+		`panic_value="boom: secret internals"`, "goroutine ",
+	} {
 		if !strings.Contains(logged, want) {
 			t.Errorf("log does not contain %q; log:\n%s", want, logged)
 		}
 	}
-	if !strings.Contains(logged, "access method=GET path=/explode status=500") {
+	if !strings.Contains(logged, "status=500") {
 		t.Errorf("access log does not record the 500; log:\n%s", logged)
 	}
 }
@@ -157,9 +170,9 @@ func TestRecoverPanicReraisesAfterResponseStarted(t *testing.T) {
 	}
 }
 
-// TestAccessLogOneLinePerRequest asserts one log line per request with
-// method, path, status, duration and correlation ID — including 404s from the
-// as-yet empty ServeMux.
+// TestAccessLogOneLinePerRequest asserts one structured record per request
+// with method, path, status, duration and correlation ID — including 404s
+// from the as-yet empty ServeMux.
 func TestAccessLogOneLinePerRequest(t *testing.T) {
 	logger, buf := testLogger(t)
 	mux := http.NewServeMux() // no routes yet: everything 404s
@@ -179,7 +192,8 @@ func TestAccessLogOneLinePerRequest(t *testing.T) {
 	}
 	line := lines[0]
 	for _, want := range []string{
-		"method=GET", "path=/some/path", "status=404", "duration=", "request_id=access-test-7",
+		"msg=access", "method=GET", "path=/some/path", "status=404", "duration=",
+		"correlation_id=access-test-7", "service=risksignal-server-test",
 	} {
 		if !strings.Contains(line, want) {
 			t.Errorf("access log line %q does not contain %q", line, want)

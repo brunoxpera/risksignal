@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+
+	"github.com/xpera/risksignal/internal/platform/logging"
 )
 
 // HeaderRequestID is the correlation header name. A request may carry its own
@@ -16,16 +18,14 @@ const HeaderRequestID = "X-Request-ID"
 // tokens while keeping downstream storage and logs bounded.
 const maxRequestIDLength = 64
 
-// requestIDContextKey is the unexported context key for the correlation ID.
-// A dedicated key type prevents collisions with other context values.
-type requestIDContextKey struct{}
-
 // CorrelationID is the outermost chain link (concept ch. 16.1: correlation
 // IDs connect an API request to its job, audit event and notification). It
 // adopts a valid inbound X-Request-ID, or generates one when the header is
-// absent or invalid, stores the effective ID in the request context and
-// echoes it back in the response header — on every response, including errors
-// generated deeper in the chain.
+// absent or invalid, stores the effective ID in the request context — via
+// logging.WithCorrelationID, so structured log records pick it up as their
+// uniform correlation_id field (WP-1a.08) — and echoes it back in the
+// response header, on every response, including errors generated deeper in
+// the chain.
 func CorrelationID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(HeaderRequestID)
@@ -33,7 +33,7 @@ func CorrelationID(next http.Handler) http.Handler {
 			id = newRequestID()
 		}
 		w.Header().Set(HeaderRequestID, id)
-		r = r.WithContext(context.WithValue(r.Context(), requestIDContextKey{}, id))
+		r = r.WithContext(logging.WithCorrelationID(r.Context(), id))
 		next.ServeHTTP(w, r)
 	})
 }
@@ -42,8 +42,18 @@ func CorrelationID(next http.Handler) http.Handler {
 // request context. The bool is false when the request never passed through
 // CorrelationID (possible only in hand-built test chains).
 func RequestIDFromContext(ctx context.Context) (string, bool) {
-	id, ok := ctx.Value(requestIDContextKey{}).(string)
-	return id, ok
+	return logging.CorrelationIDFrom(ctx)
+}
+
+// requestID returns the effective correlation ID of the request, or "-" when
+// the request did not pass through CorrelationID (only possible in hand-built
+// test chains).
+func requestID(r *http.Request) string {
+	id, ok := RequestIDFromContext(r.Context())
+	if !ok || id == "" {
+		return "-"
+	}
+	return id
 }
 
 // validRequestID reports whether s is safe to adopt as a correlation ID:
