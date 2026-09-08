@@ -101,6 +101,12 @@ service). `gosec`/`govulncheck`/`gitleaks` cover the security rows of TR-013/17.
 `cyclonedx-gomod` + `syft` cover the SBOM requirement (TR-002/TAT-01). No runtime
 dependency is added — these are build/CI-only.
 
+### D-006 — configuration model (WP-1a.02)
+
+- **Choice:** environment variables (prefix `RISKSIGNAL_`) with an optional JSON config file (`encoding/json`, stdlib — no new dependency) and versioned defaults; modes `local`/`demo`/`production`; local auth bypass via `RISKSIGNAL_AUTH_BYPASS_ENABLED` (only valid in `local` mode).
+- **Status:** default, pending Bruno confirmation.
+- **Rationale:** concept §3.3 fixes the *mechanism* (defaults → file → env) but not the file format or naming. JSON keeps the dependency set narrow (concept §3.1); env vars are the primary override in containerised deployment. Recorded so a later switch to YAML/TOML is an explicit change, not drift.
+
 ## 4. Reliance on TD defaults (isolated behind config/ports)
 
 - **TD-01** (OIDC provider) relied on in I1a for the local test provider (D-003).
