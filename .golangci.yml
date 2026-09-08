@@ -1,0 +1,56 @@
+# RiskSignal — golangci-lint configuration (WP-1a.12, D-005).
+#
+# Source of truth for the static-analysis stage: this file, not prose.
+# golangci-lint is pinned to v2.13.2 (docs/plan/orchestrator-decisions.md,
+# D-005); the CI lint job and `make ci-lint` both run `golangci-lint run`
+# with this configuration.
+#
+# Linters: the golangci-lint v2 "standard" default set (errcheck, govet,
+# ineffassign, staticcheck, unused) stays enabled and gosec is added for the
+# security row of the CI stage (concept ch. 17.1/17.3, TR-013). `go vet` also
+# runs as an explicit, separate step of the lint stage — redundancy between
+# the two is intentional and cheap (D-005 runs govet via both channels).
+#
+# Exclusions below are the deliberate exceptions, each with its rationale.
+# max-same-issues / max-issues-per-linter are zero so the gate never hides
+# repeated findings from a single linter.
+
+version: "2"
+
+linters:
+  enable:
+    - gosec
+  settings:
+    errcheck:
+      # Deliberately unchecked error returns, scoped to the exact functions:
+      #  - fmt.Fprint*: CLI output helpers writing to the injectable
+      #    stdout/stderr writers; on os.Stdout/os.Stderr these errors carry
+      #    no actionable signal and the CLI contract fixes the exit code
+      #    elsewhere (WP-1a.09 exit-code classes).
+      #  - (*os.File).Close, (*database/sql.DB).Close, (*database/sql.Rows)
+      #    .Close, migrate.Runner.Close: deferred close of read-only handles
+      #    and connection teardown at process/test end; there is no write
+      #    buffer whose flush could fail. Everything else errcheck checks.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*os.File).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*github.com/xpera/risksignal/internal/adapters/postgres/migrate.Runner).Close
+  exclusions:
+    rules:
+      # gosec G101 (hardcoded credentials) in test files: the flagged
+      # "credentials" are the loopback-only compose dev credential
+      # (risksignal/risksignal, published in compose.yaml) and synthetic
+      # fixture values (hunter2secret, tok_..., s3cr3t-password) that exist
+      # to prove redaction. Real secrets live in the environment only
+      # (concept ch. 3.3, 16.1); cmd/mock-oidc is excluded for G102 in its
+      # own source (see the #nosec there).
+      - path: _test\.go
+        text: G101
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -1,0 +1,20 @@
+# RiskSignal — gitleaks allowlist (WP-1a.12, D-005).
+#
+# gitleaks runs in the CI lint stage (`gitleaks detect`, secret scan, concept
+# ch. 17.1/17.3, TR-013) and in `make ci-lint`. This allowlist is the single
+# deliberate exception and is scoped as tightly as possible:
+#
+#   internal/platform/logging/redact_test.go
+#
+# carries *synthetic* tokens, JWTs and API keys on purpose — they are the
+# fixtures of the automated redaction test (WP-1a.08) and exist to prove that
+# the structured logger strips exactly these shapes from every output. They
+# are inert constants generated for the test, never credentials, and real
+# secrets never enter the repository (concept ch. 3.3, 16.1). No other file
+# or pattern is exempted; everything else gitleaks reports is a violation.
+
+[allowlist]
+description = "synthetic redaction fixtures in internal/platform/logging/redact_test.go"
+paths = [
+  '''internal/platform/logging/redact_test\.go''',
+]
