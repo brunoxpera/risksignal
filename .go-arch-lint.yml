@@ -1,0 +1,65 @@
+# RiskSignal — architecture dependency rules (WP-1a.11 / TR-001 gate).
+#
+# Source of truth: this file, not prose. It encodes the layer boundaries of the
+# implementation concept, docs/concept/umsetzungskonzept-v0.2.md §2.3
+# ("Verantwortungsgrenzen der Schichten") and §3.2 ("Repository-Struktur"), and
+# the ADR-011 consequence that the generated API code path is on the list of
+# imports forbidden in internal/domain.
+#
+# Semantics (go-arch-lint v1.19.0, config version 3): deps rules are whitelists.
+# A component may import only the components listed in its mayDependOn entry.
+# Intra-layer imports between subpackages are allowed by listing the component
+# itself (e.g. domain -> domain).
+#
+# Layer order (outside -> inside): adapters -> application -> domain.
+#   internal/domain:     rules and state transitions, no dependency on HTTP,
+#                        database, UI or any adapter (incl. the generated API
+#                        code path, see ADR-011). mayDependOn [domain] only.
+#   internal/application: use cases, ports, transactions. May orchestrate the
+#                        domain and use platform infrastructure.
+#   internal/adapters:   httpapi, web, cli, postgres, oidc, notify,
+#                        sources/{nvd,kev,epss}. Translate protocols into the
+#                        application ports; may also touch domain objects and
+#                        platform infrastructure.
+#   internal/platform:   config, logging, health. Infrastructure only; imports
+#                        nothing from the inner layers.
+#
+# The generated API code path (internal/adapters/httpapi/gen, placeholder) is
+# covered here because it lives under adapters/** and is therefore part of the
+# adapters component. If I1b lands the generated code outside adapters/**, add
+# it as its own component; internal/domain must simply never list it.
+#
+# cmd/* (the composition roots) is outside workdir and not part of this scan.
+
+version: 3
+
+workdir: internal
+
+allow:
+  depOnAnyVendor: true
+
+components:
+  # { in: x/** } matches package x and every package below it.
+  domain:      { in: domain/** }
+  application: { in: application/** }
+  adapters:    { in: adapters/** }
+  platform:    { in: platform/** }
+
+deps:
+  domain:
+    mayDependOn:
+      - domain
+  application:
+    mayDependOn:
+      - application
+      - domain
+      - platform
+  adapters:
+    mayDependOn:
+      - adapters
+      - application
+      - domain
+      - platform
+  platform:
+    mayDependOn:
+      - platform

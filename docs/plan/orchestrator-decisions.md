@@ -25,6 +25,7 @@ record. Binding decisions (ADR-001..ADR-015) are *not* restated here; they live 
 | sqlc | 1.31.1 | `go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest` | `/usr/local/bin/sqlc` |
 | goose | 3.28.0 | `go install github.com/pressly/goose/v3/cmd/goose@latest` | `/usr/local/bin/goose` |
 | oapi-codegen | 2.8.0 | `go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest` | `/usr/local/bin/oapi-codegen` |
+| go-arch-lint | 1.19.0 | `go install github.com/fe3dback/go-arch-lint@latest` (2026-09-08; resolved to v1.19.0) | `~/go/bin/go-arch-lint` (GOPATH/bin; not on PATH — the Makefile resolves it) |
 | Docker | 29.6.2 | pre-existing | — |
 | Docker Compose | 5.3.1 | pre-existing | — |
 | make | 3.81 | pre-existing | — |
@@ -80,7 +81,8 @@ record. Binding decisions (ADR-001..ADR-015) are *not* restated here; they live 
 
 ### D-005 — quality/security toolchain (for WP-1a.12 / WP-1a.13)
 
-These are **not yet installed**; they are pinned here so the CI stage has a single
+These are **not yet installed** (exception: go-arch-lint, installed with
+WP-1a.11/DEV-002 — see §2); they are pinned here so the CI stage has a single
 source of truth. Exact versions are fixed when the corresponding work package lands.
 
 | Concern | Tool | Notes |
@@ -92,6 +94,7 @@ source of truth. Exact versions are fixed when the corresponding work package la
 | Licence check | `go-licenses` (google) | module licence inventory |
 | SBOM (module) | `cyclonedx-gomod` | CycloneDX from `go.mod` |
 | SBOM + image scan | `syft` + `grype` | container SBOM + CVE scan |
+| Architecture check | `go-arch-lint` (fe3dback) | **pinned v1.19.0** (2026-09-08, DEV-002); declarative YAML dependency rules in `.go-arch-lint.yml`; the WP-1a.11 / TR-001 gate |
 
 **Rationale:** standard-of-care, all free/open-source, all deterministic (no paid
 service). `gosec`/`govulncheck`/`gitleaks` cover the security rows of TR-013/17.3;
@@ -116,3 +119,4 @@ are treated as best-available evidence (kickoff §2a).
 | Date | Decision | Status |
 |---|---|---|
 | 2026-09-08 | Installed Go 1.27.1 + sqlc 1.31.1 + goose 3.28.0 + oapi-codegen 2.8.0; recorded D-001..D-005 | Accepted (defaults) |
+| 2026-09-08 | DEV-002/WP-1a.11: installed go-arch-lint v1.19.0; `.go-arch-lint.yml` gate + `lint-arch`/`test-arch` targets landed; D-005 row pinned | Accepted (defaults) |
