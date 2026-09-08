@@ -1,0 +1,74 @@
+# RiskSignal — local development environment (WP-1a.03, implementation
+# concept §4.2 "Lokale Umgebung").
+#
+# Published ports bind 127.0.0.1 (loopback) only; the environment is never
+# reachable from other hosts. Host port numbers default to the values below
+# and can be overridden when a port is already taken on the developer
+# machine, e.g.  COMPOSE_OIDC_PORT=19000 make up
+#
+#   db    127.0.0.1:5432   PostgreSQL 16 (named volume pgdata)
+#   mail  127.0.0.1:1025   Mailpit SMTP
+#   mail  127.0.0.1:8025   Mailpit UI/API
+#   oidc  127.0.0.1:9000   mock OIDC provider (cmd/mock-oidc)
+#
+# server and worker are buildable skeletons that validate their configuration
+# and exit 0 until WP-1a.05/WP-1a.06/WP-1a.10 give them long-running
+# behaviour; db, mail and oidc are the services that must stay up.
+
+name: risksignal
+
+services:
+  db:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_USER: risksignal
+      POSTGRES_PASSWORD: risksignal
+      POSTGRES_DB: risksignal
+    ports:
+      - "127.0.0.1:${COMPOSE_DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U risksignal -d risksignal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  mail:
+    image: axllent/mailpit:v1.31.1
+    ports:
+      - "127.0.0.1:${COMPOSE_MAIL_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${COMPOSE_MAIL_UI_PORT:-8025}:8025"
+
+  oidc:
+    build:
+      context: .
+      dockerfile: deploy/mock-oidc/Containerfile
+    ports:
+      - "127.0.0.1:${COMPOSE_OIDC_PORT:-9000}:9000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9000/oidc/.well-known/openid-configuration"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  server:
+    build:
+      context: .
+      dockerfile: deploy/server/Containerfile
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/worker/Containerfile
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

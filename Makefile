@@ -1,4 +1,5 @@
-# RiskSignal — build and development targets (WP-1a.01 skeleton; WP-1a.11 arch gate).
+# RiskSignal — build and development targets (WP-1a.01 skeleton; WP-1a.03 compose
+# environment; WP-1a.11 arch gate).
 #
 # Go 1.27 is pinned by ADR-008 and declared in go.mod; use a matching toolchain.
 # go-arch-lint is pinned to v1.19.0 (docs/plan/orchestrator-decisions.md, D-005).
@@ -9,8 +10,9 @@
 GO ?= go
 GO_ARCH_LINT ?= go-arch-lint
 GO_ARCH_LINT_BIN := $(or $(shell command -v $(GO_ARCH_LINT) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(GO_ARCH_LINT))
+COMPOSE ?= docker compose
 
-.PHONY: build test test-arch lint lint-arch generate migrate up down
+.PHONY: build test test-arch lint lint-arch generate migrate up down verify-connectivity
 
 ## build: compile all three binaries into bin/
 build:
@@ -52,9 +54,25 @@ lint-arch:
 generate:
 	$(GO) generate ./...
 
-## migrate: database migration runner
-## up:    bring up the local environment
-## down:  tear down the local environment
-# Stubs until WP-1a.04 (migration runner) and WP-1a.03 (compose environment).
-migrate up down:
+## migrate: database migration runner (stub until WP-1a.04)
+migrate:
 	@echo "not yet implemented — WP-1a.04"
+
+## up: build and start the local compose environment in the background.
+##     db, mail and oidc stay up; server and worker validate their
+##     configuration and exit 0 until their long-running behaviour lands in
+##     WP-1a.05/WP-1a.06/WP-1a.10. Published ports default to loopback-only
+##     bindings (compose.yaml); override a busy host port with e.g.
+##     COMPOSE_OIDC_PORT=19000 make up
+up:
+	$(COMPOSE) up -d --build
+
+## down: stop and remove the local compose environment (keeps the pgdata volume)
+down:
+	$(COMPOSE) down
+
+## verify-connectivity: prove PostgreSQL answers from the compose network
+##     that server/worker use — a one-off psql on the db image resolving the
+##     service name db:5432. Requires the environment to be up (make up).
+verify-connectivity:
+	$(COMPOSE) run --rm --no-deps -e PGPASSWORD=risksignal --entrypoint psql db -h db -p 5432 -U risksignal -d risksignal -tAc 'SELECT 1'
