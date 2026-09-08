@@ -35,6 +35,9 @@ The layout follows implementation concept ch. 3.2:
     make build
 
 Produces `bin/risksignal-server`, `bin/risksignal-worker` and `bin/risksignal`.
+The build injects build metadata (version, git commit, build time) into every
+binary via `-ldflags -X` (WP-1a.07); `make VERSION=1.2.3 build` overrides the
+version, which otherwise defaults to `dev`.
 Each binary loads and validates its configuration at startup (WP-1a.02):
 built-in defaults, an optional JSON config file (`RISKSIGNAL_CONFIG_FILE`)
 and `RISKSIGNAL_*` environment variables, with environment variables taking
@@ -50,6 +53,31 @@ chain (ADR-008), shutting down cleanly on SIGINT/SIGTERM. Example:
     RISKSIGNAL_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/risksignal \
     RISKSIGNAL_OIDC_ISSUER=https://auth.local.example/ \
     bin/risksignal-server
+
+### System endpoints
+
+`bin/risksignal-server` answers the System endpoints of concept ch. 10.2 and
+16.3 (WP-1a.07) on the paths below, outside the future `/api/v1` contract
+and through the same middleware chain as everything else:
+
+- `GET /health/live` — liveness: answers 200 whenever the process responds;
+  external sources and the database are deliberately not criteria.
+- `GET /health/ready` — readiness: checks the database (pgx pool ping), the
+  completed schema migrations (checksum-verified, ADR-010) and the
+  mandatory configuration; answers 200 with `{"status":"ready"}` when all
+  pass and 503 with a distinct reason per failing check otherwise. A
+  database that is down at startup does not stop the server — readiness
+  reports red until the database is back.
+- `GET /version` — the build metadata injected at link time
+  (`make build`), e.g. `{"version":"dev","commit":"9418a984",
+  "build_time":"2026-09-08T22:57:42Z"}`; binaries built without the
+  Makefile report `dev`/`unknown`/`unknown`.
+
+Probe them while the server runs:
+
+    curl -i http://127.0.0.1:8080/health/live
+    curl -i http://127.0.0.1:8080/health/ready
+    curl -i http://127.0.0.1:8080/version
 
 ### Test
 
