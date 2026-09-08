@@ -99,10 +99,10 @@ migrate: build
 
 ## up: build and start the local compose environment in the background.
 ##     db, mail and oidc stay up; server serves HTTP through the WP-1a.06
-##     middleware chain; worker validates its configuration and exits 0 until
-##     its scheduler loop lands in WP-1a.10. Published ports default to
-##     loopback-only bindings (compose.yaml); override a busy host port with
-##     e.g. COMPOSE_OIDC_PORT=19000 make up
+##     middleware chain; worker runs its WP-1a.10 scheduler loop (heartbeat
+##     and one scheduler run per worker.interval, default 30s). Published
+##     ports default to loopback-only bindings (compose.yaml); override a
+##     busy host port with e.g. COMPOSE_OIDC_PORT=19000 make up
 up:
 	$(COMPOSE) up -d --build
 

@@ -1,7 +1,7 @@
 // Package buildinfo carries the build metadata of the running binary
-// (WP-1a.07: GET /version as the "Build-Nachweis" of concept ch. 10.2, and
-// later the version field of the structured log lines of ch. 16.1 and the
-// worker heartbeat of ch. 16.3).
+// (WP-1a.07: GET /version as the "Build-Nachweis" of concept ch. 10.2) and
+// fills the version field of the structured log lines of ch. 16.1 — server
+// access logs and the worker heartbeat of ch. 16.3.
 //
 // The values are injected at link time. The Makefile build target compiles
 // every binary with

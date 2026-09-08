@@ -46,13 +46,23 @@ authentication bypass (`RISKSIGNAL_AUTH_BYPASS_ENABLED`) is accepted in
 `local` mode only (TR-010). On invalid configuration the binary prints the
 problem and exits 1 (the CLI classifies it as validation and exits 2, see
 "CLI commands and exit codes"); on success it prints a provenance summary
-(sources, no secret values) and exits 0. `risksignal-server` then keeps
-running and serves HTTP on `http.addr` through the WP-1a.06 middleware
-chain (ADR-008), shutting down cleanly on SIGINT/SIGTERM. Example:
+(sources, no secret values) and starts its process role.
+`risksignal-server` keeps running and serves HTTP on `http.addr` through the
+WP-1a.06 middleware chain (ADR-008), shutting down cleanly on
+SIGINT/SIGTERM. `risksignal-worker` keeps running and drives its scheduler
+loop (WP-1a.10): a heartbeat and one scheduler run per `worker.interval`
+(default 30s, overridable via `RISKSIGNAL_WORKER_INTERVAL`; no job types
+yet), recording worker health (heartbeat and last successful run, ch. 16.3)
+and shutting down cleanly on SIGINT/SIGTERM within a grace period. Examples:
 
     RISKSIGNAL_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/risksignal \
     RISKSIGNAL_OIDC_ISSUER=https://auth.local.example/ \
     bin/risksignal-server
+
+    RISKSIGNAL_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/risksignal \
+    RISKSIGNAL_OIDC_ISSUER=https://auth.local.example/ \
+    RISKSIGNAL_WORKER_INTERVAL=5s \
+    bin/risksignal-worker
 
 ### System endpoints
 

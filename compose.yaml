@@ -14,8 +14,9 @@
 # server has served HTTP through the WP-1a.06 middleware chain since WP-1a.06
 # and answers the WP-1a.07 System endpoints (/health/live, /health/ready,
 # /version) since WP-1a.07 (it binds its loopback default, 127.0.0.1:8080,
-# inside the container; no host port is published); worker still validates
-# its configuration and exits 0 until WP-1a.10 gives it the scheduler loop.
+# inside the container; no host port is published). The worker has run its
+# WP-1a.10 scheduler loop — heartbeat and one scheduler run per
+# worker.interval (default 30s) — since WP-1a.10.
 # db, mail and oidc are the services that must stay up.
 
 name: risksignal
