@@ -4,11 +4,13 @@
 // sessions, synchronous use cases and health endpoints. WP-1a.02: it loads
 // and validates its configuration on startup (defaults -> optional JSON
 // config file -> RISKSIGNAL_* environment variables); an invalid
-// configuration exits 1 without starting. WP-1a.06: with a valid one it
-// serves an as-yet empty http.ServeMux (ADR-008 — no router framework)
-// wrapped in the httpapi middleware chain on http.addr, and shuts down
-// gracefully on SIGINT/SIGTERM. Routes land in WP-1a.07 (health) and I1b
-// (generated API, ADR-011).
+// configuration exits 1 without starting. WP-1a.06: it serves an
+// http.ServeMux (ADR-008 — no router framework) wrapped in the httpapi
+// middleware chain on http.addr, and shuts down gracefully on SIGINT/SIGTERM.
+// WP-1a.07: it registers the System endpoints — GET /health/live, GET
+// /health/ready and GET /version (concept ch. 10.2, 16.3) — and opens the
+// database pool whose reachability the readiness endpoint reports. The
+// generated API routes land in I1b (ADR-011).
 package main
 
 import (
@@ -20,10 +22,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/xpera/risksignal/db/migrations"
 	"github.com/xpera/risksignal/internal/adapters/httpapi"
+	"github.com/xpera/risksignal/internal/adapters/postgres"
+	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/xpera/risksignal/internal/platform/buildinfo"
 	"github.com/xpera/risksignal/internal/platform/config"
 )
 
@@ -52,12 +61,20 @@ func main() {
 // the process cleanly. It returns nil after a graceful shutdown, and an error
 // for anything else (bind failure, serve failure, shutdown timeout).
 func serve(cfg *config.Config, logger *log.Logger) error {
-	// Routes land in WP-1a.07 and I1b; until then every path 404s — through
-	// the middleware chain, which is exactly what this WP must prove.
-	mux := http.NewServeMux()
+	// The pool is lazy (postgres.NewPool, WP-1a.05/1a.07): pgx connects only
+	// when a probe or query needs it, so a database that is down at startup
+	// must not kill the server. Readiness reports the state instead — red
+	// /health/ready, green /health/live (concept ch. 16.3) — and the pool
+	// recovers on its own once the database is back.
+	pool, err := postgres.NewPool(context.Background(), cfg.Database.URL)
+	if err != nil {
+		return fmt.Errorf("create database pool: %w", err)
+	}
+	defer pool.Close()
+
 	srv := &http.Server{
 		Addr:              cfg.HTTP.Addr,
-		Handler:           httpapi.NewHandler(mux, logger),
+		Handler:           newHandler(cfg, pool, logger),
 		ReadHeaderTimeout: 5 * time.Second, // slow-header protection
 		IdleTimeout:       60 * time.Second,
 		ErrorLog:          logger, // net/http internals (e.g. panics that escape the chain)
@@ -94,4 +111,84 @@ func serve(cfg *config.Config, logger *log.Logger) error {
 		logger.Printf("shutdown complete")
 		return nil
 	}
+}
+
+// newHandler builds the route table of the server and wraps it in the
+// WP-1a.06 middleware chain (correlation ID, access log, panic recovery,
+// security headers, CSP, CORS off, body limit). WP-1a.07 registers the
+// System endpoints of concept ch. 10.2 on the ServeMux; every other path
+// still 404s — through the same chain. The generated API routes land in I1b.
+func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger httpapi.Logger) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("GET /health/live", httpapi.LiveHandler())
+	mux.Handle("GET /health/ready", httpapi.ReadyHandler(readinessProbes(cfg, pool)))
+	mux.Handle("GET /version", httpapi.VersionHandler(buildinfo.Current()))
+	return httpapi.NewHandler(mux, logger)
+}
+
+// readinessProbes returns the readiness criteria of concept ch. 16.3 as the
+// probe set of GET /health/ready: the database reachable through the pool,
+// the schema migrations complete with verified checksums, and the mandatory
+// configuration valid. External sources are deliberately not a criterion.
+//
+// Every probe returns an error whose text becomes the per-check reason in
+// the readiness report, so reasons are operator-facing: they carry no
+// credentials and no secret-bearing configuration content (the connection
+// errors of pgx and migrate name host, user and database — never the
+// password — and config validation already references keys only).
+func readinessProbes(cfg *config.Config, pool *pgxpool.Pool) []httpapi.Probe {
+	return []httpapi.Probe{
+		{
+			Name: "database",
+			Check: func(ctx context.Context) error {
+				return pool.Ping(ctx)
+			},
+		},
+		{
+			Name: "migrations",
+			Check: func(ctx context.Context) error {
+				// A dry run of the checksum-guarded runner (WP-1a.04,
+				// ADR-010) is the read-only status check: it verifies that
+				// every applied migration still matches its embedded file
+				// and reports the pending ones. An error here means the
+				// migration state cannot be trusted; pending migrations
+				// mean the schema is behind this binary.
+				runner, err := migrate.Open(ctx, cfg.Database.URL, migrations.FS)
+				if err != nil {
+					return fmt.Errorf("cannot inspect migration state: %w", err)
+				}
+				defer runner.Close()
+				res, err := runner.Migrate(ctx, true)
+				if err != nil {
+					return fmt.Errorf("migration state not trustworthy: %w", err)
+				}
+				if len(res.Pending) > 0 {
+					return fmt.Errorf("schema behind this binary: %d pending migration(s): %s",
+						len(res.Pending), pendingNames(res.Pending))
+				}
+				return nil
+			},
+		},
+		{
+			Name: "config",
+			Check: func(ctx context.Context) error {
+				// Startup already refused an invalid configuration
+				// (WP-1a.02); re-validating keeps the readiness contract
+				// honest if a later work package ever adds reloading.
+				if errs := config.Validate(cfg); len(errs) > 0 {
+					return fmt.Errorf("invalid configuration: %w", errors.Join(errs...))
+				}
+				return nil
+			},
+		},
+	}
+}
+
+// pendingNames lists the pending migration file names, comma separated.
+func pendingNames(pending []migrate.PendingMigration) string {
+	names := make([]string, 0, len(pending))
+	for _, p := range pending {
+		names = append(names, p.Path)
+	}
+	return strings.Join(names, ", ")
 }
