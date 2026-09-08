@@ -35,8 +35,18 @@ The layout follows implementation concept ch. 3.2:
     make build
 
 Produces `bin/risksignal-server`, `bin/risksignal-worker` and `bin/risksignal`.
-Each binary is a WP-1a.01 skeleton: it prints a startup line and exits with
-code 0.
+Each binary loads and validates its configuration at startup (WP-1a.02):
+built-in defaults, an optional JSON config file (`RISKSIGNAL_CONFIG_FILE`)
+and `RISKSIGNAL_*` environment variables, with environment variables taking
+precedence. `database.url` and `oidc.issuer` are mandatory; the local
+authentication bypass (`RISKSIGNAL_AUTH_BYPASS_ENABLED`) is accepted in
+`local` mode only (TR-010). On invalid configuration the binary prints the
+problem and exits 1; on success it prints a provenance summary (sources, no
+secret values) and exits 0. Example:
+
+    RISKSIGNAL_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/risksignal \
+    RISKSIGNAL_OIDC_ISSUER=https://auth.local.example/ \
+    bin/risksignal-server
 
 ### Test
 
