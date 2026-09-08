@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // envKeys lists every loader input that tests must isolate: the optional
@@ -16,6 +17,7 @@ var envKeys = []string{
 	envName("database.url"),
 	envName("oidc.issuer"),
 	envName("auth.bypass_enabled"),
+	envName("worker.interval"),
 }
 
 // resetEnv removes every loader input so each test starts from pure
@@ -81,7 +83,14 @@ func mustLoad(t *testing.T, file string, env map[string]string) *Config {
 	return cfg
 }
 
-func mustFail(t *testing.T, file string, env map[string]string, wantKey string) error {
+func mustFail(t *testing.T, file string, env map[string]string, wantKey string) {
+	t.Helper()
+	_ = mustFailErr(t, file, env, wantKey)
+}
+
+// mustFailErr runs the mustFail assertions and returns the error for call
+// sites that also inspect it.
+func mustFailErr(t *testing.T, file string, env map[string]string, wantKey string) error {
 	t.Helper()
 	_, err := loadWithEnv(t, file, env)
 	if err == nil {
@@ -112,6 +121,9 @@ func TestDefaults(t *testing.T) {
 	}
 	if d.Auth.BypassEnabled {
 		t.Error("Defaults().Auth.BypassEnabled = true, want false (secure default)")
+	}
+	if d.Worker.Interval != 30*time.Second {
+		t.Errorf("Defaults().Worker.Interval = %s, want 30s", d.Worker.Interval)
 	}
 }
 
@@ -182,7 +194,7 @@ func TestLoadInvalidHTTPAddr(t *testing.T) {
 func TestLoadInvalidBypassEnvValue(t *testing.T) {
 	env := validEnv()
 	env["auth.bypass_enabled"] = "yes"
-	err := mustFail(t, "", env, "auth.bypass_enabled")
+	err := mustFailErr(t, "", env, "auth.bypass_enabled")
 	if strings.Contains(err.Error(), "yes") {
 		t.Errorf("Load() error echoes the offending value: %v", err)
 	}
@@ -217,6 +229,89 @@ func TestValidateBypassLock(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestLoadWorkerIntervalFromEnv resolves the scheduler interval from the
+// environment and reports its provenance.
+func TestLoadWorkerIntervalFromEnv(t *testing.T) {
+	env := validEnv()
+	env["worker.interval"] = "45s"
+	cfg := mustLoad(t, "", env)
+	if cfg.Worker.Interval != 45*time.Second {
+		t.Errorf("Worker.Interval = %s, want 45s", cfg.Worker.Interval)
+	}
+	line := summaryLine(cfg.Summary(), "worker.interval")
+	if !strings.Contains(line, "45s (source=env)") {
+		t.Errorf("Summary() worker.interval line %q does not render the resolved value with its source", line)
+	}
+}
+
+// TestLoadWorkerIntervalFromFile resolves the scheduler interval from the
+// optional config file.
+func TestLoadWorkerIntervalFromFile(t *testing.T) {
+	file := writeConfigFile(t, `{
+		"database": {"url": "postgres://file@127.0.0.1/db"},
+		"oidc": {"issuer": "https://issuer.file.example/"},
+		"worker": {"interval": "1m"}
+	}`)
+	cfg := mustLoad(t, file, nil)
+	if cfg.Worker.Interval != time.Minute {
+		t.Errorf("Worker.Interval = %s, want 1m", cfg.Worker.Interval)
+	}
+	line := summaryLine(cfg.Summary(), "worker.interval")
+	if !strings.Contains(line, "1m0s (source=file)") {
+		t.Errorf("Summary() worker.interval line %q does not render the file value with its source", line)
+	}
+}
+
+// TestLoadInvalidWorkerInterval rejects unparsable, empty and non-positive
+// durations without echoing the offending value.
+func TestLoadInvalidWorkerInterval(t *testing.T) {
+	t.Run("unparsable env value", func(t *testing.T) {
+		env := validEnv()
+		env["worker.interval"] = "fast"
+		err := mustFailErr(t, "", env, "worker.interval")
+		if strings.Contains(err.Error(), "fast") {
+			t.Errorf("Load() error echoes the offending value: %v", err)
+		}
+	})
+	t.Run("empty env value", func(t *testing.T) {
+		env := validEnv()
+		env["worker.interval"] = ""
+		mustFail(t, "", env, "worker.interval")
+	})
+	t.Run("unparsable file value", func(t *testing.T) {
+		file := writeConfigFile(t, `{
+			"worker": {"interval": "often"}
+		}`)
+		err := mustFailErr(t, file, validEnv(), "worker.interval")
+		if strings.Contains(err.Error(), "often") {
+			t.Errorf("Load() error echoes the offending value: %v", err)
+		}
+	})
+}
+
+// TestValidateWorkerIntervalRequiresPositiveValue is the pure-validation
+// matrix for the scheduler interval: zero and negative values are invalid.
+func TestValidateWorkerIntervalRequiresPositiveValue(t *testing.T) {
+	for _, interval := range []time.Duration{0, -time.Second} {
+		t.Run(interval.String(), func(t *testing.T) {
+			cfg := Defaults()
+			cfg.Database.URL = "postgres://u@h/db"
+			cfg.OIDC.Issuer = "https://auth.local.example/"
+			cfg.Worker.Interval = interval
+			errs := Validate(&cfg)
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e.Error(), "worker.interval") {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("Validate() errors %v do not reject worker.interval %s", errs, interval)
+			}
+		})
 	}
 }
 

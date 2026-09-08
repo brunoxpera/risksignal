@@ -30,6 +30,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // SchemaVersion is the configuration schema version this build understands.
@@ -65,6 +66,7 @@ type Config struct {
 	Database      Database `json:"database"`
 	OIDC          OIDC     `json:"oidc"`
 	Auth          Auth     `json:"auth"`
+	Worker        Worker   `json:"worker"`
 
 	// sources records the provenance of every leaf key; populated by Load.
 	sources map[string]Source
@@ -90,6 +92,16 @@ type Auth struct {
 	BypassEnabled bool `json:"bypass_enabled"` // local dev principal, local mode only (TR-010)
 }
 
+// Worker carries the background-worker configuration (WP-1a.10).
+type Worker struct {
+	// Interval is the scheduler loop period: every interval the worker
+	// emits a heartbeat and runs one scheduler cycle (no job types in
+	// WP-1a.10). A later job-scheduling work package may split cadences
+	// per source and job type (concept ch. 8.1, 14.1); until then this
+	// single period drives the whole loop.
+	Interval time.Duration `json:"interval"`
+}
+
 // Defaults returns the built-in schema-v1 defaults.
 //
 // The defaults are deliberately development-shaped but fail-secure: local
@@ -113,6 +125,11 @@ func Defaults() Config {
 		Auth: Auth{
 			BypassEnabled: false, // secure default: bypass never on unless asked
 		},
+		Worker: Worker{
+			// A fresh local worker reports a heartbeat and a completed
+			// scheduler run every half minute without configuration.
+			Interval: 30 * time.Second,
+		},
 	}
 }
 
@@ -134,6 +151,15 @@ var envBindings = []struct {
 			return fmt.Errorf("auth.bypass_enabled: %s: must be a boolean (true or false)", envName("auth.bypass_enabled"))
 		}
 		c.Auth.BypassEnabled = b
+		return nil
+	}},
+	{"worker.interval", func(c *Config, v string) error {
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil {
+			// time.ParseDuration quotes the offending value; never surface it.
+			return fmt.Errorf("worker.interval: %s: must be a Go duration such as 30s or 1m", envName("worker.interval"))
+		}
+		c.Worker.Interval = d
 		return nil
 	}},
 }
@@ -200,6 +226,7 @@ type configFile struct {
 	Database      *fileDatabase `json:"database"`
 	OIDC          *fileOIDC     `json:"oidc"`
 	Auth          *fileAuth     `json:"auth"`
+	Worker        *fileWorker   `json:"worker"`
 }
 
 type fileHTTP struct {
@@ -218,11 +245,18 @@ type fileAuth struct {
 	BypassEnabled *bool `json:"bypass_enabled"`
 }
 
+type fileWorker struct {
+	Interval *string `json:"interval"` // Go duration, e.g. "30s"
+}
+
 // applyConfigFile reads the JSON config file at path and overrides cfg with
 // every key it declares. Unknown keys and schema version mismatches are
 // load-time errors, so a typo or a newer schema can never silently degrade
 // into defaults.
 func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
+	// #nosec G304 G703 — path is the explicit config file from the operator
+	// (RISKSIGNAL_CONFIG_FILE / --config-file), never attacker-influenced
+	// input; opening it is the documented feature, not file inclusion.
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("config file: %w", err)
@@ -268,6 +302,15 @@ func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
 	if fc.Auth != nil && fc.Auth.BypassEnabled != nil {
 		cfg.Auth.BypassEnabled = *fc.Auth.BypassEnabled
 		prov["auth.bypass_enabled"] = SourceFile
+	}
+	if fc.Worker != nil && fc.Worker.Interval != nil {
+		d, err := time.ParseDuration(strings.TrimSpace(*fc.Worker.Interval))
+		if err != nil {
+			// time.ParseDuration quotes the offending value; never surface it.
+			return fmt.Errorf("config file %s: worker.interval: invalid duration (expected a Go duration such as 30s or 1m)", path)
+		}
+		cfg.Worker.Interval = d
+		prov["worker.interval"] = SourceFile
 	}
 	return nil
 }

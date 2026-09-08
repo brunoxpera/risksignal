@@ -10,7 +10,7 @@ import (
 // security-relevant key with the source it was resolved from — but never the
 // content of a value that could carry credentials (http.addr, database.url,
 // oidc.issuer). Only non-secret descriptors are shown: the schema version,
-// the mode and the bypass flag state.
+// the mode, the bypass flag state and the worker scheduler interval.
 func (c *Config) Summary() string {
 	var b strings.Builder
 	for _, l := range c.summaryRows() {
@@ -37,9 +37,9 @@ type summaryRow struct {
 
 // summaryRows lists the report rows in a stable order. Keys that can carry
 // credentials (http.addr, database.url, oidc.issuer) report presence ("set")
-// only; the schema version, the mode and the bypass flag report their value.
-// summaryRows and JSONSummary describe the same key set and must stay in
-// lockstep with the schema (Config).
+// only; the schema version, the mode, the bypass flag and the worker
+// interval report their value. summaryRows and JSONSummary describe the
+// same key set and must stay in lockstep with the schema (Config).
 func (c *Config) summaryRows() []summaryRow {
 	src := func(key string) Source { return c.sourceOf(key) }
 	return []summaryRow{
@@ -49,6 +49,7 @@ func (c *Config) summaryRows() []summaryRow {
 		{key: "database.url", state: "set", source: src("database.url")},
 		{key: "oidc.issuer", state: "set", source: src("oidc.issuer")},
 		{key: "auth.bypass_enabled", state: strconv.FormatBool(c.Auth.BypassEnabled), source: src("auth.bypass_enabled")},
+		{key: "worker.interval", state: c.Worker.Interval.String(), source: src("worker.interval")},
 	}
 }
 
@@ -64,6 +65,7 @@ type JSONSummary struct {
 	DatabaseURL       PresenceSummary       `json:"database.url"`
 	OIDCIssuer        PresenceSummary       `json:"oidc.issuer"`
 	AuthBypassEnabled ScalarSummary[bool]   `json:"auth.bypass_enabled"`
+	WorkerInterval    ScalarSummary[string] `json:"worker.interval"`
 }
 
 // ScalarSummary reports the value and provenance of a leaf that cannot carry
@@ -90,5 +92,6 @@ func (c *Config) JSONSummary() JSONSummary {
 		DatabaseURL:       PresenceSummary{Set: true, Source: c.sourceOf("database.url")},
 		OIDCIssuer:        PresenceSummary{Set: true, Source: c.sourceOf("oidc.issuer")},
 		AuthBypassEnabled: ScalarSummary[bool]{Value: c.Auth.BypassEnabled, Source: c.sourceOf("auth.bypass_enabled")},
+		WorkerInterval:    ScalarSummary[string]{Value: c.Worker.Interval.String(), Source: c.sourceOf("worker.interval")},
 	}
 }

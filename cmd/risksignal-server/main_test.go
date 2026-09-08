@@ -45,6 +45,10 @@ func testConfig(dbURL string) *config.Config {
 		HTTP:          config.HTTP{Addr: "127.0.0.1:0"},
 		Database:      config.Database{URL: dbURL},
 		OIDC:          config.OIDC{Issuer: "http://127.0.0.1:9000/oidc"},
+		// The worker section is part of schema v1; readiness re-validates
+		// the whole configuration, so the interval must be positive even
+		// though the server never runs the scheduler.
+		Worker: config.Worker{Interval: 30 * time.Second},
 	}
 }
 

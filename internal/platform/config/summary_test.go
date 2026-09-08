@@ -72,13 +72,14 @@ func TestJSONSummaryIsDeterministic(t *testing.T) {
 	}
 
 	// encoding/json renders struct fields in declaration order, so the key
-	// set can be pinned exactly: six fixed keys, no drift.
+	// set can be pinned exactly: seven fixed keys, no drift.
 	want := `{"schema_version":{"value":1,"source":"default"},` +
 		`"env":{"value":"local","source":"default"},` +
 		`"http.addr":{"set":true,"source":"default"},` +
 		`"database.url":{"set":true,"source":"env"},` +
 		`"oidc.issuer":{"set":true,"source":"env"},` +
-		`"auth.bypass_enabled":{"value":false,"source":"default"}}`
+		`"auth.bypass_enabled":{"value":false,"source":"default"},` +
+		`"worker.interval":{"value":"30s","source":"default"}}`
 	if string(first) != want {
 		t.Fatalf("JSONSummary rendered %s, want %s", first, want)
 	}
@@ -102,6 +103,7 @@ func TestJSONSummaryMatchesSummarySources(t *testing.T) {
 		{"database.url", js.DatabaseURL.Source},
 		{"oidc.issuer", js.OIDCIssuer.Source},
 		{"auth.bypass_enabled", js.AuthBypassEnabled.Source},
+		{"worker.interval", js.WorkerInterval.Source},
 	}
 	for _, c := range cases {
 		line := summaryLine(sum, c.key)

@@ -8,8 +8,9 @@ import (
 )
 
 // Validate checks the configuration against the startup rules of concept
-// ch. 3.3: mandatory values, parseable URLs and addresses, known modes and
-// the mutually exclusive mode/flag combination behind TR-010.
+// ch. 3.3: mandatory values, parseable URLs and addresses, known modes,
+// positive durations and the mutually exclusive mode/flag combination
+// behind TR-010.
 //
 // Every returned error references the configuration key only — never the
 // offending value — so credentials can never leak into an error message.
@@ -20,6 +21,7 @@ func Validate(c *Config) []error {
 	dbURL := strings.TrimSpace(c.Database.URL)
 	issuer := strings.TrimSpace(c.OIDC.Issuer)
 	env := strings.TrimSpace(c.Env)
+	interval := c.Worker.Interval
 
 	// Mandatory values. The empty string is the marker for "not provided":
 	// the defaults leave database.url and oidc.issuer empty, and an empty
@@ -62,6 +64,13 @@ func Validate(c *Config) []error {
 	// bypass enabled; only local mode may run it.
 	if c.Auth.BypassEnabled && env != "local" {
 		errs = append(errs, errors.New("auth.bypass_enabled: local authentication bypass may only be enabled in local mode (TR-010)"))
+	}
+
+	// worker.interval must be positive: a zero or negative value would
+	// make the scheduler loop spin or never fire (WP-1a.10). Unparsable
+	// values are rejected at load time already, before Validate runs.
+	if interval <= 0 {
+		errs = append(errs, errors.New("worker.interval: must be a positive duration (set it via a config file or RISKSIGNAL_WORKER_INTERVAL)"))
 	}
 
 	return errs

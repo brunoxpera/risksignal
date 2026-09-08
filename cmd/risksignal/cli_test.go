@@ -303,7 +303,7 @@ func TestRunNotImplementedCommandsExitGeneric(t *testing.T) {
 
 func TestRunInvalidConfigurationIsValidation(t *testing.T) {
 	// Missing mandatory values name the keys only, never secret content.
-	code, stdout, stderr := runCLI(t, nil, "diagnose", "config")
+	code, _, stderr := runCLI(t, nil, "diagnose", "config")
 	if code != exitValidation {
 		t.Fatalf("exit code = %d, want %d", code, exitValidation)
 	}
@@ -314,7 +314,7 @@ func TestRunInvalidConfigurationIsValidation(t *testing.T) {
 	}
 
 	// An unreadable config file is a configuration failure: exit 2.
-	code, stdout, stderr = runCLI(t, map[string]string{"RISKSIGNAL_CONFIG_FILE": "/nonexistent/config.json"}, "diagnose", "config")
+	code, stdout, stderr := runCLI(t, map[string]string{"RISKSIGNAL_CONFIG_FILE": "/nonexistent/config.json"}, "diagnose", "config")
 	assertValidationFailure(t, code, stdout, stderr, "invalid configuration")
 
 	// The bypass lock (TR-010): production mode with the bypass enabled
@@ -322,7 +322,7 @@ func TestRunInvalidConfigurationIsValidation(t *testing.T) {
 	env := cliValidEnv()
 	env["RISKSIGNAL_ENV"] = "production"
 	env["RISKSIGNAL_AUTH_BYPASS_ENABLED"] = "true"
-	code, stdout, stderr = runCLI(t, env, "diagnose", "config", "--output", "json")
+	code, stdout, _ = runCLI(t, env, "diagnose", "config", "--output", "json")
 	if code != exitValidation {
 		t.Fatalf("exit code = %d, want %d", code, exitValidation)
 	}
@@ -357,6 +357,7 @@ func TestDiagnoseConfigTextRendersProvenanceWithoutSecrets(t *testing.T) {
 		"config: database.url:", "set (source=env)",
 		"config: oidc.issuer:", "set (source=env)",
 		"config: auth.bypass_enabled:", "false (source=default)",
+		"config: worker.interval:", "30s (source=default)",
 	}
 	for _, piece := range want {
 		if !strings.Contains(stdout, piece) {
@@ -401,6 +402,10 @@ const goldenDiagnoseConfigJSON = `{
     },
     "auth.bypass_enabled": {
       "value": false,
+      "source": "default"
+    },
+    "worker.interval": {
+      "value": "30s",
       "source": "default"
     }
   },
