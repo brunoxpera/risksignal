@@ -58,6 +58,11 @@ services:
     build:
       context: .
       dockerfile: deploy/server/Containerfile
+    environment:
+      # Valid local configuration so the WP-1a.02 startup validation passes
+      # (the skeleton exits 0; it does not connect yet — WP-1a.05).
+      RISKSIGNAL_DATABASE_URL: "postgres://risksignal:risksignal@db:5432/risksignal?sslmode=disable"
+      RISKSIGNAL_OIDC_ISSUER: "http://oidc:9000/oidc"
     depends_on:
       db:
         condition: service_healthy
@@ -66,6 +71,9 @@ services:
     build:
       context: .
       dockerfile: deploy/worker/Containerfile
+    environment:
+      RISKSIGNAL_DATABASE_URL: "postgres://risksignal:risksignal@db:5432/risksignal?sslmode=disable"
+      RISKSIGNAL_OIDC_ISSUER: "http://oidc:9000/oidc"
     depends_on:
       db:
         condition: service_healthy
