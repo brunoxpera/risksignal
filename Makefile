@@ -54,9 +54,14 @@ lint-arch:
 generate:
 	$(GO) generate ./...
 
-## migrate: database migration runner (stub until WP-1a.04)
-migrate:
-	@echo "not yet implemented — WP-1a.04"
+## migrate: run the schema migrations (WP-1a.04) against the compose database.
+##         Requires the environment to be up (make up). The command itself is
+##         ./bin/risksignal maintenance migrate [--dry-run] with the usual
+##         RISKSIGNAL_* configuration (here: the compose defaults).
+migrate: build
+	RISKSIGNAL_DATABASE_URL='postgres://risksignal:risksignal@127.0.0.1:5432/risksignal?sslmode=disable' \
+	RISKSIGNAL_OIDC_ISSUER='http://127.0.0.1:9000/oidc' \
+	./bin/risksignal maintenance migrate
 
 ## up: build and start the local compose environment in the background.
 ##     db, mail and oidc stay up; server and worker validate their

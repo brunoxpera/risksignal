@@ -64,9 +64,20 @@ negative test:
     make up
     make down
 
-Stubs in WP-1a.01 — they print "not yet implemented — WP-1a.04" and exit 0.
-The compose-based local environment lands in WP-1a.03, the migration runner
-in WP-1a.04.
+Brings up the Compose environment — PostgreSQL, a mock OIDC test provider and
+Mailpit — with loopback-only port bindings. `make down` tears it down, and
+`make verify-connectivity` proves the database is reachable from the service
+network (WP-1a.03).
+
+With the environment up, `make migrate` applies pending schema migrations
+against the compose database through the checksum-guarded migration runner
+(`risksignal maintenance migrate`, WP-1a.04, ADR-010). A dry run only
+verifies the checksums of the applied migrations and reports what would
+change, without touching the database:
+
+    RISKSIGNAL_DATABASE_URL='postgres://risksignal:risksignal@127.0.0.1:5432/risksignal?sslmode=disable' \
+    RISKSIGNAL_OIDC_ISSUER='http://127.0.0.1:9000/oidc' \
+    bin/risksignal maintenance migrate --dry-run
 
 ### Lint and generate
 
