@@ -56,6 +56,20 @@ type Component struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+// Current EPSS daily set (ADR-013, ARCH-002 §3): one row per scored CVE, replaced atomically by TRUNCATE + COPY; read by cve_id lookup
+type EpssCurrent struct {
+	// CVE id, the natural key of the set (no surrogate id — TRUNCATE + COPY friendly)
+	CveID string
+	// EPSS score, the probability in [0,1] the CVE is exploited
+	Score pgtype.Numeric
+	// EPSS percentile in [0,1] of the score within the set
+	Percentile pgtype.Numeric
+	// EPSS scoring model/date of the loaded set, e.g. 2026-09-09
+	ModelVersion string
+	// Fetch time of the loaded set from the clock port (never the DB wall clock)
+	LoadedAt pgtype.Timestamptz
+}
+
 // Immutable source statements per vulnerability (ch. 6.1); typed: synthetic_statement | cvss | kev | epss (ARCH-001 §1)
 type Evidence struct {
 	ID              pgtype.UUID
@@ -106,6 +120,42 @@ type Outbox struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+// Isolated parse/normalise failures (ch. 8.6 state machine, ARCH-002 §3): one row per offending record slice, positioned, attributed and re-addressable via payload_hash
+type Quarantine struct {
+	ID          pgtype.UUID
+	SourceID    pgtype.UUID
+	SourceRunID pgtype.UUID
+	RawRecordID pgtype.UUID
+	// Position of the offending slice within the raw payload: byte offset, line number or JSON pointer
+	Position string
+	// Stable error_code plus human message (ch. 5.2), e.g. parse.invalid_cve_id: CVE id is empty
+	Reason string
+	// SHA-256 of the offending record/slice — re-addresses the record on reprocess
+	PayloadHash string
+	// new | acknowledged | ready_for_retry | resolved (ch. 8.6 state machine); reprocess failures increment attempts and stay retryable
+	Status string
+	// Reprocess attempts; incremented on every failed reprocess
+	Attempts int32
+	// When the operator acknowledged the row; NULL until then
+	AcknowledgedAt pgtype.Timestamptz
+	// Operator principal that acknowledged the row (system in I2, ch. 13.2)
+	AcknowledgedBy pgtype.Text
+	// Operator note written with the acknowledgement
+	AcknowledgedNote pgtype.Text
+	// When reprocess succeeded and the row left the quarantine
+	ResolvedAt pgtype.Timestamptz
+	// Vulnerability created by the successful reprocess, when the record normalised to one
+	ResolvedVulnerabilityID pgtype.UUID
+	// Evidence created by the successful reprocess, when the record normalised to one
+	ResolvedEvidenceID pgtype.UUID
+	// Outcome note of the successful reprocess
+	ResolvedNote pgtype.Text
+	// Isolation time from the injected clock (never the DB wall clock)
+	CreatedAt pgtype.Timestamptz
+	// Last state change from the injected clock (never the DB wall clock)
+	UpdatedAt pgtype.Timestamptz
+}
+
 // Raw source documents, stored unchanged and hashed (ch. 8.1 step 4); the natural key makes ingest idempotent (ARCH-001 §1)
 type RawRecord struct {
 	ID       pgtype.UUID
@@ -114,8 +164,11 @@ type RawRecord struct {
 	ExternalID string
 	// SHA-256 hex of the canonical payload
 	ContentHash string
-	Payload     []byte
-	FetchedAt   pgtype.Timestamptz
+	// Unchanged source document bytes (ch. 8.1 step 4, ADR-013): jsonb in I1b, bytea from 00004 on — the raw record is the file/document, not the row
+	Payload   []byte
+	FetchedAt pgtype.Timestamptz
+	// Encoding of the stored payload bytes: identity | gzip | json — set by the fetching adapter, self-describing for reprocess
+	ContentEncoding pgtype.Text
 }
 
 // One signal per match (ch. 6.1); priority P1-P4, status new in I1b, version is the optimistic-lock token (ARCH-001 §1)
@@ -175,6 +228,10 @@ type SourceRun struct {
 	// Run counters {records, matched, signals}; committed with the success status
 	Counters []byte
 	Error    pgtype.Text
+	// Cursor value when the run opened (e.g. NVD last_modified window start); NULL for full-set sources
+	CursorBefore []byte
+	// Cursor committed with a successful run (ch. 6.1); NULL on failure — the cursor advances only after commit
+	CursorAfter []byte
 }
 
 // Normalized vulnerabilities; I1b identity + summary only (ARCH-001 §1), full NVD fields arrive with I2
@@ -184,4 +241,12 @@ type Vulnerability struct {
 	Summary     string
 	PublishedAt pgtype.Timestamptz
 	ModifiedAt  pgtype.Timestamptz
+	// Full English description of the vulnerability (I2+, NVD); NULL on I1b/KEV skeleton rows
+	Description pgtype.Text
+	// CVSS metrics block {version, base_score, base_severity, vector} (ARCH-002 §2.1); the prioritisation cvss evidence shape
+	Cvss []byte
+	// References array of the NVD record (I2+)
+	References []byte
+	// Raw NVD configurations block (I2+); normalised into the product index in I3
+	CpeConfig []byte
 }

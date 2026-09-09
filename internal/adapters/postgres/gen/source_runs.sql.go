@@ -18,7 +18,7 @@ SET finished_at = $1,
     counters    = $3,
     error       = $4
 WHERE id = $5
-RETURNING id, source_id, started_at, finished_at, status, counters, error
+RETURNING id, source_id, started_at, finished_at, status, counters, error, cursor_before, cursor_after
 `
 
 type CompleteSourceRunParams struct {
@@ -50,6 +50,8 @@ func (q *Queries) CompleteSourceRun(ctx context.Context, arg CompleteSourceRunPa
 		&i.Status,
 		&i.Counters,
 		&i.Error,
+		&i.CursorBefore,
+		&i.CursorAfter,
 	)
 	return i, err
 }
@@ -58,7 +60,7 @@ const createSourceRun = `-- name: CreateSourceRun :one
 
 INSERT INTO source_runs (source_id, started_at, status)
 VALUES ($1, $2, 'running')
-RETURNING id, source_id, started_at, finished_at, status, counters, error
+RETURNING id, source_id, started_at, finished_at, status, counters, error, cursor_before, cursor_after
 `
 
 type CreateSourceRunParams struct {
@@ -84,6 +86,8 @@ func (q *Queries) CreateSourceRun(ctx context.Context, arg CreateSourceRunParams
 		&i.Status,
 		&i.Counters,
 		&i.Error,
+		&i.CursorBefore,
+		&i.CursorAfter,
 	)
 	return i, err
 }
