@@ -7,7 +7,7 @@ package main
 // repositories (the architecture gate keeps db/migrations out of
 // internal/adapters/** — `make lint-arch` enforces that), so the CreateSignal
 // command runs here against a real, short-lived PostgreSQL exactly as
-// production wires it (demo.go demoService): postgres.WithTx as the
+// production wires it (demo.go dbService): postgres.WithTx as the
 // transaction boundary, the postgres repositories behind the ports, and the
 // injected clock supplying every timestamp.
 //
@@ -164,7 +164,7 @@ func seedCreateSignalFixture(t *testing.T, pool *pgxpool.Pool, at time.Time) str
 }
 
 // newCreateSignalService wires the application service exactly as the
-// production composition roots do (demo.go demoService): the postgres
+// production composition roots do (demo.go dbService): the postgres
 // repositories behind the ports and postgres.WithTx as the transaction
 // boundary of the command (ch. 5.1), with the injected FakeClock as the
 // time source and the given outbox repository — the real one or the

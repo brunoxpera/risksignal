@@ -135,7 +135,7 @@ func (e *cmdEnv) cmdDemoSeed(args []string) outcome {
 	ctx, cancel := context.WithTimeout(context.Background(), demoRunTimeout)
 	defer cancel()
 
-	pool, svc, out := e.demoService(ctx, cfg)
+	pool, svc, out := e.dbService(ctx, cfg)
 	if !out.ok() {
 		return out
 	}
@@ -193,7 +193,7 @@ func (e *cmdEnv) cmdDemoRun(args []string) outcome {
 	ctx, cancel := context.WithTimeout(context.Background(), demoRunTimeout)
 	defer cancel()
 
-	pool, svc, out := e.demoService(ctx, cfg)
+	pool, svc, out := e.dbService(ctx, cfg)
 	if !out.ok() {
 		return out
 	}
@@ -253,7 +253,7 @@ func (e *cmdEnv) cmdDemoReset(args []string) outcome {
 	ctx, cancel := context.WithTimeout(context.Background(), demoRunTimeout)
 	defer cancel()
 
-	pool, _, out := e.demoService(ctx, cfg)
+	pool, _, out := e.dbService(ctx, cfg)
 	if !out.ok() {
 		return out
 	}
@@ -273,18 +273,26 @@ func (e *cmdEnv) cmdDemoReset(args []string) outcome {
 	return e.ok(demoResetResult{Tables: demoResetTables})
 }
 
-// demoService opens the database pool and wires the application service of
-// the demo path behind the postgres repositories — the same composition the
-// server and worker composition roots use, with the real clock through the
-// Clock port and postgres.WithTx as the transaction boundary. An
-// unreachable database is an infrastructure failure (exit 6).
-func (e *cmdEnv) demoService(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, *application.Service, outcome) {
+// dbService opens the database pool and wires the application service
+// behind the postgres repositories — the composition the database-backed
+// CLI commands (demo, source) share, with the real clock through the Clock
+// port and postgres.WithTx as the transaction boundary. An unreachable
+// database is an infrastructure failure (exit 6).
+func (e *cmdEnv) dbService(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, *application.Service, outcome) {
 	pool, err := postgres.OpenPool(ctx, cfg.Database.URL)
 	if err != nil {
 		return nil, nil, e.fail(exitInfrastructure, classInfrastructure, "%v", err)
 	}
+	return pool, newAppService(pool, clock.RealClock{}), outcome{}
+}
+
+// newAppService wires the postgres repositories behind the application
+// ports on one pool — the composition every database-backed CLI command
+// (demo, source) shares, with the given clock through the Clock port and
+// postgres.WithTx as the transaction boundary.
+func newAppService(pool *pgxpool.Pool, clk clock.Clock) *application.Service {
 	q := gen.New(pool)
-	svc := application.NewService(application.ServiceDeps{
+	return application.NewService(application.ServiceDeps{
 		Signals:         repo.NewSignalRepo(q),
 		Audit:           repo.NewAuditRepo(q),
 		Outbox:          repo.NewOutboxRepo(q),
@@ -295,12 +303,11 @@ func (e *cmdEnv) demoService(ctx context.Context, cfg *config.Config) (*pgxpool.
 		Sources:         repo.NewSourceRepo(q),
 		Quarantine:      repo.NewQuarantineRepo(q),
 		Components:      repo.NewComponentRepo(q),
-		Clock:           clock.RealClock{},
+		Clock:           clk,
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)
 		},
 	})
-	return pool, svc, outcome{}
 }
 
 // seedDemoInventory registers the synthetic source and seeds the demo

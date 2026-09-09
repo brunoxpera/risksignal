@@ -172,6 +172,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runDiagnose(e, commandArgs[1:])
 	case "demo":
 		return runDemo(e, commandArgs[1:])
+	case "source":
+		return runSource(e, commandArgs[1:])
 	default:
 		return e.emit(commandArgs[0], e.fail(exitValidation, classValidation,
 			"unknown command (run 'risksignal help' for usage)"))
@@ -272,6 +274,9 @@ commands:
   demo run                          re-run the synthetic source (idempotent
                                     no-op on re-run)
   demo reset --yes                  truncate the demo tables (dev-only, I1b chain + quarantine)
+  source run <type|id>              enqueue one manual source.fetch job for the
+                                    named source (the worker runs it, bypassing
+                                    the schedule; dedupe source_id + request_id)
   help                              show this help
 
 The CLI is strictly non-interactive: it never prompts and never reads hidden

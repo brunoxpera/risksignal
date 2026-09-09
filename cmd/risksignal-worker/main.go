@@ -153,7 +153,30 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	}
 
 	health := worker.NewHealth()
-	sched, err := worker.NewScheduler(cfg.Worker.Interval, clock.RealClock{}, logger, health, relay.Drain)
+	// One scheduler cycle runs the source scan first (ARCH-002 §5: enqueue
+	// the source.fetch jobs of the due schedule slots — the dedupe keys of
+	// ch. 14.1 make repeated cycles no-ops), then drains the outbox so the
+	// jobs enqueued by this very cycle — and by earlier cycles and manual
+	// source run triggers — are claimed and delivered. A failing scan (a
+	// database read/write failure) fails the cycle; sources whose schedule
+	// string is not supported are skipped and logged, never fatal.
+	cycle := func(ctx context.Context) error {
+		res, err := svc.EnqueueDueSourceFetches(ctx)
+		if err != nil {
+			return err
+		}
+		if len(res.Skipped) > 0 {
+			logger.Warn("source scheduling skipped sources with an unparsable schedule",
+				slog.Any("source_ids", res.Skipped))
+		}
+		if res.Enqueued > 0 || res.AlreadyQueued > 0 {
+			logger.Debug("source scheduling cycle",
+				slog.Int("enqueued", res.Enqueued),
+				slog.Int("already_queued", res.AlreadyQueued))
+		}
+		return relay.Drain(ctx)
+	}
+	sched, err := worker.NewScheduler(cfg.Worker.Interval, clock.RealClock{}, logger, health, cycle)
 	if err != nil {
 		return fmt.Errorf("configure scheduler: %w", err)
 	}

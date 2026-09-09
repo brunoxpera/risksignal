@@ -128,8 +128,13 @@ type fakeDB struct {
 	rawRecords   []storedRawRecord
 	sourceRuns   []storedSourceRun
 	sources      []application.SourceDescriptor
-	quarantine   []domain.Quarantine
-	epssRows     []storedEpssRow
+	// scheduled are the enabled scheduled source rows of the scheduler scan
+	// (ARCH-002 §5): the fake SourceRepo.ListEnabledScheduled reads them;
+	// tests seed them independently of the descriptor store (the descriptor
+	// shape carries no schedule/enabled columns).
+	scheduled  []application.ScheduledSource
+	quarantine []domain.Quarantine
+	epssRows   []storedEpssRow
 	// components is the seeded inventory (demo seed data), written by the
 	// test before a run and only ever read by the matcher fake.
 	components []application.Component
@@ -701,6 +706,12 @@ func (f *fakeSourceRepo) SetLastContentHash(ctx context.Context, tx application.
 	ftx.record("source.hash")
 	ftx.staged.sourceHash = append(ftx.staged.sourceHash, sourceHashMutation{sourceID: sourceID, contentHash: contentHash})
 	return nil
+}
+
+// ListEnabledScheduled implements application.SourceRepo on the fake store:
+// the scheduler scan reads the seeded enabled scheduled rows (ARCH-002 §5).
+func (f *fakeSourceRepo) ListEnabledScheduled(ctx context.Context) ([]application.ScheduledSource, error) {
+	return append([]application.ScheduledSource(nil), f.db.scheduled...), nil
 }
 
 type fakeQuarantineRepo struct {

@@ -71,3 +71,25 @@ func (r *SourceRepo) SetLastContentHash(ctx context.Context, tx application.Tx, 
 	}
 	return nil
 }
+
+// ListEnabledScheduled implements application.SourceRepo: the scheduler
+// scan read (ARCH-002 §5) — every enabled source whose schedule is set,
+// with the row identity and the schedule string the scan derives the due
+// slot from.
+func (r *SourceRepo) ListEnabledScheduled(ctx context.Context) ([]application.ScheduledSource, error) {
+	const op = "source.list_enabled_scheduled"
+
+	rows, err := r.q.ListEnabledScheduledSources(ctx)
+	if err != nil {
+		return nil, mapDBError(op, err)
+	}
+	sources := make([]application.ScheduledSource, 0, len(rows))
+	for _, row := range rows {
+		sources = append(sources, application.ScheduledSource{
+			ID:       uuidString(row.ID),
+			Type:     application.SourceType(row.Type),
+			Schedule: row.Schedule.String, // NULL schedule is filtered by the statement
+		})
+	}
+	return sources, nil
+}

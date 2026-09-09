@@ -112,6 +112,14 @@ type SourceRepo interface {
 	// missing row is a not-found Error.
 	GetByID(ctx context.Context, id string) (SourceDescriptor, error)
 
+	// ListEnabledScheduled returns the sources the scheduler scan checks
+	// (ARCH-002 §5): every enabled source whose schedule is set (NULL
+	// schedules — e.g. the operator-triggered synthetic source — never
+	// appear). The scan then derives each row's due schedule slot; the
+	// schedule strings are the adapters' declared plans ("@hourly",
+	// "@daily").
+	ListEnabledScheduled(ctx context.Context) ([]ScheduledSource, error)
+
 	// SetLastContentHash records the content hash of the source's last
 	// committed raw record into sources.config.last_content_hash (DEV-041,
 	// ch. 8.3/ARCH-002 §2.2/§2.3): the fetch use cases (FetchSource,

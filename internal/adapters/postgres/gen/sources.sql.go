@@ -69,6 +69,84 @@ func (q *Queries) GetSourceByTypeAndName(ctx context.Context, arg GetSourceByTyp
 	return i, err
 }
 
+const listEnabledScheduledSources = `-- name: ListEnabledScheduledSources :many
+SELECT id, type, schedule
+FROM sources
+WHERE enabled = true AND schedule IS NOT NULL
+ORDER BY id
+`
+
+type ListEnabledScheduledSourcesRow struct {
+	ID       pgtype.UUID
+	Type     string
+	Schedule pgtype.Text
+}
+
+// ListEnabledScheduledSources returns the rows the scheduler scan checks
+// (WP-2.08/DEV-042, ARCH-002 §5): every enabled source whose schedule is
+// set — NULL schedules (e.g. the operator-triggered synthetic source) never
+// appear. The scan derives each row's due schedule slot from the schedule
+// string and enqueues the source.fetch job of the slot; id and type carry
+// the row identity, schedule the slot grammar ("@hourly", "@daily" — the
+// schedules the I2 adapters declare).
+func (q *Queries) ListEnabledScheduledSources(ctx context.Context) ([]ListEnabledScheduledSourcesRow, error) {
+	rows, err := q.db.Query(ctx, listEnabledScheduledSources)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEnabledScheduledSourcesRow
+	for rows.Next() {
+		var i ListEnabledScheduledSourcesRow
+		if err := rows.Scan(&i.ID, &i.Type, &i.Schedule); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSourcesByType = `-- name: ListSourcesByType :many
+SELECT id, type, name
+FROM sources
+WHERE type = $1
+ORDER BY name, id
+`
+
+type ListSourcesByTypeRow struct {
+	ID   pgtype.UUID
+	Type string
+	Name string
+}
+
+// ListSourcesByType returns every source row of one type — the read the
+// `source run <type>` resolution of the CLI performs (WP-2.08/DEV-042,
+// ARCH-002 §5): a type names its source row when exactly one is
+// registered, and the resolution fails on zero or several. name is carried
+// so the error can name the ambiguous rows.
+func (q *Queries) ListSourcesByType(ctx context.Context, type_ string) ([]ListSourcesByTypeRow, error) {
+	rows, err := q.db.Query(ctx, listSourcesByType, type_)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSourcesByTypeRow
+	for rows.Next() {
+		var i ListSourcesByTypeRow
+		if err := rows.Scan(&i.ID, &i.Type, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setSourceLastContentHash = `-- name: SetSourceLastContentHash :exec
 UPDATE sources
 SET config = COALESCE(config, '{}'::jsonb) || jsonb_build_object('last_content_hash', $1::text)

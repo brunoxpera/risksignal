@@ -48,3 +48,27 @@ WHERE id = @id;
 UPDATE sources
 SET config = COALESCE(config, '{}'::jsonb) || jsonb_build_object('last_content_hash', @content_hash::text)
 WHERE id = @id;
+
+-- ListEnabledScheduledSources returns the rows the scheduler scan checks
+-- (WP-2.08/DEV-042, ARCH-002 §5): every enabled source whose schedule is
+-- set — NULL schedules (e.g. the operator-triggered synthetic source) never
+-- appear. The scan derives each row's due schedule slot from the schedule
+-- string and enqueues the source.fetch job of the slot; id and type carry
+-- the row identity, schedule the slot grammar ("@hourly", "@daily" — the
+-- schedules the I2 adapters declare).
+-- name: ListEnabledScheduledSources :many
+SELECT id, type, schedule
+FROM sources
+WHERE enabled = true AND schedule IS NOT NULL
+ORDER BY id;
+
+-- ListSourcesByType returns every source row of one type — the read the
+-- `source run <type>` resolution of the CLI performs (WP-2.08/DEV-042,
+-- ARCH-002 §5): a type names its source row when exactly one is
+-- registered, and the resolution fails on zero or several. name is carried
+-- so the error can name the ambiguous rows.
+-- name: ListSourcesByType :many
+SELECT id, type, name
+FROM sources
+WHERE type = @type
+ORDER BY name, id;

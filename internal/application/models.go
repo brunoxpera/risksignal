@@ -90,6 +90,16 @@ type Component struct {
 	Version string
 }
 
+// ScheduledSource is one enabled, schedulable sources row as the scheduler
+// scan reads it (ARCH-002 §5): the row identity plus its schedule — the
+// sources a worker cycle checks for a due slot. The scan is the only read
+// of the schedule column; every other path resolves the full descriptor.
+type ScheduledSource struct {
+	ID       string
+	Type     SourceType
+	Schedule string
+}
+
 // SourceRunCounters are the counters of a source run (ARCH-001 §1
 // source_runs.counters; extended by ARCH-002 §1 to
 // {records, normalized, errors, quarantined, matched, signals}), committed
