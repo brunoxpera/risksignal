@@ -136,6 +136,17 @@ type NormalizeInput struct {
 	Payload     []byte
 	ContentHash string
 	Meta        FetchMeta
+
+	// PreviousKEVCVEs carries the CVE ids of the source's previously
+	// stored full set (the KEV catalog of the last committed run,
+	// ARCH-002 §2.2): the KEV normaliser emits a kev_removed evidence for
+	// every id that is absent from the new set, historising removals
+	// instead of silently dropping them (ch. 8.3). The normalise use case
+	// (NormalizeSource/RunSource wiring) must populate the field for KEV
+	// full-set passes by reading the CVE ids of the source's previous raw
+	// record; nil/empty — the first import — emits no removals. The other
+	// sources ignore it.
+	PreviousKEVCVEs []string
 }
 
 // RecordError isolates one failed record of a payload (ARCH-002 §1,

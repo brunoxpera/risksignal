@@ -105,6 +105,10 @@ func (s *Service) RunSource(ctx context.Context, in RunSourceInput) (RunSourceRe
 		rawID = id
 
 		sink := newNormalizeSink(s, tx, desc.ID, runID, rawID, now)
+		// Note (DEV-032 follow-up): as in NormalizeSource, the KEV
+		// full-set path must populate NormalizeInput.PreviousKEVCVEs from
+		// the source's previously stored catalog before removal
+		// historisation (kev_removed evidence) can fire.
 		res, err := in.Adapter.Normalize(ctx, NormalizeInput{
 			RawRecordID: rawID,
 			Payload:     out.Payload,

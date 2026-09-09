@@ -69,6 +69,11 @@ func (s *Service) NormalizeSource(ctx context.Context, in NormalizeSourceInput) 
 	counters := SourceRunCounters{Records: 1}
 	passErr := s.runTx(ctx, func(tx Tx) error {
 		sink := newNormalizeSink(s, tx, desc.ID, runID, rawRec.ID, now)
+		// Note (DEV-032 follow-up): the KEV full-set path must populate
+		// NormalizeInput.PreviousKEVCVEs from the CVE ids of the source's
+		// previously stored raw record — the repo read for them does not
+		// exist yet, so removal historisation (kev_removed evidence)
+		// activates with that wiring.
 		res, err := in.Adapter.Normalize(ctx, NormalizeInput{
 			RawRecordID: rawRec.ID,
 			Payload:     rawRec.Payload,
