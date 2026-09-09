@@ -2,11 +2,13 @@
 // and 11.3): `quarantine list` renders the quarantine working list — the
 // records the I2 normalisers isolated because they failed to parse or
 // normalise (position, reason, payload hash, status, created_at, source) —
-// and `quarantine ack <id> --note "…"` records the operator review
-// (new -> acknowledged, ARCH-002 §4) with the reviewer and the note.
-// `quarantine reprocess <id>` lives in this file below the ack handler
-// (DEV-035 commit 2): it re-reads the raw record the row was isolated
-// from and re-runs the source's normaliser at the current adapter.
+// `quarantine ack <id> --note "…"` records the operator review
+// (new -> acknowledged, ARCH-002 §4) with the reviewer and the note, and
+// `quarantine reprocess <id>` re-reads the raw record the row was isolated
+// from and re-runs the source's normaliser at the current adapter: a clean
+// pass resolves the row (-> resolved, linked to the new domain object), a
+// pass that still isolates the record increments attempts and stays
+// retryable (ARCH-002 §4) — both transitions audited.
 //
 // Every state change of the machine is a domain command of the application
 // service (QuarantineAck / QuarantineReprocess, DEV-030): the command runs
@@ -34,14 +36,19 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/xpera/risksignal/internal/adapters/sources/epss"
+	"github.com/xpera/risksignal/internal/adapters/sources/kev"
+	"github.com/xpera/risksignal/internal/adapters/sources/nvd"
 	"github.com/xpera/risksignal/internal/application"
 	"github.com/xpera/risksignal/internal/domain"
+	"github.com/xpera/risksignal/internal/platform/clock"
 )
 
 // quarantineCommandTimeout bounds one quarantine command. Ack/reprocess run
@@ -61,7 +68,7 @@ const defaultQuarantineListLimit = 100
 func runQuarantine(e *cmdEnv, args []string) int {
 	if len(args) < 1 {
 		return e.emit("quarantine", e.fail(exitValidation, classValidation,
-			"missing subcommand (supported: list, ack)"))
+			"missing subcommand (supported: list, ack, reprocess)"))
 	}
 	command := "quarantine " + args[0]
 	switch args[0] {
@@ -69,9 +76,11 @@ func runQuarantine(e *cmdEnv, args []string) int {
 		return e.emit(command, e.cmdQuarantineList(args[1:]))
 	case "ack":
 		return e.emit(command, e.cmdQuarantineAck(args[1:]))
+	case "reprocess":
+		return e.emit(command, e.cmdQuarantineReprocess(args[1:]))
 	default:
 		return e.emit(command, e.fail(exitValidation, classValidation,
-			"unknown subcommand (supported: list, ack)"))
+			"unknown subcommand (supported: list, ack, reprocess)"))
 	}
 }
 
@@ -113,6 +122,21 @@ type quarantineListResult struct {
 	Quarantine []quarantineView `json:"quarantine"`
 }
 
+// quarantineReprocessResult is the machine-readable payload of `quarantine
+// reprocess <id>`: the committed row state (embedded, flattened — the same
+// fixed quarantineView shape as the other commands) plus the outcome of
+// the normaliser pass. Resolved is true when the pass succeeded and the
+// row left the quarantine (-> resolved, linked to the new domain object);
+// false when the offending record still fails to normalise — the row's
+// attempts incremented and it stays retryable, which is an audited state
+// change, never an error of the command.
+type quarantineReprocessResult struct {
+	quarantineView
+	Resolved bool `json:"resolved"`
+	Records  int  `json:"records"` // domain records the pass normalised
+	Errors   int  `json:"errors"`  // records the pass still isolated
+}
+
 // cmdQuarantineList renders the quarantine working list (ARCH-002 §4,
 // ch. 11.3): every isolated row ordered by created_at then id, optionally
 // filtered by status (new | acknowledged | ready_for_retry | resolved) and
@@ -129,7 +153,7 @@ func (e *cmdEnv) cmdQuarantineList(args []string) outcome {
 	statusText := fs.String("status", "", "quarantine status filter")
 	sourceRef := fs.String("source", "", "source id or type filter")
 	limit := fs.Int("limit", defaultQuarantineListLimit, "page size")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(flagTokensFirst(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return outcome{}
 		}
@@ -254,7 +278,115 @@ func quarantineRowView(row gen.Quarantine, sourceType, sourceName string) quaran
 	}
 }
 
-// cmdQuarantineAck records the operator review of one isolated record
+// cmdQuarantineReprocess re-runs the source's normaliser over the raw
+// record a quarantined row was isolated from (ARCH-002 §4): the adapter of
+// the row's source type (the current implementation of the source port,
+// resolved by the registry below — the same composition as the worker) is
+// invoked on the stored raw record bytes, streaming through the
+// persistence sink on the command's transaction. A clean pass resolves the
+// row — linked to the new domain object the pass materialised — with the
+// quarantine.resolved audit event; a pass that still isolates the record
+// increments attempts, keeps the row retryable and writes the
+// quarantine.reprocessed audit event; both transitions and their audit
+// events commit atomically in the QuarantineReprocess use case (one
+// command, one transaction, ch. 5.1). A failed attempt is a successful
+// command (exit 0, resolved false): the audited state change happened. An
+// infrastructure failure of the pass rolls everything back and exits 6
+// without a state change.
+func (e *cmdEnv) cmdQuarantineReprocess(args []string) outcome {
+	fs := newFlagSet(e, "usage: risksignal quarantine reprocess <id>")
+	if err := fs.Parse(flagTokensFirst(args)); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return outcome{}
+		}
+		return e.fail(exitValidation, classValidation, "%v", err)
+	}
+	if fs.NArg() != 1 {
+		return e.fail(exitValidation, classValidation,
+			"quarantine reprocess takes exactly one argument: the quarantine id")
+	}
+	id := fs.Arg(0)
+
+	cfg, out := loadConfig(e)
+	if !out.ok() {
+		return out
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), quarantineCommandTimeout)
+	defer cancel()
+
+	pool, svc, out := e.dbService(ctx, cfg)
+	if !out.ok() {
+		return out
+	}
+	defer pool.Close()
+	q := gen.New(pool)
+
+	// Pre-read: fail fast with a message naming the id on an unknown row
+	// and resolve the source row — its type selects the adapter to run.
+	row, out := readQuarantineRow(ctx, q, id)
+	if !out.ok() {
+		return out
+	}
+	src, out := e.quarantineSourceOf(ctx, q, row)
+	if !out.ok() {
+		return out
+	}
+	adapter, ok := quarantineAdapters()[src.Type]
+	if !ok {
+		return e.fail(exitValidation, classValidation,
+			"no source adapter registered for source type %q (quarantine %s) — the CLI can reprocess nvd, kev and epss rows",
+			src.Type, rowViewID(row))
+	}
+
+	result, err := svc.QuarantineReprocess(ctx, application.QuarantineReprocessInput{
+		ID:      id,
+		Adapter: adapter,
+		// Actor is empty: the use case defaults to the I2 system
+		// principal "operator" (application.defaultQuarantineActorID).
+	})
+	if err != nil {
+		return demoErrorOutcome(err)
+	}
+
+	// Render the committed state (the authoritative row after the write,
+	// timestamps and resolution links included).
+	committed, out := readQuarantineRow(ctx, q, id)
+	if !out.ok() {
+		return out
+	}
+	view := quarantineRowView(committed, src.Type, src.Name)
+	res := quarantineReprocessResult{
+		quarantineView: view,
+		Resolved:       result.Resolved,
+		Records:        result.Records,
+		Errors:         result.Errors,
+	}
+
+	if e.format == formatText {
+		printQuarantineReprocess(e.stdout, res)
+	}
+	return e.ok(res)
+}
+
+// quarantineAdapters is the type-keyed registry of the reprocess command
+// (ARCH-002 §1): the current implementation of every I2 source port,
+// keyed by the source type a quarantine row names. The composition mirrors
+// the worker registry (cmd/risksignal-worker/main.go) — one adapter
+// instance per type serves every source row of that type; the transport
+// and clock arguments are nil/defaults because reprocess only invokes the
+// normalise half on stored raw record bytes (no fetch, no network). The
+// I1b synthetic source is deliberately absent: its runs never isolate
+// records into quarantine (the I1b run path reports the malformed
+// reference case as a run error, README demo seed), so no quarantine row
+// can name a synthetic source in practice.
+func quarantineAdapters() map[string]application.SourcePort {
+	return map[string]application.SourcePort{
+		string(application.SourceTypeNVD):  nvd.New(nil),
+		string(application.SourceTypeKEV):  kev.New(nil),
+		string(application.SourceTypeEPSS): epss.New(nil, clock.RealClock{}),
+	}
+}
+
 // (new -> acknowledged, ARCH-002 §4): the state change and its
 // quarantine.acknowledged audit event are written atomically by the
 // QuarantineAck use case (one command, one transaction, ch. 5.1). The
@@ -268,7 +400,7 @@ func (e *cmdEnv) cmdQuarantineAck(args []string) outcome {
 	fs := newFlagSet(e, "usage: risksignal quarantine ack <id> [--note <text>]\n"+
 		"  --note <text>  review note recorded with the acknowledgement")
 	note := fs.String("note", "", "review note of the acknowledgement")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(flagTokensFirst(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return outcome{}
 		}
@@ -350,17 +482,59 @@ func readQuarantineRow(ctx context.Context, q *gen.Queries, id string) (gen.Quar
 	return row, outcome{}
 }
 
-// quarantineViewOf resolves the source attribution of one stored row (its
-// sources row: type + name) and renders the operator view.
-func (e *cmdEnv) quarantineViewOf(ctx context.Context, q *gen.Queries, row gen.Quarantine) (quarantineView, outcome) {
+// rowViewID formats the id of a stored row for messages.
+func rowViewID(row gen.Quarantine) string { return demoUUID(row.ID) }
+
+// quarantineSourceOf resolves the sources row of one stored quarantine
+// row (its source attribution: type + name).
+func (e *cmdEnv) quarantineSourceOf(ctx context.Context, q *gen.Queries, row gen.Quarantine) (gen.Source, outcome) {
 	src, err := q.GetSourceByID(ctx, row.SourceID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return quarantineView{}, outcome{code: exitGeneric, class: classGeneric,
+			return gen.Source{}, outcome{code: exitGeneric, class: classGeneric,
 				message: fmt.Sprintf("quarantine %s references unknown source %s", demoUUID(row.ID), demoUUID(row.SourceID))}
 		}
-		return quarantineView{}, outcome{code: exitInfrastructure, class: classInfrastructure,
+		return gen.Source{}, outcome{code: exitInfrastructure, class: classInfrastructure,
 			message: err.Error()}
+	}
+	return src, outcome{}
+}
+
+// flagTokensFirst reorders the arguments of one quarantine subcommand so
+// that every flag token — and, for a flag without an inline value, its
+// following value token — precedes the positional arguments. Go's flag
+// package stops parsing at the first non-flag argument, while the
+// documented quarantine grammar places the positional id first
+// (`quarantine ack <id> --note "…"`); the reorder lets the operator write
+// flags before or after the id. The quarantine flag sets carry value flags
+// only (--note, --status, --source, --limit), so a flag token always
+// consumes the next token as its value when it carries no inline "=" — a
+// boolean flag would need different handling and none of the quarantine
+// subcommands has one.
+func flagTokensFirst(args []string) []string {
+	flags := make([]string, 0, len(args))
+	rest := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			rest = append(rest, a)
+			continue
+		}
+		flags = append(flags, a)
+		if !strings.Contains(a, "=") && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	return append(flags, rest...)
+}
+
+// quarantineViewOf resolves the source attribution of one stored row (its
+// sources row: type + name) and renders the operator view.
+func (e *cmdEnv) quarantineViewOf(ctx context.Context, q *gen.Queries, row gen.Quarantine) (quarantineView, outcome) {
+	src, out := e.quarantineSourceOf(ctx, q, row)
+	if !out.ok() {
+		return quarantineView{}, out
 	}
 	return quarantineRowView(row, src.Type, src.Name), outcome{}
 }
@@ -408,5 +582,24 @@ func printQuarantineAck(w io.Writer, row quarantineView) {
 		row.ID, row.Status, row.AcknowledgedBy, row.AcknowledgedAt)
 	if row.AcknowledgedNote != "" {
 		fmt.Fprintf(w, "  note: %s\n", row.AcknowledgedNote)
+	}
+}
+
+// printQuarantineReprocess renders the reprocess outcome: the resolved
+// verdict with the pass counts and the resolution link, or the audited
+// still-failing verdict with the incremented attempts.
+func printQuarantineReprocess(w io.Writer, res quarantineReprocessResult) {
+	if res.Resolved {
+		fmt.Fprintf(w, "quarantine %s reprocessed: resolved (records %d, errors %d), status %s at %s\n",
+			res.ID, res.Records, res.Errors, res.Status, res.ResolvedAt)
+		if res.ResolvedVulnerabilityID != "" {
+			fmt.Fprintf(w, "  linked vulnerability %s\n", res.ResolvedVulnerabilityID)
+		}
+		if res.ResolvedEvidenceID != "" {
+			fmt.Fprintf(w, "  linked evidence %s\n", res.ResolvedEvidenceID)
+		}
+	} else {
+		fmt.Fprintf(w, "quarantine %s reprocessed: %d record(s) still fail to normalise (records %d) — attempts now %d, the row stays retryable (audited quarantine.reprocessed)\n",
+			res.ID, res.Errors, res.Records, res.Attempts)
 	}
 }

@@ -292,6 +292,10 @@ commands:
   quarantine ack <id> [--note <t>]  record the operator review of one
                                     isolated record (new -> acknowledged,
                                     audited quarantine.acknowledged)
+  quarantine reprocess <id>         re-run the source normaliser over the
+                                    raw record of one isolated record
+                                    (resolves on success; attempts + 1 and
+                                    stays retryable on failure — audited)
   help                              show this help
 
 The CLI is strictly non-interactive: it never prompts and never reads hidden
