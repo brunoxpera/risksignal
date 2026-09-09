@@ -12,8 +12,11 @@
 // database pool whose reachability the readiness endpoint reports. WP-1a.08:
 // all process and request logging goes through the structured, redacting
 // logger of internal/platform/logging (JSON in demo/production, text
-// locally), carrying the uniform fields of concept ch. 16.1. The generated
-// API routes land in I1b (ADR-011).
+// locally), carrying the uniform fields of concept ch. 16.1. WP-1b.08: the
+// I1b signal reads of the generated API — GET /api/v1/signals and GET
+// /api/v1/signals/{signal_id} (ARCH-001 §4, ADR-011) — are registered on
+// the same mux as the System endpoints, behind the same middleware chain,
+// and served by the application service built over the database pool.
 package main
 
 import (
@@ -34,8 +37,12 @@ import (
 	"github.com/xpera/risksignal/db/migrations"
 	"github.com/xpera/risksignal/internal/adapters/httpapi"
 	"github.com/xpera/risksignal/internal/adapters/postgres"
+	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
 	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/xpera/risksignal/internal/adapters/postgres/repo"
+	"github.com/xpera/risksignal/internal/application"
 	"github.com/xpera/risksignal/internal/platform/buildinfo"
+	"github.com/xpera/risksignal/internal/platform/clock"
 	"github.com/xpera/risksignal/internal/platform/config"
 	"github.com/xpera/risksignal/internal/platform/logging"
 )
@@ -126,16 +133,48 @@ func serve(cfg *config.Config, logger *slog.Logger) error {
 // newHandler builds the route table of the server and wraps it in the
 // WP-1a.06 middleware chain (correlation ID, access log, panic recovery,
 // security headers, CSP, CORS off, body limit). WP-1a.07 registers the
-// System endpoints of concept ch. 10.2 on the ServeMux; every other path
-// still 404s — through the same chain, whose access log writes one
-// structured record per request (WP-1a.08). The generated API routes land in
-// I1b.
+// System endpoints of concept ch. 10.2 on the ServeMux; WP-1b.08 registers
+// the generated I1b signal reads of ARCH-001 §4 (GET /api/v1/signals and
+// GET /api/v1/signals/{signal_id}) on the same mux — the application
+// service over the database pool serves them, and the chain applies to
+// them like to every other route. Every other path still 404s — through
+// the same chain, whose access log writes one structured record per
+// request (WP-1a.08).
 func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /health/live", httpapi.LiveHandler())
 	mux.Handle("GET /health/ready", httpapi.ReadyHandler(readinessProbes(cfg, pool)))
 	mux.Handle("GET /version", httpapi.VersionHandler(buildinfo.Current()))
+
+	svc := newSignalService(pool)
+	httpapi.RegisterSignalRoutes(mux, httpapi.NewSignalsHandler(svc, logger))
 	return httpapi.NewHandler(mux, logger)
+}
+
+// newSignalService assembles the application service behind the signal API
+// (WP-1b.08, DEV-018): the server serves the read use cases, but the
+// application service is one unit — every port of application.NewService is
+// wired like in the other composition roots (cmd/risksignal demo), so the
+// same service instance can grow the I4 command endpoints without a
+// structural change. Construction touches no database: the pool connects
+// lazily, so a stopped database keeps the server up and readiness reports
+// it (the /api/v1 reads answer 500 problem details until the pool
+// recovers).
+func newSignalService(pool *pgxpool.Pool) *application.Service {
+	q := gen.New(pool)
+	return application.NewService(application.ServiceDeps{
+		Signals:         repo.NewSignalRepo(q),
+		Audit:           repo.NewAuditRepo(q),
+		Outbox:          repo.NewOutboxRepo(q),
+		Vulnerabilities: repo.NewVulnerabilityRepo(q),
+		Matches:         repo.NewMatchRepo(q),
+		SourceRuns:      repo.NewSourceRunRepo(q),
+		Components:      repo.NewComponentRepo(q),
+		Clock:           clock.RealClock{},
+		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
+			return postgres.WithTx(ctx, pool, fn)
+		},
+	})
 }
 
 // readinessProbes returns the readiness criteria of concept ch. 16.3 as the
