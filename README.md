@@ -317,6 +317,50 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
         bin/risksignal source status --output json
       RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
         bin/risksignal source status nvd
+- `inventory validate <file>` — the read-only parse report of one
+  inventory CSV (WP-3.05 / DEV-059+060, ARCH-003 §1.3): header check,
+  row-count/size limits, enum validity
+  (`type`/`environment`/`criticality`/`exposure` via the domain
+  parsers), identifier syntax (`cpe`/`purl`/`image`/`digest`) and
+  intra-file conflicts (two rows of one asset with the same natural key
+  but divergent fields). Every failure is positioned (`line`, `column`,
+  `reason`) and never aborts the file — the report carries the row and
+  error counts next to the problems. Opens no database. Example:
+
+      bin/risksignal inventory validate inventory.csv --output json
+- `inventory preview <file>` — the read-only diff of one inventory CSV
+  against the current inventory (ARCH-003 §1.3 step 2): every clean row
+  is classified as created / updated / unchanged per asset and
+  component, next to the row/error counts and the data-quality warnings
+  (unknown criticality/exposure). Preview never writes; it shows exactly
+  what a commit of the file's clean rows would change. Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal inventory preview inventory.csv --output json
+- `inventory import <file> [--commit|--yes]` — commit one inventory CSV
+  (ARCH-003 §1.3 step 3). Dry run is mandatory (concept ch. 11.3):
+  without `--commit` (or its alias `--yes`) the command renders exactly
+  the preview report and writes nothing. With a commit flag the clean
+  rows land in one transaction — the additive upserts of assets
+  (`UQ (source, external_id)`) and components (`UQ (asset_id,
+  natural_key)`, the natural key derived through
+  `domain.ComponentNaturalKey` exactly as the preview compares it),
+  `updated_at` stamped from the injected clock, the `inventory.import`
+  audit event and — when the commit changed at least one row — exactly
+  one `matching.rebuild` outbox job whose dedupe key is
+  `matching.rebuild:<rule_version>:<inventory_snapshot>` (the composite
+  ruleset version `a<alias.version>d<decision.version>` plus the
+  ARCH-003 §5 hash over the inventory counts and max lifecycle stamps,
+  captured after the commit's own writes in the same transaction).
+  Absence never deactivates: rows the file does not carry stay
+  untouched, and a re-commit of identical content is a no-op — no row
+  rewritten, no rebuild enqueued. Problem rows never write: the report
+  carries the positioned problems of the rows a commit blocked next to
+  the committed tallies. The audit actor is the I2 system principal
+  `operator` (user principals land with I5a). Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal inventory import inventory.csv --commit --output json
 - `quarantine list [--status <status>] [--source <type|id>] [--limit <n>]`
   — the quarantine working list (ARCH-002 §4, concept ch. 8.6): every
   record the I2 normalisers isolated because it failed to parse or
