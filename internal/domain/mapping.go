@@ -11,13 +11,33 @@ import "fmt"
 // keeps this constant.
 const MatchRuleVersion = "i1b-1"
 
+// rulesetVersionWidth is the fixed digit width of each counter inside the
+// composite rule version ("a<n>d<m>"). Both counters are zero-padded to
+// this width, so the composite sorts lexicographically exactly like the
+// numeric (aliasVersion, decisionVersion) pair. That ordering property is
+// the contract, not an optimisation: matches.rule_version is a text
+// column and the match-history read orders by it
+// (ORDER BY rule_version DESC), and an unpadded composite mis-orders
+// multi-digit counters ("a10d1" sorts below "a2d1", DEV-057 finding). A
+// zero-pad only fixes ordering while every stored counter stays below
+// 10^width, so the width is deliberately generous — it must exceed any
+// achievable ruleset-version counter for the lifetime of the product and
+// is not a "current size" knob. The composite keeps the a<n>d<m> form:
+// the padded digits read back as the same counters (RulesetVersion(0, 0)
+// is the initial "no rules yet" ruleset marker, its components parse back
+// to (0, 0)).
+const rulesetVersionWidth = 10
+
 // RulesetVersion derives the effective matching rule version (ARCH-003
 // §1.4/§3): the composite "a<alias.version>d<decision.version>" of the
 // current alias_rules and decision_rules version counters — a change to
 // either table bumps the composite, which flows into matches.rule_version
 // and the matching.rebuild dedupe key. The counters are the monotonic
 // rule versions of the two tables (0 when a table has no rules yet);
-// negative counters are a caller error.
+// negative counters are a caller error. Both counters are zero-padded to
+// rulesetVersionWidth digits ("a%010dd%010d") so the composite orders
+// lexicographically as the numeric pair — multi-digit rule versions
+// (a10d01 after a2d01) sort correctly (DEV-057).
 func RulesetVersion(aliasVersion, decisionVersion int) (string, error) {
 	if aliasVersion < 0 {
 		return "", fmt.Errorf("domain: ruleset version: alias version %d must be >= 0", aliasVersion)
@@ -25,7 +45,7 @@ func RulesetVersion(aliasVersion, decisionVersion int) (string, error) {
 	if decisionVersion < 0 {
 		return "", fmt.Errorf("domain: ruleset version: decision version %d must be >= 0", decisionVersion)
 	}
-	return fmt.Sprintf("a%dd%d", aliasVersion, decisionVersion), nil
+	return fmt.Sprintf("a%0*dd%0*d", rulesetVersionWidth, aliasVersion, rulesetVersionWidth, decisionVersion), nil
 }
 
 // candidateScoreMin and candidateScoreMax bound the actually computed

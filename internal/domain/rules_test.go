@@ -191,23 +191,64 @@ func TestDecisionRuleAppliesAt(t *testing.T) {
 }
 
 // TestRulesetVersion covers the composite rule-version derivation
-// "a<alias.version>d<decision.version>" (ARCH-003 §1.4/§3).
+// "a<alias.version>d<decision.version>" (ARCH-003 §1.4/§3) with the
+// zero-padded counters of rulesetVersionWidth: the composite keeps the
+// a<n>d<m> form, its components parse back to the supplied counters, and
+// the string sorts lexicographically exactly like the numeric pair — so
+// multi-digit rule versions order correctly (DEV-057).
 func TestRulesetVersion(t *testing.T) {
 	got, err := RulesetVersion(3, 7)
-	if err != nil || got != "a3d7" {
-		t.Errorf("RulesetVersion(3, 7) = %q, %v; want a3d7", got, err)
+	if err != nil || got != "a0000000003d0000000007" {
+		t.Errorf("RulesetVersion(3, 7) = %q, %v; want a0000000003d0000000007", got, err)
 	}
-	if got, err := RulesetVersion(0, 0); err != nil || got != "a0d0" {
-		t.Errorf("RulesetVersion(0, 0) = %q, %v; want a0d0 (no rules yet)", got, err)
+	if got, err := RulesetVersion(0, 0); err != nil || got != "a0000000000d0000000000" {
+		t.Errorf("RulesetVersion(0, 0) = %q, %v; want a0000000000d0000000000 (no rules yet)", got, err)
 	}
-	if got, err := RulesetVersion(1, 0); err != nil || got != "a1d0" {
-		t.Errorf("RulesetVersion(1, 0) = %q, %v; want a1d0", got, err)
+	if got, err := RulesetVersion(1, 0); err != nil || got != "a0000000001d0000000000" {
+		t.Errorf("RulesetVersion(1, 0) = %q, %v; want a0000000001d0000000000", got, err)
 	}
 	if _, err := RulesetVersion(-1, 2); err == nil {
 		t.Error("negative alias version: want error")
 	}
 	if _, err := RulesetVersion(1, -2); err == nil {
 		t.Error("negative decision version: want error")
+	}
+}
+
+// TestRulesetVersionOrdering pins the DEV-057 fix: the composite sorts
+// lexicographically exactly like the numeric (alias, decision) counter
+// pair, including across the single-digit → multi-digit boundary that a
+// plain "a%dd%d" composite would mis-order ("a10d1" vs "a2d1").
+func TestRulesetVersionOrdering(t *testing.T) {
+	pairs := [][2]int{
+		{0, 0}, {1, 0}, {2, 1}, {9, 9}, {10, 1}, {10, 2}, {11, 0}, {99, 99},
+		{100, 0}, {101, 2}, {1000, 7}, {9999999999, 9999999999},
+	}
+	versions := make([]string, len(pairs))
+	for i, p := range pairs {
+		v, err := RulesetVersion(p[0], p[1])
+		if err != nil {
+			t.Fatalf("RulesetVersion(%d, %d): unexpected error: %v", p[0], p[1], err)
+		}
+		versions[i] = v
+	}
+	for i := 1; i < len(pairs); i++ {
+		if versions[i-1] >= versions[i] {
+			t.Errorf("RulesetVersion ordering: %q (%v) must sort below %q (%v)", versions[i-1], pairs[i-1], versions[i], pairs[i])
+		}
+	}
+	// The composite is lexicographically ordered as the numeric pair also
+	// when the decision counter dominates: a2d10 must sort above a2d9.
+	low, err := RulesetVersion(2, 9)
+	if err != nil {
+		t.Fatalf("RulesetVersion(2, 9): unexpected error: %v", err)
+	}
+	high, err := RulesetVersion(2, 10)
+	if err != nil {
+		t.Fatalf("RulesetVersion(2, 10): unexpected error: %v", err)
+	}
+	if low >= high {
+		t.Errorf("a2d9 (%q) must sort below a2d10 (%q)", low, high)
 	}
 }
 
