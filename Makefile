@@ -1,6 +1,7 @@
 # RiskSignal — build and development targets (WP-1a.01 skeleton; WP-1a.03 compose
 # environment; WP-1a.11 arch gate; WP-1a.12 CI pipeline stages 1-2; WP-1a.13
-# images, SBOM, scans and signing groundwork; WP-1b.07 OpenAPI codegen, ADR-011).
+# images, SBOM, scans and signing groundwork; WP-1b.07 OpenAPI codegen, ADR-011;
+# WP-1b.11 ADR-011 CI gates and the E2E demo).
 #
 # Go 1.27 is pinned by ADR-008 and declared in go.mod; use a matching toolchain.
 # sqlc is pinned to v1.31.1 (ADR-009; the sqlc.yaml comment says the same) and
@@ -82,7 +83,7 @@ SCAN_DIR := $(ARTIFACT_DIR)/scan
 
 .PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
 	verify-connectivity ci-lint ci-test test-contract ci-build demo check-gofmt vet lint-golangci \
-	lint-licenses lint-secrets up-db image sbom scan sign
+	lint-licenses lint-secrets lint-openapi-validate lint-openapi-diff up-db image sbom scan sign
 
 ## build: compile all three binaries into bin/ with build metadata injected
 build:
@@ -102,10 +103,16 @@ test-arch:
 
 ## ci-lint: WP-1a.12 lint stage, in the CI order: formatting check, go vet,
 ##          static analysis (golangci-lint with gosec), architecture gate,
-##          licence check, secret scan. Identical to the CI lint job, so the
+##          licence check, secret scan, then the ADR-011 OpenAPI gates of
+##          WP-1b.11: gate 1 (lint-openapi-validate — the kin-openapi
+##          validation of the contract suite, the CI no-Node equivalent of
+##          the redocly make validate-openapi gate) and gate 2
+##          (lint-openapi-diff — the generate diff-gate, sqlc ADR-009 and
+##          oapi-codegen ADR-011). Identical to the CI lint job, so the
 ##          stage is verifiable without GitHub (deterministic: pinned tools,
 ##          .golangci.yml and .gitleaks.toml are the sources of truth).
-ci-lint: check-gofmt vet lint-golangci lint-arch lint-licenses lint-secrets
+ci-lint: check-gofmt vet lint-golangci lint-arch lint-licenses lint-secrets \
+	lint-openapi-validate lint-openapi-diff
 
 ## ci-test: WP-1a.12 test stage — race-enabled test suite against a real
 ##          PostgreSQL. The compose db service is started first (up-db) so
@@ -349,15 +356,41 @@ generate:
 ##            api/openapi/redocly.yaml: it extends minimal and turns off the
 ##            three warning rules that would flag intentional I1b properties
 ##            (see the config file) — the gate fails on an invalid document,
-##            not on lint taste. The CI wiring of gate 1 and the generate
-##            diff-gate (gate 2) is WP-1b.11; the contract test is gate 3
-##            (WP-1b.09).
+##            not on lint taste. This target is the local developer gate: CI
+##            installs no Node toolchain and runs gate 1 as the kin-openapi
+##            validation of the contract suite instead — its no-Node
+##            equivalent, wired in WP-1b.11 (make lint-openapi-validate,
+##            cmd/risksignal-server TestOpenAPIDocumentValidatesAgainst31) —
+##            and gate 2 as the generate diff-gate (make lint-openapi-diff);
+##            the contract test is gate 3 (WP-1b.09).
 validate-openapi:
 	@command -v npx >/dev/null 2>&1 || { \
 		echo "npx not found on PATH — install Node.js (LTS) to run the schema validator"; \
 		exit 2; \
 	}
 	npx --yes @redocly/cli@2.51.2 lint api/openapi/openapi.yaml --config=api/openapi/redocly.yaml
+
+## lint-openapi-validate: ADR-011 gate 1, CI wiring (WP-1b.11) — validate
+##            api/openapi/openapi.yaml against the OpenAPI 3.1 specification
+##            through the kin-openapi validation of the contract suite
+##            (cmd/risksignal-server TestOpenAPIDocumentValidatesAgainst31),
+##            run standalone without a database. This is the CI (no-Node)
+##            equivalent of the redocly `make validate-openapi` gate, which
+##            needs Node via npx and stays the local developer validator;
+##            the CI lint job runs the same targeted go test.
+lint-openapi-validate:
+	$(GO) test ./cmd/risksignal-server -run '^TestOpenAPIDocumentValidatesAgainst31$$' -count=1
+
+## lint-openapi-diff: ADR-011 gate 2, CI wiring (WP-1b.11) — regenerate the
+##            committed code (sqlc, ADR-009, and oapi-codegen, ADR-011, via
+##            `make generate`) and fail when the generated trees diverge
+##            from the committed output (git diff --exit-code over the sqlc
+##            and oapi-codegen gen directories): a hand-edited generated
+##            file or a schema change without regeneration breaks the gate
+##            (TAT-13). Part of ci-lint; the CI lint job runs the same make
+##            generate + git diff --exit-code sequence.
+lint-openapi-diff: generate
+	@git diff --exit-code -- internal/adapters/httpapi/gen internal/adapters/postgres/gen
 
 ## migrate: run the schema migrations (WP-1a.04) against the compose database.
 ##         Requires the environment to be up (make up). The command itself is

@@ -26,8 +26,11 @@ package main
 // The OpenAPI document itself is first validated against the 3.1
 // specification (ADR-011 gate 1) and the declared responses are checked
 // against the contract statements of this work package, so the suite stands
-// alone; the redocly validation of `make validate-openapi` and the
-// generate diff-gate run in CI regardless (WP-1b.11).
+// alone. In CI the same kin-openapi validation runs standalone as the lint
+// job's gate 1 (TestOpenAPIDocumentValidatesAgainst31 below — the no-Node
+// equivalent of the redocly `make validate-openapi` gate, which stays a
+// local developer check), and the generate diff-gate runs in that same job
+// (`make lint-openapi-diff`, WP-1b.11).
 //
 // Like the other composition-root integration tests, the suite skips when
 // no PostgreSQL is reachable, so `go test ./...` and `make ci-test` stay
@@ -386,8 +389,10 @@ func TestSignalContractAgainstSeededServer(t *testing.T) {
 // the generated code embeds the document with), then asserts the contract
 // statements of this work package: every declared response of the two reads
 // references the reusable ProblemDetails component with its required
-// fields. The redocly lint of `make validate-openapi` remains the CI gate-1
-// validator; this keeps the contract suite self-verifying.
+// fields. It runs inside the contract suite (gate 3, self-verifying) and
+// standalone as the CI lint job's ADR-011 gate 1 — the no-Node equivalent
+// of the redocly `make validate-openapi` gate, which stays the local
+// developer validator (WP-1b.11).
 func validateOpenAPIContract(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -459,6 +464,23 @@ func validateOpenAPIContract(t *testing.T) {
 			t.Errorf("ProblemDetails required = %v, missing %q", pd.Value.Required, required)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Standalone ADR-011 gate-1 hook (WP-1b.11)
+// ---------------------------------------------------------------------------
+
+// TestOpenAPIDocumentValidatesAgainst31 is the ADR-011 gate-1 hook of the CI
+// lint job (WP-1b.11, DEV-025): the same kin-openapi document validation the
+// contract suite embeds, run standalone — no database, no server — so CI can
+// execute it in the no-Node lint job as the equivalent of the redocly
+// `make validate-openapi` gate (which stays the local developer validator;
+// CI installs no Node toolchain). `go test ./...` picks it up like any
+// other test; the CI lint job runs it targeted via
+// `go test ./cmd/risksignal-server -run '^TestOpenAPIDocumentValidatesAgainst31$' -count=1`
+// and `make ci-lint` through lint-openapi-validate.
+func TestOpenAPIDocumentValidatesAgainst31(t *testing.T) {
+	validateOpenAPIContract(t)
 }
 
 // ---------------------------------------------------------------------------

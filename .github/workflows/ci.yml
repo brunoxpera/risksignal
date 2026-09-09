@@ -5,10 +5,18 @@
 # Stage layout (concept ch. 17.3):
 #   lint  — gofmt check, go vet, static analysis incl. gosec (golangci-lint),
 #           architecture gate (go-arch-lint, WP-1a.11), licence check
-#           (go-licenses), secret scan (gitleaks)
+#           (go-licenses), secret scan (gitleaks), then the ADR-011 OpenAPI
+#           gates of WP-1b.11: gate 1 (validate the document against the
+#           3.1 spec through the kin-openapi validation of the contract
+#           suite — the CI no-Node equivalent of the redocly
+#           `make validate-openapi` gate; CI installs no Node toolchain)
+#           and gate 2 (regenerate sqlc + oapi-codegen output and fail on a
+#           diff, ADR-009/ADR-011, TAT-13)
 #   test  — race-enabled unit and integration tests against a short-lived,
 #           real PostgreSQL 16 service container (concept ch. 17.1:
-#           integration tests run against a real, short-lived instance)
+#           integration tests run against a real, short-lived instance);
+#           includes the ADR-011 gate-3 contract suite, whose document
+#           validation doubles as the gate-1 check inside the suite
 #   build — `make build`: the three binaries with build metadata
 #   image — stages 4–6 (WP-1a.13, runs after lint/test/build): production
 #           container images with the WP-1a.07 build metadata (`make image`),
@@ -85,6 +93,26 @@ jobs:
         run: |
           go install github.com/gitleaks/gitleaks/v8@${GITLEAKS_VERSION}
           "$(go env GOPATH)/bin/gitleaks" detect --source .
+      - name: OpenAPI validate — ADR-011 gate 1 (WP-1b.11)
+        # The kin-openapi validation of the contract suite, run standalone
+        # without a database: the no-Node CI equivalent of the redocly
+        # `make validate-openapi` gate, which needs Node via npx and stays
+        # the local developer validator. Mirrors `make lint-openapi-validate`
+        # (and `make ci-lint`).
+        run: go test ./cmd/risksignal-server -run '^TestOpenAPIDocumentValidatesAgainst31$' -count=1
+      - name: regenerate and diff generated code — ADR-011 gate 2 (WP-1b.11)
+        # Regenerate the committed sqlc (ADR-009) and oapi-codegen (ADR-011)
+        # output and fail on any divergence: a hand-edited generated file or
+        # a schema change without regeneration breaks the build (TAT-13).
+        # Mirrors `make lint-openapi-diff` (and `make ci-lint`).
+        env:
+          SQLC_VERSION: v1.31.1
+          OAPI_CODEGEN_VERSION: v2.8.0
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@${SQLC_VERSION}
+          go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@${OAPI_CODEGEN_VERSION}
+          make generate
+          git diff --exit-code -- internal/adapters/httpapi/gen internal/adapters/postgres/gen
 
   test:
     name: test (stage 2)
