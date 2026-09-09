@@ -271,7 +271,7 @@ commands:
                                     (deterministic reference fixture, WP-1b.05)
   demo run                          re-run the synthetic source (idempotent
                                     no-op on re-run)
-  demo reset --yes                  truncate the I1b demo tables (dev-only)
+  demo reset --yes                  truncate the demo tables (dev-only, I1b chain + quarantine)
   help                              show this help
 
 The CLI is strictly non-interactive: it never prompts and never reads hidden

@@ -1,8 +1,9 @@
 // demo subcommands (WP-1b.05 / DEV-019, ARCH-001 §3 "Trigger"): `demo seed`
 // registers the synthetic source row, seeds the demo inventory (assets and
 // components) and runs the synthetic source once; `demo run` re-runs the
-// source (an idempotent no-op on re-run); `demo reset` truncates the I1b
-// tables (dev-only, requires --yes per concept ch. 11.3). Production of the
+// source (an idempotent no-op on re-run); `demo reset` truncates the demo
+// tables (the I1b chain plus quarantine since I2; dev-only, requires --yes
+// per concept ch. 11.3). Production of the
 // signal is a CLI/operator action — the API only reads the result
 // (ARCH-001 §3).
 //
@@ -53,15 +54,19 @@ const demoRunTimeout = 5 * time.Minute
 // (ARCH-001 §1 assets.source; the I1b demo seeds its own inventory rows).
 const demoSource = "demo"
 
-// demoResetTables are the I1b tables `demo reset` truncates (ARCH-001 §1:
+// demoResetTables are the demo tables `demo reset` truncates (ARCH-001 §1:
 // the walking-skeleton chain sources … risk_signals plus audit_events and
-// outbox, which the demo's signal creation writes). The reset is dev-only
-// and requires --yes; it never touches the migration bookkeeping
-// (schema_migration_log) or any later iteration's tables.
+// outbox, which the demo's signal creation writes; and quarantine, which
+// since I2 (00004) holds foreign keys into that set — PostgreSQL refuses a
+// TRUNCATE of a table referenced by an untruncated table, so the reset must
+// include it). The reset is dev-only and requires --yes; it never touches
+// the migration bookkeeping (schema_migration_log) or any later iteration's
+// tables.
 var demoResetTables = []string{
 	"risk_signals",
 	"matches",
 	"evidences",
+	"quarantine",
 	"vulnerabilities",
 	"raw_records",
 	"source_runs",
@@ -74,10 +79,10 @@ var demoResetTables = []string{
 
 // demoTruncateSQL truncates every demo table in one statement. PostgreSQL
 // resolves the foreign keys among the listed tables internally, so the
-// order is irrelevant; no table outside the list references one of them in
-// I1b, hence no CASCADE (a later table with a foreign key into this set
-// would fail loudly instead of silently truncating).
-const demoTruncateSQL = `TRUNCATE TABLE risk_signals, matches, evidences, vulnerabilities, raw_records, source_runs, components, assets, sources, audit_events, outbox`
+// order is irrelevant; no table outside the list references one of them,
+// hence no CASCADE (a later table with a foreign key into this set would
+// fail loudly instead of silently truncating).
+const demoTruncateSQL = `TRUNCATE TABLE risk_signals, matches, evidences, quarantine, vulnerabilities, raw_records, source_runs, components, assets, sources, audit_events, outbox`
 
 // runDemo dispatches `risksignal demo ...`.
 func runDemo(e *cmdEnv, args []string) int {
@@ -218,13 +223,14 @@ func (e *cmdEnv) cmdDemoRun(args []string) outcome {
 	return e.ok(demoRunResult{Run: run})
 }
 
-// cmdDemoReset truncates the I1b demo tables. It is dev-only: without the
+// cmdDemoReset truncates the demo tables (the I1b chain plus the I2
+// quarantine, which references it). It is dev-only: without the
 // explicit --yes confirmation the command fails as a validation error
 // before any configuration or database access.
 func (e *cmdEnv) cmdDemoReset(args []string) outcome {
 	fs := newFlagSet(e, "usage: risksignal demo reset\n"+
-		"  --yes  confirm the truncation of the I1b demo tables (dev-only)")
-	yes := fs.Bool("yes", false, "confirm the truncation of the I1b demo tables (dev-only)")
+		"  --yes  confirm the truncation of the demo tables (dev-only)")
+	yes := fs.Bool("yes", false, "confirm the truncation of the demo tables (dev-only)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return outcome{}
@@ -236,7 +242,7 @@ func (e *cmdEnv) cmdDemoReset(args []string) outcome {
 	}
 	if !*yes {
 		return e.fail(exitValidation, classValidation,
-			"demo reset truncates the I1b demo tables (sources, source runs, raw records, vulnerabilities, evidences, matches, risk signals, assets, components, audit events, outbox) — pass --yes to confirm")
+			"demo reset truncates the demo tables (sources, source runs, raw records, vulnerabilities, evidences, matches, risk signals, assets, components, audit events, outbox, quarantine) — pass --yes to confirm")
 	}
 
 	cfg, out := loadConfig(e)
@@ -261,7 +267,7 @@ func (e *cmdEnv) cmdDemoReset(args []string) outcome {
 	}
 
 	if e.format == formatText {
-		fmt.Fprintf(e.stdout, "truncated %d I1b table(s): %v\n", len(demoResetTables), demoResetTables)
+		fmt.Fprintf(e.stdout, "truncated %d demo table(s): %v\n", len(demoResetTables), demoResetTables)
 		fmt.Fprintln(e.stdout, "demo reset is a dev-only command; the next 'risksignal demo seed' rebuilds the demo state")
 	}
 	return e.ok(demoResetResult{Tables: demoResetTables})

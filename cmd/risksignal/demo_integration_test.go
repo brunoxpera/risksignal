@@ -3,7 +3,8 @@ package main
 // Integration tests of the WP-1b.05 demo path (DEV-019) at the composition
 // root: `demo seed` (register the synthetic source, seed the demo inventory
 // and run the synthetic source once), `demo run` (idempotent re-run) and
-// `demo reset` (dev-only truncation of the I1b tables) against a real,
+// `demo reset` (dev-only truncation of the demo tables — the I1b chain
+// plus quarantine, which since 00004 references it) against a real,
 // short-lived PostgreSQL.
 //
 // The test proves the exit criteria of WP-1b.05 end to end:
