@@ -51,6 +51,119 @@ func (q *Queries) GetVulnerabilityByCveID(ctx context.Context, cveID string) (Ge
 	return i, err
 }
 
+const listVulnerabilitiesByIDs = `-- name: ListVulnerabilitiesByIDs :many
+SELECT id, cve_id, cpe_config
+FROM vulnerabilities
+WHERE id IN (SELECT value::uuid FROM jsonb_array_elements_text($1::jsonb))
+ORDER BY id
+`
+
+type ListVulnerabilitiesByIDsRow struct {
+	ID        pgtype.UUID
+	CveID     string
+	CpeConfig []byte
+}
+
+// ListVulnerabilitiesByIDs returns the rows of the given vulnerability
+// ids, ascending by id — the recompute batch read: the pre-filtered
+// vulnerability id list of one matching.recompute job resolved into
+// statement-bearing rows (ids is a jsonb array of canonical uuid
+// strings). Vulnerabilities are never deleted, so a missing id is an
+// enqueuer bug the adapter reports as not-found. Rows without a
+// cpe_config block (I1b/KEV skeleton rows) come back with cpe_config NULL
+// and decompose into no statements — they resolve no candidates and
+// spawn no matching work.
+func (q *Queries) ListVulnerabilitiesByIDs(ctx context.Context, ids []byte) ([]ListVulnerabilitiesByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listVulnerabilitiesByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVulnerabilitiesByIDsRow
+	for rows.Next() {
+		var i ListVulnerabilitiesByIDsRow
+		if err := rows.Scan(&i.ID, &i.CveID, &i.CpeConfig); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVulnerabilitiesByPairs = `-- name: ListVulnerabilitiesByPairs :many
+
+SELECT DISTINCT v.id, v.cve_id, v.cpe_config
+FROM vulnerabilities v
+WHERE v.cpe_config IS NOT NULL
+  AND EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements($1::jsonb) AS p,
+           jsonb_array_elements_text(
+               jsonb_path_query_array(v.cpe_config, '$[*].nodes[*].cpeMatch[*].criteria')
+               || jsonb_path_query_array(v.cpe_config, '$.nodes[*].cpeMatch[*].criteria')
+           ) AS criteria
+      WHERE lower(split_part(criteria, ':', 4)) = lower(p->>0)
+        AND lower(split_part(criteria, ':', 5)) = lower(p->>1)
+  )
+ORDER BY v.id
+`
+
+type ListVulnerabilitiesByPairsRow struct {
+	ID        pgtype.UUID
+	CveID     string
+	CpeConfig []byte
+}
+
+// Matching-side reads of the vulnerabilities table (ARCH-003 §3/§5,
+// WP-3.09/DEV-065): the vulnerability-side reads of the matching runs —
+// the reverse pair read of matching.rebuild (ListVulnerabilitiesByPairs)
+// and the by-id batch read of matching.recompute (ListVulnerabilitiesByIDs).
+// Both return the row identity plus the raw NVD configurations block
+// (cpe_config) the adapter decomposes into the affected-product
+// statements of the run (the raw block is stored verbatim by the I2
+// ingest; the decomposition — the WP-3.07 statement decomposition — is
+// an adapter concern, never a stored column).
+// ListVulnerabilitiesByPairs returns the vulnerabilities whose stored
+// NVD configurations block (vulnerabilities.cpe_config, the verbatim raw
+// block of the I2 ingest) carries a cpeMatch criteria whose CPE 2.3
+// vendor/product pair equals one of the given raw normalised pairs
+// (pairs is a jsonb array of two-string arrays [vendor, product]) — the
+// reverse of the candidate pre-filter over the inventory-driven pair set
+// of a matching.rebuild component page (ADR-012, ARCH-003 §5: no
+// CVE-driven fan-out, the read is bounded by the component set). Each
+// row appears once, ordered ascending by id. The alias closure is the
+// caller's job — the run queries the closure-expanded pair set — so the
+// implementation matches the raw stored criteria pairs only (a CVE whose
+// raw pair is an alias variant is found through the closed query pair of
+// its canonical). The criteria comparison folds case like the stored
+// normalised keys; the returned cpe_config block is decomposed into the
+// affected-product statements by the adapter (rows the SQL filter lets
+// through on a raw criteria pair that the statement decomposition does
+// not render — a non-vulnerable or negated cpeMatch — decompose into no
+// pair and are intersected away by the run).
+func (q *Queries) ListVulnerabilitiesByPairs(ctx context.Context, pairs []byte) ([]ListVulnerabilitiesByPairsRow, error) {
+	rows, err := q.db.Query(ctx, listVulnerabilitiesByPairs, pairs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVulnerabilitiesByPairsRow
+	for rows.Next() {
+		var i ListVulnerabilitiesByPairsRow
+		if err := rows.Scan(&i.ID, &i.CveID, &i.CpeConfig); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertVulnerability = `-- name: UpsertVulnerability :one
 
 INSERT INTO vulnerabilities (cve_id, summary, description, published_at, modified_at, cvss, "references", cpe_config)
