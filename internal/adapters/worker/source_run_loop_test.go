@@ -86,7 +86,7 @@ func newLoopRelay(t *testing.T, db *jobDB, clk clock.Clock, srv *httptest.Server
 	svc := newJobService(db, clk)
 	jobs, err := NewSourceJobs(svc, &jobSourceRepo{db: db}, map[application.SourceType]application.SourcePort{
 		application.SourceTypeKEV: kev.New(srv.Client().Transport),
-	}, discardLogger())
+	}, nil, discardLogger())
 	if err != nil {
 		t.Fatalf("NewSourceJobs: %v", err)
 	}

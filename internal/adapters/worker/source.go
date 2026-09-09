@@ -52,8 +52,29 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/xpera/risksignal/internal/application"
+	"github.com/xpera/risksignal/internal/platform/metrics"
+)
+
+// Metric names of the source run-loop completion points (concept ch. 16.2,
+// ARCH-002 §5, DEV-043): the worker records one sample per completed
+// source.fetch/source.normalize pass on the in-process registry of
+// internal/platform/metrics — the substrate of the later /metrics endpoint
+// (I6). The values accumulate per process and are labelled per source
+// (source_id + source_type); `source status` reports the same ch. 16.2
+// names as current values measured from the database projection at read
+// time. source_data_age_seconds is not recorded here — the worker would
+// only ever observe the instant after a completed run; the durable data
+// age is derived from the projection (a scrape-time computation of the I6
+// endpoint / the status read).
+const (
+	metricSourceRunDurationSeconds = "source_run_duration_seconds" // duration of one completed pass
+	metricSourceRecordsTotal       = "source_records_total"        // raw documents stored by fetch passes
+	metricSourceErrorsTotal        = "source_errors_total"         // records isolated by normalize passes
+	metricSourceRateLimited        = "source_rate_limited"         // latest fetch outcome was rate-limited
+	metricEpssRowsTotal            = "epss_rows_total"             // rows loaded by epss normalize passes
 )
 
 // SourceJobRunner is the application surface the source job handlers drive
@@ -72,23 +93,27 @@ type SourceResolver interface {
 }
 
 // SourceJobs is the dispatch state of the two source job handlers: the
-// runner (application service), the source resolver and the type-keyed
-// adapter registry the composition root owns. It is safe for use from one
-// goroutine (the relay dispatches sequentially); handlers are registered at
-// wiring time, before the scheduler loop starts.
+// runner (application service), the source resolver, the type-keyed
+// adapter registry the composition root owns and the optional metrics
+// registry the handlers record their run-loop completion points on. It is
+// safe for use from one goroutine (the relay dispatches sequentially);
+// handlers are registered at wiring time, before the scheduler loop starts.
 type SourceJobs struct {
 	svc      SourceJobRunner
 	sources  SourceResolver
 	adapters map[application.SourceType]application.SourcePort
+	metrics  *metrics.Registry // nil: run-loop metrics recording disabled
 	logger   *slog.Logger
 }
 
 // NewSourceJobs assembles the source job handlers. svc and sources must not
 // be nil; a nil adapter registry is a programming error reported here (an
 // empty registry is allowed — a worker without sources simply dead-letters
-// their jobs with a clear error). A nil logger falls back to a silent
-// logger.
-func NewSourceJobs(svc SourceJobRunner, sources SourceResolver, adapters map[application.SourceType]application.SourcePort, logger *slog.Logger) (*SourceJobs, error) {
+// their jobs with a clear error). reg is the metrics registry the handlers
+// record their completion points on; a nil reg disables the run-loop
+// metrics recording (tests and registries that do not care). A nil logger
+// falls back to a silent logger.
+func NewSourceJobs(svc SourceJobRunner, sources SourceResolver, adapters map[application.SourceType]application.SourcePort, reg *metrics.Registry, logger *slog.Logger) (*SourceJobs, error) {
 	if svc == nil {
 		return nil, fmt.Errorf("worker: source jobs: runner must not be nil")
 	}
@@ -105,6 +130,7 @@ func NewSourceJobs(svc SourceJobRunner, sources SourceResolver, adapters map[app
 		svc:      svc,
 		sources:  sources,
 		adapters: adapters,
+		metrics:  reg,
 		logger:   logger,
 	}, nil
 }
@@ -138,8 +164,15 @@ func (j *SourceJobs) handleFetch(ctx context.Context, event ClaimedEvent) error 
 		return j.classify(err)
 	}
 
+	// The run-loop completion point of one fetch half (ch. 16.2): the
+	// pass duration is observed and the outcome recorded — a stored raw
+	// document advances source_records_total, a rate-limited response sets
+	// the source_rate_limited gauge (a non-rate-limited outcome clears it).
+	started := time.Now()
 	res, err := j.svc.FetchSource(ctx, application.FetchSourceInput{SourceID: payload.SourceID, Adapter: adapter})
+	labels := sourceMetricLabels(payload.SourceID, adapter.Type())
 	if err != nil {
+		j.observeFetchFailure(labels, started)
 		return j.classify(err)
 	}
 	if res.Meta.RateLimited {
@@ -150,6 +183,7 @@ func (j *SourceJobs) handleFetch(ctx context.Context, event ClaimedEvent) error 
 		// relay's lease governs the redelivery timing; honouring the exact
 		// Retry-After backoff is the per-job-type retry configuration of
 		// I2/I4.
+		j.observeFetchOutcome(labels, started, true, 0)
 		j.logger.Warn("source.fetch rate-limited; will retry after lease expiry",
 			slog.String("event_id", event.ID),
 			slog.String("source_id", payload.SourceID),
@@ -160,6 +194,7 @@ func (j *SourceJobs) handleFetch(ctx context.Context, event ClaimedEvent) error 
 	if res.Meta.NoChange {
 		// An unchanged full set is a successful no-op run (ch. 8.3): the
 		// job is delivered.
+		j.observeFetchOutcome(labels, started, false, 0)
 		j.logger.Debug("source.fetch no-change run delivered",
 			slog.String("event_id", event.ID),
 			slog.String("source_id", payload.SourceID),
@@ -170,8 +205,10 @@ func (j *SourceJobs) handleFetch(ctx context.Context, event ClaimedEvent) error 
 		// A fetch that neither errored, rate-limited nor reported no-change
 		// must have stored a raw record — anything else is a use-case
 		// contract violation and is permanent.
+		j.observeFetchOutcome(labels, started, false, 0)
 		return fmt.Errorf("source.fetch: run %s finished without a stored raw record and without a terminal no-op/rate-limit outcome", res.RunID)
 	}
+	j.observeFetchOutcome(labels, started, false, float64(res.Counters.Records))
 	return nil
 }
 
@@ -190,13 +227,98 @@ func (j *SourceJobs) handleNormalize(ctx context.Context, event ClaimedEvent) er
 		return j.classify(err)
 	}
 
-	if _, err := j.svc.NormalizeSource(ctx, application.NormalizeSourceInput{
+	started := time.Now()
+	res, err := j.svc.NormalizeSource(ctx, application.NormalizeSourceInput{
 		RawRecordID: payload.RawRecordID,
 		Adapter:     adapter,
-	}); err != nil {
+	})
+	labels := sourceMetricLabels(payload.SourceID, adapter.Type())
+	if err != nil {
+		j.observeNormalizeFailure(labels, started)
 		return j.classify(err)
 	}
+	// The completion point of one normalise half (ch. 16.2): the pass
+	// duration is observed and the committed counters recorded — the
+	// isolated records advance source_errors_total, and an EPSS pass
+	// advances epss_rows_total by the row count of the loaded daily set
+	// (the pass's normalized counter, ARCH-002 §2.3).
+	j.observeNormalizeOutcome(labels, started, res, adapter.Type() == application.SourceTypeEPSS)
 	return nil
+}
+
+// sourceMetricLabels is the label set of one source's metric series: the
+// source row id and its adapter type (identities only, no secrets).
+func sourceMetricLabels(sourceID string, sourceType application.SourceType) metrics.Labels {
+	return metrics.Labels{"source_id": sourceID, "source_type": string(sourceType)}
+}
+
+// observeFetchOutcome records the completion point of one fetch pass: the
+// pass duration, the source_rate_limited gauge (set by the outcome — a
+// rate-limited response sets it, every other outcome clears it) and the
+// records the pass stored (source_records_total, 0 for no-op and
+// rate-limited passes). All recording is skipped when the jobs run without
+// a metrics registry.
+func (j *SourceJobs) observeFetchOutcome(labels metrics.Labels, startedAt time.Time, rateLimited bool, storedRecords float64) {
+	if j.metrics == nil {
+		return
+	}
+	limited := 0.0
+	if rateLimited {
+		limited = 1
+	}
+	j.metrics.Seconds(metricSourceRunDurationSeconds, "duration of one completed source.fetch pass").With(labels).
+		Observe(time.Since(startedAt).Seconds())
+	j.metrics.Gauge(metricSourceRateLimited, "latest fetch outcome of the source was rate-limited").With(labels).
+		Set(limited)
+	if storedRecords > 0 {
+		j.metrics.Counter(metricSourceRecordsTotal, "raw documents the source's fetch passes stored in this process").With(labels).
+			Add(storedRecords)
+	}
+}
+
+// observeFetchFailure records the duration of a fetch pass that failed
+// (retried or dead-lettered): the duration is observed, the rate-limit
+// gauge cleared (a failed pass is not a rate-limited outcome) and no
+// records counter advanced.
+func (j *SourceJobs) observeFetchFailure(labels metrics.Labels, startedAt time.Time) {
+	if j.metrics == nil {
+		return
+	}
+	j.metrics.Seconds(metricSourceRunDurationSeconds, "duration of one completed source.fetch pass").With(labels).
+		Observe(time.Since(startedAt).Seconds())
+	j.metrics.Gauge(metricSourceRateLimited, "latest fetch outcome of the source was rate-limited").With(labels).
+		Set(0)
+}
+
+// observeNormalizeOutcome records the completion point of one normalise
+// pass: the pass duration and the committed counters — the isolated
+// records advance source_errors_total, and an EPSS pass (epss=true)
+// advances epss_rows_total by the loaded row count (the pass's normalized
+// counter).
+func (j *SourceJobs) observeNormalizeOutcome(labels metrics.Labels, startedAt time.Time, res application.NormalizeSourceResult, epss bool) {
+	if j.metrics == nil {
+		return
+	}
+	j.metrics.Seconds(metricSourceRunDurationSeconds, "duration of one completed source.normalize pass").With(labels).
+		Observe(time.Since(startedAt).Seconds())
+	if res.Counters.Errors > 0 {
+		j.metrics.Counter(metricSourceErrorsTotal, "records the source's normalize passes isolated in this process").With(labels).
+			Add(float64(res.Counters.Errors))
+	}
+	if epss && res.Counters.Normalized > 0 {
+		j.metrics.Counter(metricEpssRowsTotal, "rows the source's epss passes loaded in this process").With(labels).
+			Add(float64(res.Counters.Normalized))
+	}
+}
+
+// observeNormalizeFailure records the duration of a normalise pass that
+// failed (retried or dead-lettered); no counters advance.
+func (j *SourceJobs) observeNormalizeFailure(labels metrics.Labels, startedAt time.Time) {
+	if j.metrics == nil {
+		return
+	}
+	j.metrics.Seconds(metricSourceRunDurationSeconds, "duration of one completed source.normalize pass").With(labels).
+		Observe(time.Since(startedAt).Seconds())
 }
 
 // adapterFor resolves the adapter of a job's source row: the source row's

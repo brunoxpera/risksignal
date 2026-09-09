@@ -85,12 +85,14 @@ func (r *mapResolver) GetByID(ctx context.Context, id string) (application.Sourc
 var _ SourceResolver = (*mapResolver)(nil)
 
 // newJobHarness wires a relay with the two source job handlers registered
-// on a scripted runner, a resolver and an adapter registry.
+// on a scripted runner, a resolver and an adapter registry. The handlers
+// run without a metrics registry (the run-loop metrics tests construct
+// SourceJobs directly with one).
 func newJobHarness(t *testing.T, runner SourceJobRunner, resolver SourceResolver, adapters map[application.SourceType]application.SourcePort) (*Relay, *fakeStore, *scriptedRunner) {
 	t.Helper()
 	store := &fakeStore{}
 	relay := newRelay(t, store)
-	jobs, err := NewSourceJobs(runner, resolver, adapters, discardLogger())
+	jobs, err := NewSourceJobs(runner, resolver, adapters, nil, discardLogger())
 	if err != nil {
 		t.Fatalf("NewSourceJobs: %v", err)
 	}
@@ -358,13 +360,13 @@ func TestNormalizeHandlerClassifiesFailures(t *testing.T) {
 // are wiring errors reported at construction; RegisterHandlers rejects a
 // relay that already carries one of the two job types.
 func TestNewSourceJobsRejectsWiringErrors(t *testing.T) {
-	if _, err := NewSourceJobs(nil, kevResolver(), kevRegistry, nil); err == nil {
+	if _, err := NewSourceJobs(nil, kevResolver(), kevRegistry, nil, nil); err == nil {
 		t.Fatal("NewSourceJobs with a nil runner succeeded, want an error")
 	}
-	if _, err := NewSourceJobs(&scriptedRunner{}, nil, kevRegistry, nil); err == nil {
+	if _, err := NewSourceJobs(&scriptedRunner{}, nil, kevRegistry, nil, nil); err == nil {
 		t.Fatal("NewSourceJobs with a nil resolver succeeded, want an error")
 	}
-	if _, err := NewSourceJobs(&scriptedRunner{}, kevResolver(), nil, nil); err == nil {
+	if _, err := NewSourceJobs(&scriptedRunner{}, kevResolver(), nil, nil, nil); err == nil {
 		t.Fatal("NewSourceJobs with a nil registry succeeded, want an error")
 	}
 
@@ -372,7 +374,7 @@ func TestNewSourceJobsRejectsWiringErrors(t *testing.T) {
 	if err := relay.Register(application.EventTypeSourceFetch, func(ctx context.Context, event ClaimedEvent) error { return nil }); err != nil {
 		t.Fatalf("pre-register: %v", err)
 	}
-	jobs, err := NewSourceJobs(&scriptedRunner{}, kevResolver(), kevRegistry, nil)
+	jobs, err := NewSourceJobs(&scriptedRunner{}, kevResolver(), kevRegistry, nil, nil)
 	if err != nil {
 		t.Fatalf("NewSourceJobs: %v", err)
 	}

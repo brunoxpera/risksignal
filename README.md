@@ -274,6 +274,48 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
   in the CLI process. Without `--request-id` every invocation enqueues a
   new job (fresh request id); a fixed `--request-id` makes the trigger
   idempotent (dedupe key `source_id + request_id`).
+- `source list` — the source monitor projection of every registered source
+  (WP-2.08b, ARCH-002 §5): per source the latest run (status,
+  `finished_at`, committed counters, error), the data age, the degraded
+  flag, the open quarantine count and the current values of the ch. 16.2
+  source metrics. Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal source list
+
+  The data age is `clock.Now()` minus the last successful run's
+  `finished_at` — for an NVD source (incremental, last-modified cursor)
+  the committed `cursor_after.last_modified`, the end of the fetched data
+  window, is the basis. A source whose data age exceeds twice its planned
+  interval (derived from its schedule: `@hourly` → 1 h, `@daily` → 24 h)
+  is reported as `degraded` — a stale-source visibility flag that never
+  makes the application unready (ch. 16.3). Sources without a successful
+  run or without a planned interval are never degraded on this criterion.
+  The latest run's rate-limit flag is set when the run closed failed with
+  the stable `fetch.rate_limited` outcome (ch. 14.2) — rate limiting is
+  recorded, never a source technical error. The monitor is a read-only
+  projection over `sources`, `source_runs` and `quarantine`; its output
+  carries no secrets (the source config, which holds the `api_key_ref`
+  secret reference, is never selected or rendered).
+- `source status [<type|id>]` — the detailed monitor view of the named
+  source (all sources without an argument), rendered as a per-source
+  block; `--output json` is the automation form and reports the same
+  monitor payload as `source list` (the ordered `sources` array), so
+  automation can parse one schema for both. The per-source JSON carries
+  the current values of the ch. 16.2 source metrics under their metric
+  names — `source_run_duration_seconds` (latest run), `source_records_total`
+  and `source_errors_total` (latest run counters), `source_data_age_seconds`,
+  `source_rate_limited` and `epss_rows_total` (the row count of the latest
+  EPSS daily set) — as measured from the projection at read time. The
+  worker process additionally accumulates the same metric names
+  in-process at its run-loop completion points (the fetch/normalize
+  passes), the substrate of the dedicated HTTP `/metrics` exposition of a
+  later iteration (I6). Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal source status --output json
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal source status nvd
 - `help` — usage text.
 
 Exit codes are part of the automation contract — branch on them, never on
@@ -315,6 +357,11 @@ remains the default output; help output is always human-oriented. Examples:
     bin/risksignal demo seed --output json   # run id, status, counters, errors
     bin/risksignal demo run                  # idempotent re-run, no new signals
     bin/risksignal demo reset --yes          # dev-only, truncates the demo tables
+
+    RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+      bin/risksignal source list             # per-source monitor projection
+    RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+      bin/risksignal source status <id> --output json
 
     RISKSIGNAL_DATABASE_URL=postgres://u:p@127.0.0.1:1/rs \
       bin/risksignal diagnose connectivity; echo $?   # 6 (infrastructure)

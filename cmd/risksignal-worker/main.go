@@ -42,6 +42,7 @@ import (
 	"github.com/xpera/risksignal/internal/platform/clock"
 	"github.com/xpera/risksignal/internal/platform/config"
 	"github.com/xpera/risksignal/internal/platform/logging"
+	"github.com/xpera/risksignal/internal/platform/metrics"
 )
 
 // shutdownGracePeriod bounds the worker shutdown (WP-1a.10: clean shutdown
@@ -144,7 +145,11 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 		application.SourceTypeKEV:  kev.New(nil),
 		application.SourceTypeEPSS: epss.New(nil, clock.RealClock{}),
 	}
-	sourceJobs, err := worker.NewSourceJobs(svc, repo.NewSourceRepo(q), adapters, logger)
+	// The run-loop metrics registry (DEV-043, ch. 16.2): the source job
+	// handlers record every completed fetch/normalize pass on it — the
+	// in-process substrate of the /metrics exposition of the later
+	// iteration I6 (source status renders the durable projection).
+	sourceJobs, err := worker.NewSourceJobs(svc, repo.NewSourceRepo(q), adapters, metrics.New(), logger)
 	if err != nil {
 		return fmt.Errorf("configure source jobs: %w", err)
 	}
