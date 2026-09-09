@@ -39,6 +39,7 @@ type runSource struct {
 
 func (s *runSource) Type() application.SourceType { return s.typ }
 func (s *runSource) Plan() application.SourcePlan { return s.plan }
+func (s *runSource) NormalizerVersion() string    { return "test-normalizer-v1" }
 func (s *runSource) Fetch(ctx context.Context, in application.FetchInput) (application.FetchOutput, error) {
 	s.lastFetchIn = in
 	return s.fetchOut, s.fetchErr
@@ -181,8 +182,8 @@ func TestFetchSourceHappyPath(t *testing.T) {
 	if job.Type != application.EventTypeSourceNormalize {
 		t.Fatalf("job type = %q, want %q", job.Type, application.EventTypeSourceNormalize)
 	}
-	if job.DedupeKey != "source.normalize:"+raw.id {
-		t.Fatalf("job dedupe key = %q, want source.normalize:<raw_record_id>", job.DedupeKey)
+	if job.DedupeKey != "source.normalize:"+raw.id+":test-normalizer-v1" {
+		t.Fatalf("job dedupe key = %q, want source.normalize:<raw_record_id>:<normalizer_version>", job.DedupeKey)
 	}
 }
 

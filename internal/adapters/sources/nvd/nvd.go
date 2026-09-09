@@ -43,6 +43,12 @@ const (
 	userAgent               = "risksignal-nvd-adapter/0.1 (xpera riskSignal)"
 )
 
+// normalizerVersion is the compile-time normaliser version of the NVD
+// adapter (ARCH-002 §1, ch. 14.1): it stamps the source.normalize dedupe
+// key of every NVD raw record. Bumping it forces a fresh normalise pass of
+// previously fetched windows without dedupe.
+const normalizerVersion = "nvd-normalizer-v1"
+
 // Adapter implements application.SourcePort for the NVD source type
 // (ARCH-002 §1): Type() "nvd", incremental last-modified plan, the bounded
 // window fetch of §2.1 and the normalise half (normalize.go).
@@ -64,6 +70,9 @@ func New(rt http.RoundTripper) *Adapter {
 
 // Type identifies the adapter (ARCH-002 §1).
 func (*Adapter) Type() application.SourceType { return application.SourceTypeNVD }
+
+// NormalizerVersion identifies the adapter's normalise pass (ARCH-002 §1).
+func (*Adapter) NormalizerVersion() string { return normalizerVersion }
 
 // Plan is the static, operator-visible contract of the source (ARCH-002
 // §1/§5): an incremental source advancing the last-modified cursor on an

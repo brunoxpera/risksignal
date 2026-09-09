@@ -254,6 +254,18 @@ type SourcePort interface {
 	// Plan is the static, operator-visible contract of the source.
 	Plan() SourcePlan
 
+	// NormalizerVersion is the compile-time normaliser version of the
+	// adapter (ARCH-002 §1), e.g. "nvd-normalizer-v1": a deterministic
+	// stamp identifying one normalise pass of this adapter's payloads. The
+	// fetch use cases append it to the source.normalize job's dedupe key
+	// (raw_record_id + normalizer_version, ch. 14.1/ARCH-002 §5) so a
+	// bump — a normaliser change — forces a fresh normalise pass without
+	// dedupe against earlier passes (the mechanism behind the quarantine
+	// ready_for_retry reprocess, ARCH-002 §1/§4). The version is a
+	// compile-time constant per adapter; it never comes from a database
+	// row or a payload.
+	NormalizerVersion() string
+
 	// Fetch retrieves one slice and returns its unchanged payload plus
 	// technical metadata and the cursor to persist after a successful
 	// commit (ch. 8.1 steps 2–4). For full-set sources the cursor is nil

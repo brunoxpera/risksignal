@@ -28,6 +28,12 @@ const (
 	// a full output (NoChange false).
 	lastContentHashConfigKey = "last_content_hash"
 
+	// normalizerVersion is the compile-time normaliser version of the EPSS
+	// adapter (ARCH-002 §1, ch. 14.1): it stamps the source.normalize
+	// dedupe key of every EPSS raw record. Bumping it forces a fresh
+	// normalise pass of a stored daily file without dedupe.
+	normalizerVersion = "epss-normalizer-v1"
+
 	userAgent   = "risksignal-epss-adapter/0.1 (xpera riskSignal)"
 	dateLayout  = "2006-01-02"
 	fileNameFmt = "epss_scores-%s.csv.gz"
@@ -63,6 +69,9 @@ func New(rt http.RoundTripper, clk clock.Clock) *Adapter {
 
 // Type identifies the adapter (ARCH-002 §1).
 func (*Adapter) Type() application.SourceType { return application.SourceTypeEPSS }
+
+// NormalizerVersion identifies the adapter's normalise pass (ARCH-002 §1).
+func (*Adapter) NormalizerVersion() string { return normalizerVersion }
 
 // Plan is the static, operator-visible contract of the source (ARCH-002
 // §1/§2.3): a full-set source replacing the whole daily set on a daily

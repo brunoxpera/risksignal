@@ -8,39 +8,18 @@ import (
 	"time"
 )
 
-// Outbox and job vocabulary of the source run use cases (ARCH-002 §5,
-// WP-2.08 wires the relay handlers on these keys).
+// Job vocabulary of the source run use cases (ARCH-002 §5, WP-2.08 wires
+// the relay handlers on these keys). The full job contract — event types,
+// payload shapes and dedupe key builders of both source jobs — lives in
+// source_jobs.go; this block keeps the constants the fetch use case itself
+// writes to.
 const (
-	// EventTypeSourceNormalize is the outbox type of the source.normalize
-	// job a successful fetch enqueues. The enqueue is part of the fetch
-	// run's terminal commit — the ARCH-002 §6 fault seam: a failing outbox
-	// append rolls back the run completion, the stored raw record and the
-	// cursor with it (the cursor advances only after commit).
-	EventTypeSourceNormalize = "source.normalize"
-
-	// sourceNormalizeDedupePrefix prefixes the job's dedupe key:
-	// "source.normalize:<raw_record_id>" — one normalize job per raw record
-	// for the record's whole lifetime (the outbox UQ dedupe_key makes a
-	// repeated enqueue a no-op conflict, and WP-2.08 appends the adapter's
-	// normalizer_version to the key when it lands, per ARCH-002 §1/§5).
-	sourceNormalizeDedupePrefix = "source.normalize:"
-
 	// rateLimitedErrorText is the stable error text of a rate-limited run:
 	// the run closes failed (the cursor does not advance) but the failure is
 	// recorded as rate-limited, never as a source technical error (ch. 14.2,
 	// ARCH-002 §2.1) — the caller reads FetchMeta.RateLimited/RetryAfter.
 	rateLimitedErrorText = "fetch.rate_limited"
 )
-
-// sourceNormalizePayload is the outbox payload of a source.normalize job
-// (ARCH-002 §5): the raw record identity plus the fetch metadata the
-// normalise pass receives. It carries no secret: the API key reference is
-// resolved by the fetching adapter and never persisted (ch. 3.3, TR-013).
-type sourceNormalizePayload struct {
-	RawRecordID string    `json:"raw_record_id"`
-	SourceID    string    `json:"source_id"`
-	FetchedAt   time.Time `json:"fetched_at"`
-}
 
 // FetchSourceInput drives one fetch half (the worker's source.fetch job,
 // ARCH-002 §5): the resolved source row and the adapter that implements the
@@ -163,7 +142,7 @@ func (s *Service) FetchSource(ctx context.Context, in FetchSourceInput) (FetchSo
 		if err := s.sources.SetLastContentHash(ctx, tx, desc.ID, out.ContentHash); err != nil {
 			return err
 		}
-		return s.appendNormalizeJob(ctx, tx, rawID, desc.ID, out, now)
+		return s.appendNormalizeJob(ctx, tx, rawID, desc.ID, in.Adapter.NormalizerVersion(), out, now)
 	}); err != nil {
 		// Nothing of the terminal commit landed — close the run failed (no
 		// cursor) and surface the cause.
@@ -216,11 +195,14 @@ func (s *Service) openRun(ctx context.Context, sourceID string, cursorBefore jso
 }
 
 // appendNormalizeJob enqueues the source.normalize job of one raw record on
-// the caller's transaction (ARCH-002 §5). The outbox UQ on dedupe_key makes
-// the enqueue idempotent: a job already queued for the record is a conflict
-// and a no-op here, never an error.
-func (s *Service) appendNormalizeJob(ctx context.Context, tx Tx, rawID, sourceID string, out FetchOutput, now time.Time) error {
-	payload, err := json.Marshal(sourceNormalizePayload{
+// the caller's transaction (ARCH-002 §5). The job's dedupe key carries the
+// record identity and the adapter's compile-time normaliser version
+// (raw_record_id + normalizer_version, ch. 14.1 — source_jobs.go): a job
+// already queued for the record and version is a no-op conflict here, never
+// an error, while a bumped normaliser version forces a fresh pass without
+// dedupe.
+func (s *Service) appendNormalizeJob(ctx context.Context, tx Tx, rawID, sourceID, normalizerVersion string, out FetchOutput, now time.Time) error {
+	payload, err := json.Marshal(SourceNormalizeJobPayload{
 		RawRecordID: rawID,
 		SourceID:    sourceID,
 		FetchedAt:   out.FetchedAt,
@@ -231,12 +213,12 @@ func (s *Service) appendNormalizeJob(ctx context.Context, tx Tx, rawID, sourceID
 	err = s.outbox.Append(ctx, tx, OutboxEvent{
 		Type:        EventTypeSourceNormalize,
 		Payload:     payload,
-		DedupeKey:   sourceNormalizeDedupePrefix + rawID,
+		DedupeKey:   sourceNormalizeDedupeKey(rawID, normalizerVersion),
 		AvailableAt: now,
 		CreatedAt:   now,
 	})
 	if kind, ok := ErrorKindOf(err); ok && kind == KindConflict {
-		return nil // the job is already queued for this raw record
+		return nil // the job is already queued for this raw record and version
 	}
 	return err
 }

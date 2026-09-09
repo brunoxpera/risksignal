@@ -9,13 +9,16 @@
 // of internal/adapters/worker — a heartbeat and one scheduler run per
 // worker.interval, where the run is the outbox relay drain of ARCH-001 §2:
 // the loop claims the due outbox batch (lease-based, SKIP LOCKED),
-// dispatches every row to the handler registered for its type (in I1b: the
-// signal.created sink, a no-op standing in for the I4 notification adapter)
-// and acks or dead-letters each row. Worker health records the heartbeat
-// and the last successful run (concept ch. 16.3) and time is read through
-// the injectable clock port of internal/platform/clock (ch. 7.2, TR-009).
-// SIGINT/SIGTERM shuts the loop down cleanly within a grace period. Further
-// job types land in later work packages (ch. 14).
+// dispatches every row to the handler registered for its type and acks or
+// dead-letters each row. WP-2.08 (DEV-042) extends the dispatch registry
+// with the source.run job types of ARCH-002 §5 — source.fetch and
+// source.normalize — driven through the application service on the same
+// database pool (the signal.created sink of I1b stays registered). Worker
+// health records the heartbeat and the last successful run (concept ch.
+// 16.3) and time is read through the injectable clock port of
+// internal/platform/clock (ch. 7.2, TR-009). SIGINT/SIGTERM shuts the loop
+// down cleanly within a grace period. Further job types land in later work
+// packages (ch. 14).
 package main
 
 import (
@@ -30,6 +33,9 @@ import (
 	"github.com/xpera/risksignal/internal/adapters/postgres"
 	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
 	"github.com/xpera/risksignal/internal/adapters/postgres/repo"
+	"github.com/xpera/risksignal/internal/adapters/sources/epss"
+	"github.com/xpera/risksignal/internal/adapters/sources/kev"
+	"github.com/xpera/risksignal/internal/adapters/sources/nvd"
 	"github.com/xpera/risksignal/internal/adapters/worker"
 	"github.com/xpera/risksignal/internal/application"
 	"github.com/xpera/risksignal/internal/platform/buildinfo"
@@ -93,14 +99,57 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	// The outbox relay (WP-1b.06, ARCH-001 §2) executes one drain per
 	// scheduler cycle. Its dispatch registry carries the I1b signal.created
 	// sink — a no-op standing in for the I4 notification adapter, which
-	// grows onto the same registry key in I4 (ch. 14.3 notification.deliver)
-	// alongside the job types of I2/I3.
-	relay, err := worker.NewRelay(repo.NewOutboxRelay(gen.New(pool)), logger)
+	// grows onto the same registry key in I4 (ch. 14.3
+	// notification.deliver) — and, since WP-2.08 (DEV-042, ARCH-002 §5),
+	// the source.run job types: source.fetch and source.normalize, driven
+	// through the application service below.
+	q := gen.New(pool)
+	relay, err := worker.NewRelay(repo.NewOutboxRelay(q), logger)
 	if err != nil {
 		return fmt.Errorf("configure outbox relay: %w", err)
 	}
 	if err := relay.Register(application.EventTypeSignalCreated, worker.SignalCreatedSink(logger)); err != nil {
 		return fmt.Errorf("configure outbox relay: %w", err)
+	}
+
+	// The source job handlers (ARCH-002 §5) run on the application service
+	// — the same composition the server and CLI roots use, with the real
+	// clock and postgres.WithTx as the transaction boundary — and on the
+	// type-keyed adapter registry of the I2 HTTP sources. The adapters are
+	// endpoint-less on purpose: the base URL of every fetch arrives through
+	// the resolved sources row (ARCH-002 §1), so one adapter instance per
+	// type serves every configured source of that type, and the standard
+	// transports reach the public endpoints. The pool is lazy (WP-1a.05):
+	// a database that is down at startup must not stop the worker — the
+	// heartbeat needs no database and every database-touching step fails
+	// per cycle until the pool recovers on its own.
+	svc := application.NewService(application.ServiceDeps{
+		Signals:         repo.NewSignalRepo(q),
+		Audit:           repo.NewAuditRepo(q),
+		Outbox:          repo.NewOutboxRepo(q),
+		Vulnerabilities: repo.NewVulnerabilityRepo(q),
+		Matches:         repo.NewMatchRepo(q),
+		SourceRuns:      repo.NewSourceRunRepo(q),
+		RawRecords:      repo.NewRawRecordRepo(q),
+		Sources:         repo.NewSourceRepo(q),
+		Quarantine:      repo.NewQuarantineRepo(q),
+		Components:      repo.NewComponentRepo(q),
+		Clock:           clock.RealClock{},
+		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
+			return postgres.WithTx(ctx, pool, fn)
+		},
+	})
+	adapters := map[application.SourceType]application.SourcePort{
+		application.SourceTypeNVD:  nvd.New(nil),
+		application.SourceTypeKEV:  kev.New(nil),
+		application.SourceTypeEPSS: epss.New(nil, clock.RealClock{}),
+	}
+	sourceJobs, err := worker.NewSourceJobs(svc, repo.NewSourceRepo(q), adapters, logger)
+	if err != nil {
+		return fmt.Errorf("configure source jobs: %w", err)
+	}
+	if err := sourceJobs.RegisterHandlers(relay); err != nil {
+		return fmt.Errorf("configure source jobs: %w", err)
 	}
 
 	health := worker.NewHealth()

@@ -33,6 +33,12 @@ const (
 // "kev-2026-09-09" (ARCH-002 §2.2: the catalog version/date).
 const externalIDPrefix = "kev-"
 
+// normalizerVersion is the compile-time normaliser version of the KEV
+// adapter (ARCH-002 §1, ch. 14.1): it stamps the source.normalize dedupe
+// key of every KEV raw record. Bumping it forces a fresh normalise pass of
+// a stored catalog without dedupe.
+const normalizerVersion = "kev-normalizer-v1"
+
 // Adapter implements application.SourcePort for the KEV source type
 // (ARCH-002 §1): Type() "kev", full-set plan without a cursor, the
 // versioned catalog fetch of §2.2 and the normalise half (normalize.go).
@@ -54,6 +60,9 @@ func New(rt http.RoundTripper) *Adapter {
 
 // Type identifies the adapter (ARCH-002 §1).
 func (*Adapter) Type() application.SourceType { return application.SourceTypeKEV }
+
+// NormalizerVersion identifies the adapter's normalise pass (ARCH-002 §1).
+func (*Adapter) NormalizerVersion() string { return normalizerVersion }
 
 // Plan is the static, operator-visible contract of the source (ARCH-002
 // §1/§2.2): a full-set source replacing the whole catalog on a daily

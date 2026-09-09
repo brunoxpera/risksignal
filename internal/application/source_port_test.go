@@ -32,6 +32,8 @@ func (f *fakeSource) Type() application.SourceType { return f.typ }
 
 func (f *fakeSource) Plan() application.SourcePlan { return f.plan }
 
+func (f *fakeSource) NormalizerVersion() string { return "test-normalizer-v1" }
+
 func (f *fakeSource) Fetch(ctx context.Context, in application.FetchInput) (application.FetchOutput, error) {
 	f.fetchIn = in
 	return f.fetchOut, nil
