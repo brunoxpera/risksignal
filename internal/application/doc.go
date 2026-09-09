@@ -6,14 +6,20 @@
 // contract — SourcePort and its source type/kind/cursor vocabulary,
 // fetch/normalise input-output types and the NormalizeSink/RecordError
 // seam (source_port.go) — the port the I2 NVD/KEV/EPSS adapters implement.
-// No use case consumes the port before WP-2.04 (DEV-030).
+// WP-2.04 (DEV-030) adds the use cases that drive the port: FetchSource /
+// NormalizeSource / RunSource (the fetch and normalise halves of a source
+// run with cursor-on-commit bookkeeping, source_port.go's run companions
+// fetch_source.go / normalize_source.go / run_source.go) and the
+// quarantine review commands QuarantineList / QuarantineAck /
+// QuarantineReprocess (quarantine.go, ARCH-002 §4 state machine with one
+// audit event per transition).
 //
 // The layer depends only on the domain and on platform infrastructure
 // (.go-arch-lint.yml): every persistence concern sits behind the repository
 // ports declared in ports.go and is implemented in internal/adapters/postgres.
 // The transaction boundary is a port too — TxRunner, wired to the adapters'
 // postgres.WithTx at the composition root — so the use cases can run the
-// three writes of a command on one real transaction without importing any
+// writes of a command on one real transaction without importing any
 // adapter. Errors are classified per concept ch. 5.2 (validation, conflict,
 // not found, infrastructure) as typed *Error values.
 package application
