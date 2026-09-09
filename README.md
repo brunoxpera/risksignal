@@ -262,10 +262,11 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
   the counted error plus the run counters are part of the result.
 - `demo run` — re-run the synthetic source against the seeded inventory:
   an idempotent no-op that creates no duplicate rows and no new signals.
-- `demo reset --yes` — truncate the I1b demo tables (sources, source runs,
-  raw records, vulnerabilities, evidences, matches, risk signals, assets,
-  components, audit events, outbox). Dev-only: requires the explicit
-  `--yes` and never prompts; the next `demo seed` rebuilds the demo state.
+- `demo reset --yes` — truncate the demo tables (sources, source runs,
+  raw records, vulnerabilities, evidences, matches, risk signals,
+  quarantine, assets, components, audit events, outbox). Dev-only: requires
+  the explicit `--yes` and never prompts; the next `demo seed` rebuilds the
+  demo state.
 - `source run <type|id> [--request-id <id>]` — the manual trigger of the
   source.run loop (WP-2.08, ARCH-002 §5): enqueue one `source.fetch` job
   for the named source (resolved by id, or by type when exactly one source

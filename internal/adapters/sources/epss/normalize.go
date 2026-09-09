@@ -69,8 +69,10 @@ func (*Adapter) Normalize(ctx context.Context, in application.NormalizeInput, si
 		// sources (they never read the field), but the EPSS adapter
 		// requires its writer: without it nothing would load and the run
 		// would complete as if the set had been replaced — an
-		// infrastructure error instead (the wiring that populates
-		// NormalizeInput.EpssBulk is a source-run completion follow-up).
+		// infrastructure error instead. The DEV-041 source-run wiring
+		// populates NormalizeInput.EpssBulk for epss sources through the
+		// pass boundary (source_pass.go), so production runs never take
+		// this branch.
 		return res, fmt.Errorf("epss: normalize: the source-run wiring must hand the EPSS bulk writer (NormalizeInput.EpssBulk); nothing was loaded")
 	}
 

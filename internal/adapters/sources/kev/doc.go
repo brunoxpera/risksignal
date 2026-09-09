@@ -24,11 +24,11 @@
 // FetchMeta.NoChange, counters all 0). The adapter is persistence-free and
 // never reads the database: it compares the fetched document's hash
 // against the content hash the fetch use case hands back through
-// sources.config.last_content_hash (maintained after each committed run;
-// DEV-032 wiring follow-up — absent today, every fetch returns a full
-// output and the no-op signal activates with that wiring). NoChange is
-// signalled via FetchMeta.NoChange on FetchOutput; the payload and its
-// hash are returned either way.
+// sources.config.last_content_hash (maintained after every committed
+// fetch, DEV-041). A source without a committed fetch yet (or with an
+// empty stored hash) returns a full output — NoChange stays false.
+// NoChange is signalled via FetchMeta.NoChange on FetchOutput; the payload
+// and its hash are returned either way.
 //
 // # Rate limits
 //
