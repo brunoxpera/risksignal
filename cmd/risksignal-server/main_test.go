@@ -16,12 +16,16 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +37,36 @@ import (
 	"github.com/xpera/risksignal/internal/platform/buildinfo"
 	"github.com/xpera/risksignal/internal/platform/config"
 )
+
+// embeddedVersions returns the versions of the embedded migration files in
+// application order (the leading number of each <version>_<name>.sql file
+// name). The migration assertions treat the embedded set as the source of
+// truth instead of a hard-coded count, so they stay correct as the set grows.
+func embeddedVersions(t *testing.T) []int64 {
+	t.Helper()
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatalf("read embedded migrations: %v", err)
+	}
+	versions := make([]int64, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".sql") {
+			continue
+		}
+		prefix, _, ok := strings.Cut(name, "_")
+		if !ok {
+			t.Fatalf("migration file %q has no version prefix", name)
+		}
+		v, err := strconv.ParseInt(prefix, 10, 64)
+		if err != nil {
+			t.Fatalf("migration file %q: invalid version prefix: %v", name, err)
+		}
+		versions = append(versions, v)
+	}
+	sort.Slice(versions, func(i, j int) bool { return versions[i] < versions[j] })
+	return versions
+}
 
 // defaultTestDBURL points at the compose db service (compose.yaml, WP-1a.03).
 const defaultTestDBURL = "postgres://risksignal:risksignal@127.0.0.1:5432/risksignal?sslmode=disable"
@@ -179,8 +213,8 @@ func TestHealthReadyWithMigratedDatabase(t *testing.T) {
 	if err := runner.Close(); err != nil {
 		t.Fatalf("close migration runner: %v", err)
 	}
-	if len(res.Applied) != 1 {
-		t.Fatalf("fresh migrate applied %d migration(s), want 1", len(res.Applied))
+	if len(res.Applied) != len(embeddedVersions(t)) {
+		t.Fatalf("fresh migrate applied %d migration(s), want the full embedded set", len(res.Applied))
 	}
 
 	pool, err := postgres.NewPool(ctx, dbURL)

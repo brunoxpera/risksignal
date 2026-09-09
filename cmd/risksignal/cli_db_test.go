@@ -10,6 +10,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -30,8 +31,10 @@ func TestCLIMigrateExitCodesAgainstRealDatabase(t *testing.T) {
 	dbURL := newTestDB(t)
 	env := cliDBEnv(dbURL)
 
-	// A fresh database migrates cleanly: exit 0 with exactly one applied
-	// migration in the JSON result.
+	// A fresh database migrates cleanly: exit 0 with every embedded migration
+	// applied, in version order (the applied set is derived from the embedded
+	// migration files, not hard-coded — see embeddedVersions in main_test.go).
+	want := embeddedVersions(t)
 	code, stdout, stderr := runCLI(t, env, "maintenance", "migrate", "--output", "json")
 	if code != exitOK {
 		t.Fatalf("fresh migrate exit code = %d, want 0 (stderr: %s)", code, stderr)
@@ -42,23 +45,28 @@ func TestCLIMigrateExitCodesAgainstRealDatabase(t *testing.T) {
 	}
 	var res migrateResult
 	decodeJSONStrict(t, string(envJSON.Result), &res)
-	if res.DryRun || res.Verified != 0 || len(res.Applied) != 1 || res.Applied[0].Version != 1 ||
+	if res.DryRun || res.Verified != 0 || len(res.Applied) != len(want) ||
 		len(res.Pending) != 0 || len(res.Recovered) != 0 {
-		t.Fatalf("fresh migrate result = %+v, want exactly one applied migration (version 1)", res)
+		t.Fatalf("fresh migrate result = %+v, want exactly %d applied migrations", res, len(want))
+	}
+	for i, v := range want {
+		if res.Applied[i].Version != v {
+			t.Fatalf("fresh migrate applied %+v, want versions %v in order", res.Applied, want)
+		}
 	}
 	if res.Applied[0].DurationMS < 0 || res.Applied[0].Path == "" {
 		t.Fatalf("applied migration %+v, want path and non-negative duration", res.Applied[0])
 	}
 
-	// A rerun is a no-op: exit 0, one verified checksum, nothing applied.
+	// A rerun is a no-op: exit 0, every checksum verified, nothing applied.
 	code, stdout, stderr = runCLI(t, env, "maintenance", "migrate", "--output", "json")
 	if code != exitOK {
 		t.Fatalf("rerun exit code = %d, want 0 (stderr: %s)", code, stderr)
 	}
 	res = migrateResult{}
 	decodeJSONStrict(t, string(decodeEnvelope(t, stdout).Result), &res)
-	if res.Verified != 1 || len(res.Applied) != 0 || len(res.Pending) != 0 {
-		t.Fatalf("rerun result = %+v, want one verified checksum and nothing to do", res)
+	if res.Verified != len(want) || len(res.Applied) != 0 || len(res.Pending) != 0 {
+		t.Fatalf("rerun result = %+v, want %d verified checksums and nothing to do", res, len(want))
 	}
 
 	// A dry run on the migrated database verifies and writes nothing.
@@ -68,8 +76,8 @@ func TestCLIMigrateExitCodesAgainstRealDatabase(t *testing.T) {
 	}
 	res = migrateResult{}
 	decodeJSONStrict(t, string(decodeEnvelope(t, stdout).Result), &res)
-	if !res.DryRun || res.Verified != 1 || len(res.Applied) != 0 || len(res.Pending) != 0 {
-		t.Fatalf("dry run result = %+v, want read-only verification of one checksum", res)
+	if !res.DryRun || res.Verified != len(want) || len(res.Applied) != 0 || len(res.Pending) != 0 {
+		t.Fatalf("dry run result = %+v, want read-only verification of %d checksums", res, len(want))
 	}
 
 	// The text form of the same command stays human-readable.
@@ -77,7 +85,7 @@ func TestCLIMigrateExitCodesAgainstRealDatabase(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("text dry run exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout, "verified checksums of 1 applied migration(s); nothing to do") {
+	if !strings.Contains(stdout, fmt.Sprintf("verified checksums of %d applied migration(s); nothing to do", len(want))) {
 		t.Fatalf("text dry run stdout = %q", stdout)
 	}
 
