@@ -316,6 +316,61 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
         bin/risksignal source status --output json
       RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
         bin/risksignal source status nvd
+- `quarantine list [--status <status>] [--source <type|id>] [--limit <n>]`
+  — the quarantine working list (ARCH-002 §4, concept ch. 8.6): every
+  record the I2 normalisers isolated because it failed to parse or
+  normalise, oldest isolation first. Each row carries the isolation facts
+  — `position` within the raw payload (byte offset, line number or JSON
+  pointer), the stable `reason` (`error_code` + human message, ch. 5.2)
+  and the `payload_hash` (the SHA-256 of the offending record/slice, so
+  the record stays re-addressable on reprocess) — plus the machine state
+  (`status` new | acknowledged | ready_for_retry | resolved, `attempts`),
+  `created_at` and the source attribution (id, type, name). `--status`
+  and `--source` filter the list (the source filter accepts the source id
+  or its type when exactly one source of that type is registered, the
+  `source run` resolution); `--limit` bounds the page (default 100). The
+  row content is operator-visible failure data — never a secret. Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal quarantine list
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal quarantine list --status new --source kev --output json
+- `quarantine ack <id> [--note <text>]` — record the operator review of
+  one isolated record (new -> acknowledged, ARCH-002 §4): the row records
+  the reviewer (`acknowledged_by`), `acknowledged_at` and the review
+  note, and the transition writes its `quarantine.acknowledged` audit
+  event atomically with the state change (one command, one transaction,
+  ch. 5.1; the ch. 13.2 quarantine transitions are auditable). The
+  reviewer is the I2 system principal `operator` — the CLI takes no
+  identity input before user principals land (I5a). The machine guards
+  hold: only a `new` row can be acknowledged; a reviewed, retryable or
+  resolved row is rejected (exit 2) without a write and without an audit
+  event. Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal quarantine ack <id> --note "reviewed: parser fix shipped"
+- `quarantine reprocess <id>` — re-run the source's normaliser over the
+  raw record the row was isolated from, at the current adapter of the
+  row's source type (the compiled-in `normalizer_version`, ARCH-002 §1):
+  the stored raw record bytes are read back and normalised again,
+  streaming through the persistence sink on the command's transaction. A
+  clean pass resolves the row (-> `resolved`, `resolved_at`) and links
+  the new domain object the pass materialised via
+  `resolved_vulnerability_id`, writing the `quarantine.resolved` audit
+  event; a pass that still isolates the offending record increments
+  `attempts`, keeps the row retryable and writes the
+  `quarantine.reprocessed` audit event — that outcome is an audited state
+  change, never an error, so the command exits 0 with `"resolved":
+  false`. State change, domain-object writes and audit event commit
+  atomically (ch. 5.1); an infrastructure failure of the pass rolls
+  everything back and exits 6. A resolved row is terminal. Reprocessing
+  an EPSS row would reload the whole daily set (the EPSS full-set path
+  replaces `epss_current` whole, ADR-013), which the quarantine command
+  deliberately does not do — re-run the source instead
+  (`source run epss`). Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal quarantine reprocess <id> --output json
 - `help` — usage text.
 
 Exit codes are part of the automation contract — branch on them, never on
@@ -362,6 +417,13 @@ remains the default output; help output is always human-oriented. Examples:
       bin/risksignal source list             # per-source monitor projection
     RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
       bin/risksignal source status <id> --output json
+
+    RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+      bin/risksignal quarantine list --status new   # the open isolations
+    RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+      bin/risksignal quarantine ack <id> --note "reviewed"
+    RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+      bin/risksignal quarantine reprocess <id> --output json
 
     RISKSIGNAL_DATABASE_URL=postgres://u:p@127.0.0.1:1/rs \
       bin/risksignal diagnose connectivity; echo $?   # 6 (infrastructure)

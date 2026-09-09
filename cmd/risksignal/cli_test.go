@@ -256,6 +256,39 @@ func TestRunSourceDispatchValidation(t *testing.T) {
 	}
 }
 
+func TestRunQuarantineDispatchValidation(t *testing.T) {
+	// Missing subcommand.
+	code, stdout, stderr := runCLI(t, cliValidEnv(), "quarantine")
+	assertValidationFailure(t, code, stdout, stderr, "missing subcommand")
+
+	// Unknown subcommand (text and json).
+	code, stdout, stderr = runCLI(t, cliValidEnv(), "quarantine", "bogus")
+	assertValidationFailure(t, code, stdout, stderr, "unknown subcommand")
+
+	code, stdout, _ = runCLI(t, cliValidEnv(), "quarantine", "bogus", "--output", "json")
+	if code != exitValidation {
+		t.Fatalf("exit code = %d, want %d", code, exitValidation)
+	}
+	env := decodeEnvelope(t, stdout)
+	if env.Command != "quarantine bogus" || env.Error == nil || env.Error.Class != classValidation {
+		t.Fatalf("envelope = %+v, want validation error for quarantine bogus", env)
+	}
+
+	// The subcommands are documented in the usage text.
+	code, stdout, stderr = runCLI(t, nil, "help")
+	if code != exitOK {
+		t.Fatalf("help: code %d stderr %q", code, stderr)
+	}
+	for _, piece := range []string{"quarantine list", "quarantine ack <id>", "quarantine reprocess <id>"} {
+		if !strings.Contains(stdout, piece) {
+			t.Errorf("help: stdout does not contain %q", piece)
+		}
+	}
+	if stderr != "" {
+		t.Fatalf("help: stderr = %q, want empty", stderr)
+	}
+}
+
 func TestRunArgumentValidation(t *testing.T) {
 	// Validation failures must not depend on the configuration: argument
 	// problems are reported before any config load.
@@ -271,6 +304,16 @@ func TestRunArgumentValidation(t *testing.T) {
 		{"source run missing arg", []string{"source", "run"}, "takes exactly one argument"},
 		{"source run extra args", []string{"source", "run", "a", "b"}, "takes exactly one argument"},
 		{"source run unknown flag", []string{"source", "run", "--bogus", "nvd"}, "flag provided but not defined"},
+		{"quarantine ack missing arg", []string{"quarantine", "ack"}, "takes exactly one argument"},
+		{"quarantine ack extra args", []string{"quarantine", "ack", "a", "b"}, "takes exactly one argument"},
+		{"quarantine ack unknown flag", []string{"quarantine", "ack", "--bogus", "x"}, "flag provided but not defined"},
+		{"quarantine reprocess missing arg", []string{"quarantine", "reprocess"}, "takes exactly one argument"},
+		{"quarantine reprocess extra args", []string{"quarantine", "reprocess", "a", "b"}, "takes exactly one argument"},
+		{"quarantine reprocess unknown flag", []string{"quarantine", "reprocess", "--bogus", "x"}, "flag provided but not defined"},
+		{"quarantine list extra arg", []string{"quarantine", "list", "extra"}, "unexpected argument"},
+		{"quarantine list unknown flag", []string{"quarantine", "list", "--bogus"}, "flag provided but not defined"},
+		{"quarantine list invalid status", []string{"quarantine", "list", "--status", "bogus"}, "invalid QuarantineStatus"},
+		{"quarantine list zero limit", []string{"quarantine", "list", "--limit", "0"}, "--limit must be >= 1"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
