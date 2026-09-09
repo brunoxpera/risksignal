@@ -13,32 +13,44 @@ import (
 
 const completeSourceRun = `-- name: CompleteSourceRun :one
 UPDATE source_runs
-SET finished_at = $1,
-    status      = $2,
-    counters    = $3,
-    error       = $4
-WHERE id = $5
+SET finished_at  = $1,
+    status       = $2,
+    counters     = $3,
+    error        = $4,
+    cursor_after = CASE WHEN $2 = 'succeeded' THEN $5::jsonb ELSE NULL END
+WHERE id = $6
 RETURNING id, source_id, started_at, finished_at, status, counters, error, cursor_before, cursor_after
 `
 
 type CompleteSourceRunParams struct {
-	FinishedAt pgtype.Timestamptz
-	Status     string
-	Counters   []byte
-	Error      pgtype.Text
-	ID         pgtype.UUID
+	FinishedAt  pgtype.Timestamptz
+	Status      string
+	Counters    []byte
+	Error       pgtype.Text
+	CursorAfter []byte
+	ID          pgtype.UUID
 }
 
 // CompleteSourceRun closes a run with its terminal state: status succeeded
 // or failed, finished_at, the committed counters and the error text of a
 // failed run (concept ch. 8.1 step 5: the E1 error is counted and recorded,
 // it does not abort the other cases).
+//
+// cursor_after is the cursor committed with a successful run only (ch. 6.1,
+// ARCH-002 §1): the CASE guard writes the caller's cursor_after when the
+// terminal status is 'succeeded' and NULL otherwise, so a failed run can
+// never advance the cursor — the next run starts again from cursor_before.
+// The caller passes the cursor value of a succeeded run and NULL (or the
+// same value, which is ignored) of a failed one. The ::jsonb cast pins the
+// parameter's type — inside a CASE the planner would otherwise infer text
+// for the untyped parameter and the jsonb assignment would fail.
 func (q *Queries) CompleteSourceRun(ctx context.Context, arg CompleteSourceRunParams) (SourceRun, error) {
 	row := q.db.QueryRow(ctx, completeSourceRun,
 		arg.FinishedAt,
 		arg.Status,
 		arg.Counters,
 		arg.Error,
+		arg.CursorAfter,
 		arg.ID,
 	)
 	var i SourceRun
@@ -58,25 +70,64 @@ func (q *Queries) CompleteSourceRun(ctx context.Context, arg CompleteSourceRunPa
 
 const createSourceRun = `-- name: CreateSourceRun :one
 
-INSERT INTO source_runs (source_id, started_at, status)
-VALUES ($1, $2, 'running')
+INSERT INTO source_runs (source_id, started_at, status, cursor_before)
+VALUES ($1, $2, 'running', $3)
 RETURNING id, source_id, started_at, finished_at, status, counters, error, cursor_before, cursor_after
 `
 
 type CreateSourceRunParams struct {
-	SourceID  pgtype.UUID
-	StartedAt pgtype.Timestamptz
+	SourceID     pgtype.UUID
+	StartedAt    pgtype.Timestamptz
+	CursorBefore []byte
 }
 
-// source_runs lifecycle writes (ARCH-001 §1, WP-1b.02).
+// source_runs lifecycle writes (ARCH-001 §1, WP-1b.02; cursor bookkeeping
+// ARCH-002 §1/§3, WP-2.03b).
 //
 // Exactly one end state per run; counters advance only on success
-// (concept ch. 6.1 SourceRun, ARCH-001 §3 step 1 and 6).
+// (concept ch. 6.1 SourceRun, ARCH-001 §3 step 1 and 6). From migration
+// 00004 on a run also carries the I2 cursor bookkeeping (ch. 7.1):
+// cursor_before is the cursor value when the run opened, cursor_after the
+// cursor committed with a successful run. The cursor advances only after
+// commit — cursor_after is written exclusively by the success path of
+// CompleteSourceRun and stays NULL on a failed run, so a failure leaves the
+// source cursor where it was and the next run re-fetches the same window
+// (ARCH-002 §1/§2.1, ch. 8.2). Full-set sources (KEV, EPSS) and the I1b
+// synthetic source have no cursor and leave both fields NULL.
 // CreateSourceRun opens a run with status 'running' and the default empty
 // counters. started_at comes from the injected clock (ch. 7.2) — never the
-// database clock — so runs are reproducible in tests.
+// database clock — so runs are reproducible in tests. cursor_before records
+// the source cursor value the run opened from (the value the fetch half
+// read off sources.cursor before fetching); NULL for full-set sources and
+// the cursor-less I1b synthetic source.
 func (q *Queries) CreateSourceRun(ctx context.Context, arg CreateSourceRunParams) (SourceRun, error) {
-	row := q.db.QueryRow(ctx, createSourceRun, arg.SourceID, arg.StartedAt)
+	row := q.db.QueryRow(ctx, createSourceRun, arg.SourceID, arg.StartedAt, arg.CursorBefore)
+	var i SourceRun
+	err := row.Scan(
+		&i.ID,
+		&i.SourceID,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Status,
+		&i.Counters,
+		&i.Error,
+		&i.CursorBefore,
+		&i.CursorAfter,
+	)
+	return i, err
+}
+
+const getSourceRunByID = `-- name: GetSourceRunByID :one
+SELECT id, source_id, started_at, finished_at, status, counters, error, cursor_before, cursor_after
+FROM source_runs
+WHERE id = $1
+`
+
+// GetSourceRunByID loads one run with its cursor fields — the read the
+// source monitor and any caller that needs the committed cursor_after /
+// opened cursor_before of a run starts from.
+func (q *Queries) GetSourceRunByID(ctx context.Context, id pgtype.UUID) (SourceRun, error) {
+	row := q.db.QueryRow(ctx, getSourceRunByID, id)
 	var i SourceRun
 	err := row.Scan(
 		&i.ID,
