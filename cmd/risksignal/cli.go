@@ -174,6 +174,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runDemo(e, commandArgs[1:])
 	case "source":
 		return runSource(e, commandArgs[1:])
+	case "quarantine":
+		return runQuarantine(e, commandArgs[1:])
 	default:
 		return e.emit(commandArgs[0], e.fail(exitValidation, classValidation,
 			"unknown command (run 'risksignal help' for usage)"))
@@ -283,6 +285,13 @@ commands:
   source status [<type|id>]         render the detailed monitor view of the
                                     named source (all sources without an
                                     argument) with the current metric values
+  quarantine list [--status <s>]    show the quarantine working list (the
+                  [--source <t|id>]  isolated records of the ch. 8.6 state
+                  [--limit <n>]      machine): position, reason, payload
+                                    hash, status, created_at, source
+  quarantine ack <id> [--note <t>]  record the operator review of one
+                                    isolated record (new -> acknowledged,
+                                    audited quarantine.acknowledged)
   help                              show this help
 
 The CLI is strictly non-interactive: it never prompts and never reads hidden
