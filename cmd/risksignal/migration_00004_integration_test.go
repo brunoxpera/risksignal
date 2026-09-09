@@ -111,8 +111,10 @@ func TestMigration00004BackfillsPayloadJSONBToBytea(t *testing.T) {
 		t.Fatal("seeded raw record has empty jsonb payload")
 	}
 
-	// Step 3: apply the remaining embedded migrations (00004).
-	runner, err = migrate.Open(ctx, dbURL, migrations.FS)
+	// Step 3: apply migration 00004 on top of the I1b schema (pinned to
+	// version 4 — later embedded migrations like 00005 are separate tasks
+	// and stay out of this test's scope).
+	runner, err = migrate.Open(ctx, dbURL, migrationFSUpTo(t, 4))
 	if err != nil {
 		t.Fatalf("migrate.Open: %v", err)
 	}
