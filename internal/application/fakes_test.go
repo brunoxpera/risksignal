@@ -1,0 +1,537 @@
+package application_test
+
+// In-memory fakes for the application-layer unit tests (DEV-018 acceptance:
+// "Unit tests with in-memory fakes; fault-injection unit test shows no
+// partial commit").
+//
+// The fakes mirror the production wiring one level down: the fake
+// transaction runner plays the role of postgres.WithTx, and the fake
+// repositories stage their writes on the fake transaction they receive —
+// commit publishes the staged rows into the shared fake database, rollback
+// discards them. A test therefore observes exactly what a caller of the real
+// stack observes: rows exist only after the transaction committed, and the
+// per-transaction write order is recorded for assertions. The ARCH-001 §5
+// fault seam is armed by setting the failpoint on the fake outbox
+// repository: Append records the write and then returns the injected error,
+// exactly as a decorated production OutboxRepo.Append would.
+//
+// Read-path fakes (GetByID/List over the joined §4 view) are seeded directly
+// with application.Signal values: the view aggregates match/vulnerability/
+// component/asset rows from other tables, which the write-path fakes do not
+// model. No test mixes both paths on the same rows, so the split stays
+// faithful to what each test exercises.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/xpera/risksignal/internal/application"
+	"github.com/xpera/risksignal/internal/domain"
+	"github.com/xpera/risksignal/internal/platform/clock"
+	"github.com/xpera/risksignal/internal/platform/uuid"
+)
+
+// fixedNow is the single point in time every fake clock reads, so tests can
+// assert exact timestamps and the reproducibility of re-runs.
+var fixedNow = time.Date(2026, 9, 9, 9, 30, 0, 0, time.UTC)
+
+// ---------------------------------------------------------------------------
+// shared fake database
+
+type storedSignal struct {
+	sig       domain.RiskSignal
+	createdAt time.Time
+}
+
+type storedVuln struct {
+	id, cveID, summary string
+}
+
+type storedEvidence struct {
+	vulnID, rawID string
+	typ           domain.EvidenceType
+	value         []byte
+	hash          string
+	observedAt    time.Time
+}
+
+type storedMatch struct {
+	id        string
+	rec       application.MatchRecord
+	createdAt time.Time
+}
+
+type storedRawRecord struct {
+	id, sourceID, externalID, contentHash string
+	fetchedAt                             time.Time
+}
+
+type storedSourceRun struct {
+	id, sourceID string
+	status       string
+	counters     application.SourceRunCounters
+	errText      string
+	startedAt    time.Time
+	finishedAt   time.Time
+}
+
+type storedRunCompletion struct {
+	runID      string
+	status     application.SourceRunStatus
+	counters   application.SourceRunCounters
+	errText    string
+	finishedAt time.Time
+}
+
+// fakeDB is the committed state of the fake persistence: rows are visible
+// here only after the transaction that staged them committed.
+type fakeDB struct {
+	signalRows   []storedSignal
+	auditEvents  []application.AuditEvent
+	outboxEvents []application.OutboxEvent
+	vulns        []storedVuln
+	evidenceRows []storedEvidence
+	matchRows    []storedMatch
+	rawRecords   []storedRawRecord
+	sourceRuns   []storedSourceRun
+	// components is the seeded inventory (demo seed data), written by the
+	// test before a run and only ever read by the matcher fake.
+	components []application.Component
+	// signalViews is the joined §4 read store, seeded by read-path tests.
+	signalViews []application.Signal
+}
+
+func (d *fakeDB) hasSignalForMatch(matchID string) bool {
+	for _, r := range d.signalRows {
+		if r.sig.MatchID == matchID {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *fakeDB) vulnByCVE(cveID string) (string, bool) {
+	for _, v := range d.vulns {
+		if v.cveID == cveID {
+			return v.id, true
+		}
+	}
+	return "", false
+}
+
+func (d *fakeDB) evidenceExists(rawID string, typ domain.EvidenceType, hash string) bool {
+	for _, e := range d.evidenceRows {
+		if e.rawID == rawID && e.typ == typ && e.hash == hash {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *fakeDB) matchExists(vulnID, compID, ruleVersion string) (string, bool) {
+	for _, m := range d.matchRows {
+		if m.rec.VulnerabilityID == vulnID && m.rec.ComponentID == compID && m.rec.RuleVersion == ruleVersion {
+			return m.id, true
+		}
+	}
+	return "", false
+}
+
+func (d *fakeDB) rawRecordExists(sourceID, externalID, hash string) (string, bool) {
+	for _, r := range d.rawRecords {
+		if r.sourceID == sourceID && r.externalID == externalID && r.contentHash == hash {
+			return r.id, true
+		}
+	}
+	return "", false
+}
+
+func (d *fakeDB) applyCompletion(c storedRunCompletion) error {
+	for i := range d.sourceRuns {
+		if d.sourceRuns[i].id == c.runID {
+			d.sourceRuns[i].status = string(c.status)
+			d.sourceRuns[i].counters = c.counters
+			d.sourceRuns[i].errText = c.errText
+			d.sourceRuns[i].finishedAt = c.finishedAt
+			return nil
+		}
+	}
+	return errors.New("fake: source run not found for completion")
+}
+
+// ---------------------------------------------------------------------------
+// fake transaction + runner
+
+// fakeTx is one transaction: it records the write order and stages rows;
+// commit publishes them into the shared database, rollback discards them.
+// pgx.Tx is embedded so the fake satisfies the application.Tx alias; its
+// methods are never invoked by the fakes (they stage on the struct, they do
+// not run SQL).
+type fakeTx struct {
+	pgx.Tx
+	db     *fakeDB
+	log    []string
+	staged fakeStaged
+
+	committed  bool
+	rolledBack bool
+}
+
+type fakeStaged struct {
+	signals     []storedSignal
+	audit       []application.AuditEvent
+	outbox      []application.OutboxEvent
+	vulns       []storedVuln
+	evidences   []storedEvidence
+	matches     []storedMatch
+	rawRecords  []storedRawRecord
+	runs        []storedSourceRun
+	completions []storedRunCompletion
+}
+
+func (t *fakeTx) record(op string) { t.log = append(t.log, op) }
+
+func (t *fakeTx) commit() {
+	t.db.signalRows = append(t.db.signalRows, t.staged.signals...)
+	t.db.auditEvents = append(t.db.auditEvents, t.staged.audit...)
+	t.db.outboxEvents = append(t.db.outboxEvents, t.staged.outbox...)
+	t.db.vulns = append(t.db.vulns, t.staged.vulns...)
+	t.db.evidenceRows = append(t.db.evidenceRows, t.staged.evidences...)
+	t.db.matchRows = append(t.db.matchRows, t.staged.matches...)
+	t.db.rawRecords = append(t.db.rawRecords, t.staged.rawRecords...)
+	t.db.sourceRuns = append(t.db.sourceRuns, t.staged.runs...)
+	for _, c := range t.staged.completions {
+		if err := t.db.applyCompletion(c); err != nil {
+			panic(err) // a completion of a missing run is a test bug
+		}
+	}
+	t.committed = true
+}
+
+func (t *fakeTx) rollback() {
+	t.rolledBack = true
+	t.staged = fakeStaged{}
+}
+
+// fakeTxRunner plays postgres.WithTx: commit on nil, rollback and the
+// original error (unwrapped) otherwise. Every transaction it opens stays
+// observable for assertions (write order, commit/rollback state).
+type fakeTxRunner struct {
+	db  *fakeDB
+	txs []*fakeTx
+}
+
+func (r *fakeTxRunner) Run(ctx context.Context, fn func(tx application.Tx) error) error {
+	ftx := &fakeTx{db: r.db}
+	r.txs = append(r.txs, ftx)
+	if err := fn(ftx); err != nil {
+		ftx.rollback()
+		return err
+	}
+	ftx.commit()
+	return nil
+}
+
+func (r *fakeTxRunner) last() *fakeTx {
+	if len(r.txs) == 0 {
+		return nil
+	}
+	return r.txs[len(r.txs)-1]
+}
+
+func fakeTxOf(tx application.Tx) (*fakeTx, error) {
+	ftx, ok := tx.(*fakeTx)
+	if !ok {
+		return nil, application.InfraError("fake", errors.New("unexpected transaction type"))
+	}
+	return ftx, nil
+}
+
+// ---------------------------------------------------------------------------
+// fake repositories
+
+type fakeSignalRepo struct{ db *fakeDB }
+
+func (f *fakeSignalRepo) Create(ctx context.Context, tx application.Tx, rec application.SignalRecord, createdAt time.Time) (domain.RiskSignal, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	ftx.record("signal")
+	if f.db.hasSignalForMatch(rec.MatchID) {
+		return domain.RiskSignal{}, application.ConflictError("create_signal", fmt.Errorf("signal already exists for match %s", rec.MatchID))
+	}
+	sig := domain.RiskSignal{
+		ID:          uuid.New(),
+		MatchID:     rec.MatchID,
+		Priority:    rec.Priority,
+		Status:      domain.SignalStatusNew,
+		Version:     1,
+		RuleVersion: rec.RuleVersion,
+		Factors:     rec.Factors,
+	}
+	ftx.staged.signals = append(ftx.staged.signals, storedSignal{sig: sig, createdAt: createdAt})
+	return sig, nil
+}
+
+func (f *fakeSignalRepo) GetByID(ctx context.Context, id string) (application.Signal, error) {
+	for _, s := range f.db.signalViews {
+		if s.ID == id {
+			return s, nil
+		}
+	}
+	return application.Signal{}, application.NotFoundError("get_signal", fmt.Errorf("signal %s not found", id))
+}
+
+// priorityRank mirrors the SQL ORDER BY of ListSignals (P1→P4 text order).
+func priorityRank(p domain.Priority) int {
+	switch p {
+	case domain.PriorityP1:
+		return 0
+	case domain.PriorityP2:
+		return 1
+	case domain.PriorityP3:
+		return 2
+	case domain.PriorityP4:
+		return 3
+	}
+	return 99
+}
+
+func (f *fakeSignalRepo) List(ctx context.Context, filter application.SignalFilter, limit, offset int) ([]application.Signal, error) {
+	var rows []application.Signal
+	for _, s := range f.db.signalViews {
+		if filter.Priority != nil && s.Priority != *filter.Priority {
+			continue
+		}
+		if filter.Status != nil && s.Status != *filter.Status {
+			continue
+		}
+		rows = append(rows, s)
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		pi, pj := priorityRank(rows[i].Priority), priorityRank(rows[j].Priority)
+		if pi != pj {
+			return pi < pj
+		}
+		if !rows[i].CreatedAt.Equal(rows[j].CreatedAt) {
+			return rows[i].CreatedAt.Before(rows[j].CreatedAt)
+		}
+		return rows[i].ID < rows[j].ID
+	})
+	if offset >= len(rows) {
+		return []application.Signal{}, nil
+	}
+	rows = rows[offset:]
+	if len(rows) > limit+1 {
+		rows = rows[:limit+1]
+	}
+	return rows, nil
+}
+
+func (f *fakeSignalRepo) ExistsByMatchID(ctx context.Context, matchID string) (bool, error) {
+	return f.db.hasSignalForMatch(matchID), nil
+}
+
+type fakeAuditRepo struct {
+	db *fakeDB
+	// failpoint, when set, makes Append fail after recording the write.
+	failpoint error
+}
+
+func (f *fakeAuditRepo) Append(ctx context.Context, tx application.Tx, ev application.AuditEvent) error {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return err
+	}
+	ftx.record("audit")
+	if f.failpoint != nil {
+		return f.failpoint
+	}
+	ftx.staged.audit = append(ftx.staged.audit, ev)
+	return nil
+}
+
+type fakeOutboxRepo struct {
+	db *fakeDB
+	// failpoint is the ARCH-001 §5 seam: when set, Append records the write
+	// and then fails — simulating an outbox write error after the signal
+	// and audit writes of the same transaction succeeded.
+	failpoint error
+}
+
+func (f *fakeOutboxRepo) Append(ctx context.Context, tx application.Tx, ev application.OutboxEvent) error {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return err
+	}
+	ftx.record("outbox")
+	if f.failpoint != nil {
+		return f.failpoint
+	}
+	ftx.staged.outbox = append(ftx.staged.outbox, ev)
+	return nil
+}
+
+type fakeVulnerabilityRepo struct{ db *fakeDB }
+
+func (f *fakeVulnerabilityRepo) Upsert(ctx context.Context, tx application.Tx, rec application.VulnerabilityRecord, publishedAt, modifiedAt time.Time) (string, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return "", err
+	}
+	ftx.record("vuln")
+	if id, ok := f.db.vulnByCVE(rec.CVEID); ok {
+		return id, nil
+	}
+	id := uuid.New()
+	ftx.staged.vulns = append(ftx.staged.vulns, storedVuln{id: id, cveID: rec.CVEID, summary: rec.Summary})
+	return id, nil
+}
+
+func (f *fakeVulnerabilityRepo) AddEvidence(ctx context.Context, tx application.Tx, ev application.EvidenceRecord, observedAt time.Time) error {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return err
+	}
+	ftx.record("evidence")
+	if f.db.evidenceExists(ev.RawRecordID, ev.Type, ev.ValueHash) {
+		return nil // ON CONFLICT DO NOTHING
+	}
+	ftx.staged.evidences = append(ftx.staged.evidences, storedEvidence{
+		vulnID: ev.VulnerabilityID, rawID: ev.RawRecordID, typ: ev.Type,
+		value: ev.Value, hash: ev.ValueHash, observedAt: observedAt,
+	})
+	return nil
+}
+
+type fakeMatchRepo struct{ db *fakeDB }
+
+func (f *fakeMatchRepo) Insert(ctx context.Context, tx application.Tx, rec application.MatchRecord, createdAt time.Time) (string, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return "", err
+	}
+	ftx.record("match")
+	if id, ok := f.db.matchExists(rec.VulnerabilityID, rec.ComponentID, rec.RuleVersion); ok {
+		return id, nil
+	}
+	id := uuid.New()
+	ftx.staged.matches = append(ftx.staged.matches, storedMatch{id: id, rec: rec, createdAt: createdAt})
+	return id, nil
+}
+
+type fakeSourceRunRepo struct{ db *fakeDB }
+
+func (f *fakeSourceRunRepo) InsertRawRecord(ctx context.Context, tx application.Tx, sourceID, externalID string, payload []byte, contentHash string, fetchedAt time.Time) (string, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return "", err
+	}
+	ftx.record("raw")
+	if id, ok := f.db.rawRecordExists(sourceID, externalID, contentHash); ok {
+		return id, nil
+	}
+	id := uuid.New()
+	ftx.staged.rawRecords = append(ftx.staged.rawRecords, storedRawRecord{
+		id: id, sourceID: sourceID, externalID: externalID, contentHash: contentHash, fetchedAt: fetchedAt,
+	})
+	return id, nil
+}
+
+func (f *fakeSourceRunRepo) Open(ctx context.Context, tx application.Tx, sourceID string, startedAt time.Time) (string, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return "", err
+	}
+	ftx.record("run.open")
+	id := uuid.New()
+	ftx.staged.runs = append(ftx.staged.runs, storedSourceRun{
+		id: id, sourceID: sourceID, status: "running", startedAt: startedAt,
+	})
+	return id, nil
+}
+
+func (f *fakeSourceRunRepo) Complete(ctx context.Context, tx application.Tx, runID string, status application.SourceRunStatus, counters application.SourceRunCounters, errText string, finishedAt time.Time) error {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return err
+	}
+	ftx.record("run.complete")
+	ftx.staged.completions = append(ftx.staged.completions, storedRunCompletion{
+		runID: runID, status: status, counters: counters, errText: errText, finishedAt: finishedAt,
+	})
+	return nil
+}
+
+type fakeComponentRepo struct{ db *fakeDB }
+
+func (f *fakeComponentRepo) ListByVendorProduct(ctx context.Context, vendor, product string) ([]application.Component, error) {
+	var out []application.Component
+	for _, c := range f.db.components {
+		if c.Vendor == vendor && c.Product == product {
+			out = append(out, c)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Version < out[j].Version })
+	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// harness
+
+// harness wires every fake into a ready-to-use application service.
+type harness struct {
+	db     *fakeDB
+	runner *fakeTxRunner
+
+	signals *fakeSignalRepo
+	audit   *fakeAuditRepo
+	outbox  *fakeOutboxRepo
+	vulns   *fakeVulnerabilityRepo
+	matches *fakeMatchRepo
+	runs    *fakeSourceRunRepo
+	comps   *fakeComponentRepo
+	clock   *clock.FakeClock
+
+	svc *application.Service
+}
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	h := &harness{
+		db:    &fakeDB{},
+		clock: clock.NewFakeClock(fixedNow),
+	}
+	h.runner = &fakeTxRunner{db: h.db}
+	h.signals = &fakeSignalRepo{db: h.db}
+	h.audit = &fakeAuditRepo{db: h.db}
+	h.outbox = &fakeOutboxRepo{db: h.db}
+	h.vulns = &fakeVulnerabilityRepo{db: h.db}
+	h.matches = &fakeMatchRepo{db: h.db}
+	h.runs = &fakeSourceRunRepo{db: h.db}
+	h.comps = &fakeComponentRepo{db: h.db}
+	h.svc = application.NewService(application.ServiceDeps{
+		Signals:         h.signals,
+		Audit:           h.audit,
+		Outbox:          h.outbox,
+		Vulnerabilities: h.vulns,
+		Matches:         h.matches,
+		SourceRuns:      h.runs,
+		Components:      h.comps,
+		Clock:           h.clock,
+		RunTx:           h.runner.Run,
+	})
+	return h
+}
+
+// systemActor is the I1b audit actor of the command-level tests.
+func systemActor(id string) application.Actor {
+	return application.Actor{Type: application.ActorTypeSystem, ID: id}
+}
