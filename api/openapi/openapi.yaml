@@ -75,6 +75,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SignalList'
+        '400':
+          description: |
+            The request is not acceptable as given: an out-of-vocabulary
+            priority or status filter, a limit outside [1, 100], a
+            malformed cursor or a query value the parameter binding cannot
+            parse. Rendered as an RFC 9457 problem detail whose detail
+            names the offending value (ARCH-001 §4 400 mapping).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error (for example an unreachable
+            database). The cause never leaves the server: the problem
+            detail is the generic internal-error shape without a detail
+            field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v1/signals/{signal_id}:
     get:
       operationId: getSignal
@@ -97,8 +118,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Signal'
+        '400':
+          description: |
+            The signal_id path parameter is not a well-formed identifier
+            (uuid). Rendered as an RFC 9457 problem detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '404':
           description: No signal exists for this signal_id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error (for example an unreachable
+            database). The cause never leaves the server: the problem
+            detail is the generic internal-error shape without a detail
+            field (concept ch. 5.2).
           content:
             application/json:
               schema:
@@ -236,9 +275,10 @@ components:
     ProblemDetails:
       type: object
       description: |
-        RFC 9457 problem detail. Reusable across every API error: I1b uses
-        it for the 404 of getSignal; 400/5xx responses grow onto it with the
-        I1b handlers (WP-1b.08) and later iterations.
+        RFC 9457 problem detail. Reusable across every API error: the 400
+        of an invalid request, the 404 of an unknown signal and the generic
+        500 of an unexpected internal error, all carrying the request
+        correlation id (concept ch. 12.3).
       required:
         - type
         - title

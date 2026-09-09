@@ -7,17 +7,20 @@
 #   - an embedded copy of this OpenAPI document            (embedded-spec)
 # The strict server (strict-server) additionally generates the typed
 # StrictServerInterface, so a handler missing for a declared operation fails
-# the build (ADR-011: contract drift becomes a compile error). The net/http
-# target matches ADR-008. The generated package lives under adapters/** and
-# is therefore part of the adapters component of .go-arch-lint.yml —
+# the build (ADR-011: contract drift becomes a compile error). The client
+# (client) is the generated Go client of the same contract — in v2 it emits
+# both the plain client and the typed ClientWithResponses wrapper — used by
+# the contract test (WP-1b.09 / DEV-023, ADR-011 gate 3: driving the
+# generated client against a seeded server is the only client of the wire
+# contract; hand-written request code would drift). The net/http target
+# matches ADR-008. The generated package lives under adapters/** and is
+# therefore part of the adapters component of .go-arch-lint.yml —
 # internal/domain cannot import it.
-#
-# Client generation is deliberately off: it is enabled by WP-1b.09
-# (DEV-023) for the contract test.
 package: gen
 generate:
   models: true
   std-http-server: true
   strict-server: true
   embedded-spec: true
+  client: true
 output: internal/adapters/httpapi/gen/openapi.gen.go

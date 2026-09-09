@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path"
@@ -170,9 +171,10 @@ type MatchMethod string
 // Priority Urgency class of a signal (concept ch. 6.2, ch. 9.3); P1 is most urgent.
 type Priority string
 
-// ProblemDetails RFC 9457 problem detail. Reusable across every API error: I1b uses
-// it for the 404 of getSignal; 400/5xx responses grow onto it with the
-// I1b handlers (WP-1b.08) and later iterations.
+// ProblemDetails RFC 9457 problem detail. Reusable across every API error: the 400
+// of an invalid request, the 404 of an unknown signal and the generic
+// 500 of an unexpected internal error, all carrying the request
+// correlation id (concept ch. 12.3).
 type ProblemDetails struct {
 	// CorrelationId Request correlation id (concept ch. 12.3), linking the problem to the server logs.
 	CorrelationId string `json:"correlation_id"`
@@ -281,6 +283,574 @@ type ListSignalsParams struct {
 
 	// Cursor Opaque pagination cursor from a previous page's next_cursor.
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// RequestEditorFn is the function signature for the RequestEditor callback function
+type RequestEditorFn func(ctx context.Context, req *http.Request) error
+
+// Doer performs HTTP requests.
+//
+// The standard http.Client implements this interface.
+type HttpRequestDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+// Client which conforms to the OpenAPI3 specification for this service.
+type Client struct {
+	// The endpoint of the server conforming to this interface, with scheme,
+	// https://api.deepmap.com for example. This can contain a path relative
+	// to the server, such as https://api.deepmap.com/dev-test, and all the
+	// paths in the swagger spec will be appended to the server.
+	Server string
+
+	// Doer for performing requests, typically a *http.Client with any
+	// customized settings, such as certificate chains.
+	Client HttpRequestDoer
+
+	// A list of callbacks for modifying requests which are generated before sending over
+	// the network.
+	RequestEditors []RequestEditorFn
+}
+
+// ClientOption allows setting custom parameters during construction
+type ClientOption func(*Client) error
+
+// Creates a new Client, with reasonable defaults
+func NewClient(server string, opts ...ClientOption) (*Client, error) {
+	// create a client with sane default values
+	client := Client{
+		Server: server,
+	}
+	// mutate client and add all optional params
+	for _, o := range opts {
+		if err := o(&client); err != nil {
+			return nil, err
+		}
+	}
+	// ensure the server URL always has a trailing slash
+	if !strings.HasSuffix(client.Server, "/") {
+		client.Server += "/"
+	}
+	// create httpClient, if not already present
+	if client.Client == nil {
+		client.Client = &http.Client{}
+	}
+	return &client, nil
+}
+
+// WithHTTPClient allows overriding the default Doer, which is
+// automatically created using http.Client. This is useful for tests.
+func WithHTTPClient(doer HttpRequestDoer) ClientOption {
+	return func(c *Client) error {
+		c.Client = doer
+		return nil
+	}
+}
+
+// WithRequestEditorFn allows setting up a callback function, which will be
+// called right before sending the request. This can be used to mutate the request.
+func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
+	return func(c *Client) error {
+		c.RequestEditors = append(c.RequestEditors, fn)
+		return nil
+	}
+}
+
+// The interface specification for the client above.
+type ClientInterface interface {
+
+	// ListSignals List signals
+	//
+	// Cursor-paginated, filterable working-list read (concept ch. 10.2,
+	// ch. 10.4). Signals sort by priority ascending (P1 first), then by
+	// created_at as the stable tiebreak. The page envelope always carries
+	// a next_cursor: pass it back unchanged to fetch the next page, null
+	// means the last page was reached.
+	//
+	// Corresponds with GET /api/v1/signals (the `ListSignals` operationId).
+	ListSignals(ctx context.Context, params *ListSignalsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSignal Get a signal
+	//
+	// Readable signal detail (the exit-criterion read, ARCH-001 §4):
+	// the signal joined with its match, vulnerability, component and
+	// asset.
+	//
+	// Corresponds with GET /api/v1/signals/{signal_id} (the `GetSignal` operationId).
+	GetSignal(ctx context.Context, signalId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// ListSignals List signals
+//
+// Cursor-paginated, filterable working-list read (concept ch. 10.2,
+// ch. 10.4). Signals sort by priority ascending (P1 first), then by
+// created_at as the stable tiebreak. The page envelope always carries
+// a next_cursor: pass it back unchanged to fetch the next page, null
+// means the last page was reached.
+//
+// Corresponds with GET /api/v1/signals (the `ListSignals` operationId).
+func (c *Client) ListSignals(ctx context.Context, params *ListSignalsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSignalsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetSignal Get a signal
+//
+// Readable signal detail (the exit-criterion read, ARCH-001 §4):
+// the signal joined with its match, vulnerability, component and
+// asset.
+//
+// Corresponds with GET /api/v1/signals/{signal_id} (the `GetSignal` operationId).
+func (c *Client) GetSignal(ctx context.Context, signalId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSignalRequest(c.Server, signalId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NewListSignalsRequest constructs an http.Request for the ListSignals method
+func NewListSignalsRequest(server string, params *ListSignalsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/signals")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Priority != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "priority", *params.Priority, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Status != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "status", *params.Status, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetSignalRequest constructs an http.Request for the GetSignal method
+func NewGetSignalRequest(server string, signalId string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "signal_id", signalId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/signals/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
+	for _, r := range c.RequestEditors {
+		if err := r(ctx, req); err != nil {
+			return err
+		}
+	}
+	for _, r := range additionalEditors {
+		if err := r(ctx, req); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ClientWithResponses builds on ClientInterface to offer response payloads
+type ClientWithResponses struct {
+	ClientInterface
+}
+
+// NewClientWithResponses creates a new ClientWithResponses, which wraps
+// Client with return type handling
+func NewClientWithResponses(server string, opts ...ClientOption) (*ClientWithResponses, error) {
+	client, err := NewClient(server, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &ClientWithResponses{client}, nil
+}
+
+// WithBaseURL overrides the baseURL.
+func WithBaseURL(baseURL string) ClientOption {
+	return func(c *Client) error {
+		newBaseURL, err := url.Parse(baseURL)
+		if err != nil {
+			return err
+		}
+		c.Server = newBaseURL.String()
+		return nil
+	}
+}
+
+// ClientWithResponsesInterface is the interface specification for the client with responses above.
+type ClientWithResponsesInterface interface {
+
+	// ListSignalsWithResponse List signals
+	//
+	// Cursor-paginated, filterable working-list read (concept ch. 10.2,
+	// ch. 10.4). Signals sort by priority ascending (P1 first), then by
+	// created_at as the stable tiebreak. The page envelope always carries
+	// a next_cursor: pass it back unchanged to fetch the next page, null
+	// means the last page was reached.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/signals (the `ListSignals` operationId).
+	ListSignalsWithResponse(ctx context.Context, params *ListSignalsParams, reqEditors ...RequestEditorFn) (*ListSignalsResponse, error)
+
+	// GetSignalWithResponse Get a signal
+	//
+	// Readable signal detail (the exit-criterion read, ARCH-001 §4):
+	// the signal joined with its match, vulnerability, component and
+	// asset.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/signals/{signal_id} (the `GetSignal` operationId).
+	GetSignalWithResponse(ctx context.Context, signalId string, reqEditors ...RequestEditorFn) (*GetSignalResponse, error)
+}
+
+type ListSignalsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SignalList
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListSignalsResponse) GetJSON200() *SignalList {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListSignalsResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ListSignalsResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListSignalsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSignalsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSignalsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListSignalsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetSignalResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Signal
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetSignalResponse) GetJSON200() *Signal {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetSignalResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetSignalResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetSignalResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetSignalResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSignalResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSignalResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetSignalResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// ListSignalsWithResponse List signals
+//
+// Cursor-paginated, filterable working-list read (concept ch. 10.2,
+// ch. 10.4). Signals sort by priority ascending (P1 first), then by
+// created_at as the stable tiebreak. The page envelope always carries
+// a next_cursor: pass it back unchanged to fetch the next page, null
+// means the last page was reached.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/signals (the `ListSignals` operationId).
+func (c *ClientWithResponses) ListSignalsWithResponse(ctx context.Context, params *ListSignalsParams, reqEditors ...RequestEditorFn) (*ListSignalsResponse, error) {
+	rsp, err := c.ListSignals(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSignalsResponse(rsp)
+}
+
+// GetSignalWithResponse Get a signal
+//
+// Readable signal detail (the exit-criterion read, ARCH-001 §4):
+// the signal joined with its match, vulnerability, component and
+// asset.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/signals/{signal_id} (the `GetSignal` operationId).
+func (c *ClientWithResponses) GetSignalWithResponse(ctx context.Context, signalId string, reqEditors ...RequestEditorFn) (*GetSignalResponse, error) {
+	rsp, err := c.GetSignal(ctx, signalId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSignalResponse(rsp)
+}
+
+// ParseListSignalsResponse parses an HTTP response from a ListSignalsWithResponse call
+func ParseListSignalsResponse(rsp *http.Response) (*ListSignalsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSignalsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SignalList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetSignalResponse parses an HTTP response from a GetSignalWithResponse call
+func ParseGetSignalResponse(rsp *http.Response) (*GetSignalResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSignalResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Signal
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
 }
 
 // ServerInterface represents all server handlers.
@@ -548,6 +1118,34 @@ func (response ListSignals200JSONResponse) VisitListSignalsResponse(w http.Respo
 	return err
 }
 
+type ListSignals400JSONResponse ProblemDetails
+
+func (response ListSignals400JSONResponse) VisitListSignalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSignals500JSONResponse ProblemDetails
+
+func (response ListSignals500JSONResponse) VisitListSignalsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetSignalRequestObject struct {
 	SignalId string `json:"signal_id"`
 }
@@ -570,6 +1168,20 @@ func (response GetSignal200JSONResponse) VisitGetSignalResponse(w http.ResponseW
 	return err
 }
 
+type GetSignal400JSONResponse ProblemDetails
+
+func (response GetSignal400JSONResponse) VisitGetSignalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetSignal404JSONResponse ProblemDetails
 
 func (response GetSignal404JSONResponse) VisitGetSignalResponse(w http.ResponseWriter) error {
@@ -580,6 +1192,20 @@ func (response GetSignal404JSONResponse) VisitGetSignalResponse(w http.ResponseW
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSignal500JSONResponse ProblemDetails
+
+func (response GetSignal500JSONResponse) VisitGetSignalResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -690,42 +1316,46 @@ func (sh *strictHandler) GetSignal(w http.ResponseWriter, r *http.Request, signa
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
