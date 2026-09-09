@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -59,11 +61,49 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	cfg.MinConns = minConns
 	cfg.MaxConns = maxConns
 
+	// pgx scans timestamptz values into time.Time in the local time zone
+	// unless the timestamp codec carries an explicit scan location. The
+	// walking skeleton stores every timestamp as timestamptz UTC and reads
+	// it back as UTC (ARCH-001 §1: "all timestamps timestamptz UTC"); the
+	// read contract renders RFC 3339 UTC on the wire (ARCH-001 §4), so the
+	// scan location is pinned to UTC here, at the data-access home, instead
+	// of leaking the host time zone through the application layer into the
+	// API responses.
+	cfg.AfterConnect = func(_ context.Context, conn *pgx.Conn) error {
+		pinUTCScan(conn.TypeMap(), pgtype.TimestampOID)
+		pinUTCScan(conn.TypeMap(), pgtype.TimestamptzOID)
+		return nil
+	}
+
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: create pool: %w", err)
 	}
 	return pool, nil
+}
+
+// pinUTCScan re-registers the timestamp codec of oid on m with a private
+// copy whose scan location is UTC. The codecs of the pgtype default map
+// are shared, process-wide instances that every connection's type map
+// references — mutating one in place would race the concurrent scans of
+// other connections (the -race suite proved it) — so the connection's own
+// map gets a copy instead. A missing codec is not an error: the map simply
+// does not know the oid.
+func pinUTCScan(m *pgtype.Map, oid uint32) {
+	dt, ok := m.TypeForOID(oid)
+	if !ok {
+		return
+	}
+	switch c := dt.Codec.(type) {
+	case *pgtype.TimestampCodec:
+		clone := *c
+		clone.ScanLocation = time.UTC
+		m.RegisterType(&pgtype.Type{Name: dt.Name, OID: dt.OID, Codec: &clone})
+	case *pgtype.TimestamptzCodec:
+		clone := *c
+		clone.ScanLocation = time.UTC
+		m.RegisterType(&pgtype.Type{Name: dt.Name, OID: dt.OID, Codec: &clone})
+	}
 }
 
 // OpenPool opens a pgx connection pool for databaseURL and verifies with a
