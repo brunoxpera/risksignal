@@ -1,0 +1,283 @@
+# RiskSignal API contract — I1b walking skeleton (ARCH-001 §4, WP-1b.07).
+#
+# OpenAPI 3.1, schema-first (ADR-011): this document is the source of truth
+# for the /api/v1 signal reads. Server interfaces and request/response types
+# are generated from it with oapi-codegen (pinned v2.8.0; see
+# oapi-codegen.yml and the Makefile). The generated code is committed, and CI
+# regenerates and fails on a diff (ADR-011 gate 2, wired in WP-1b.11).
+#
+# Locked conventions (ADR-011/ADR-008, concept ch. 3.1): JSON snake_case,
+# RFC 3339 UTC date-times, string identifiers, RFC 9457 Problem Details.
+# I1b exposes the *reachable subset* of the domain enum vocabularies only —
+# SignalStatus "new", MatchMethod exact_identifier|canonical_product_range —
+# the full domain sets (internal/domain, DEV-015) grow the contract with I3
+# and I4.
+#
+# Deliberately outside this document (ARCH-001 §4, httpapi/system.go): the
+# System endpoints GET /health/live, GET /health/ready and GET /version —
+# operational probes with a fixed plain-JSON shape. Signal production is a
+# CLI/operator action (demo seed|run), never an API write, so I1b declares
+# no write operation; Idempotency-Key and If-Match are declared as reusable
+# header-parameter components now and become operative on the I4 command
+# endpoints.
+openapi: 3.1.0
+info:
+  title: RiskSignal API
+  version: 0.1.0
+  description: |
+    Read contract of the RiskSignal walking skeleton (I1b): the
+    cursor-paginated working-list read and the single-signal read. The
+    contract carries no write operations — signal production is the CLI
+    `demo` path — and no System endpoints; both are deliberate (ARCH-001
+    §4).
+paths:
+  /api/v1/signals:
+    get:
+      operationId: listSignals
+      summary: List signals
+      description: |
+        Cursor-paginated, filterable working-list read (concept ch. 10.2,
+        ch. 10.4). Signals sort by priority ascending (P1 first), then by
+        created_at as the stable tiebreak. The page envelope always carries
+        a next_cursor: pass it back unchanged to fetch the next page, null
+        means the last page was reached.
+      parameters:
+        - name: priority
+          in: query
+          required: false
+          description: Only signals of this priority (P1-P4).
+          schema:
+            $ref: '#/components/schemas/Priority'
+        - name: status
+          in: query
+          required: false
+          description: Only signals in this status. I1b signals are always "new".
+          schema:
+            $ref: '#/components/schemas/SignalStatus'
+        - name: limit
+          in: query
+          required: false
+          description: Maximum page size.
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque pagination cursor from a previous page's next_cursor.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of signals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignalList'
+  /api/v1/signals/{signal_id}:
+    get:
+      operationId: getSignal
+      summary: Get a signal
+      description: |
+        Readable signal detail (the exit-criterion read, ARCH-001 §4):
+        the signal joined with its match, vulnerability, component and
+        asset.
+      parameters:
+        - name: signal_id
+          in: path
+          required: true
+          description: Signal identifier (uuid).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The requested signal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Signal'
+        '404':
+          description: No signal exists for this signal_id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+components:
+  schemas:
+    # --- Core signal read (ARCH-001 §4) -----------------------------------
+    Signal:
+      type: object
+      description: One readable risk signal, joined with its asset and product.
+      required:
+        - id
+        - match_id
+        - cve_id
+        - priority
+        - status
+        - confidence
+        - method
+        - product
+        - summary
+        - created_at
+        - version
+      properties:
+        id:
+          type: string
+          description: Signal identifier (uuid).
+        match_id:
+          type: string
+          description: Identifier of the match that produced this signal (uuid).
+        cve_id:
+          type: string
+          description: The normalized vulnerability identifier, e.g. CVE-2024-0001.
+        priority:
+          $ref: '#/components/schemas/Priority'
+        status:
+          $ref: '#/components/schemas/SignalStatus'
+        confidence:
+          $ref: '#/components/schemas/Confidence'
+        method:
+          $ref: '#/components/schemas/MatchMethod'
+        asset:
+          $ref: '#/components/schemas/SignalAsset'
+        product:
+          $ref: '#/components/schemas/SignalProduct'
+        summary:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC creation timestamp (injected clock).
+        version:
+          type: integer
+          description: Optimistic-lock token; starts at 1 and grows on every change.
+        due_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 UTC SLA deadline; null until the I4 SLA clocks.
+    SignalAsset:
+      type: object
+      description: The joined inventory asset of a signal (ARCH-001 §4 asset).
+      required:
+        - id
+        - name
+        - type
+        - criticality
+        - exposure
+      properties:
+        id:
+          type: string
+          description: Asset identifier (uuid).
+        name:
+          type: string
+        type:
+          type: string
+          description: Asset type, e.g. server_vm, container_image (vocabulary grows with I3).
+        criticality:
+          $ref: '#/components/schemas/Criticality'
+        exposure:
+          $ref: '#/components/schemas/Exposure'
+    SignalProduct:
+      type: object
+      description: The joined component product of a signal (ARCH-001 §4 product).
+      required:
+        - vendor
+        - product
+        - version
+      properties:
+        vendor:
+          type: string
+        product:
+          type: string
+        version:
+          type: string
+    SignalList:
+      type: object
+      description: One page of the working-list read (ARCH-001 §4 listSignals).
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          description: The signals of this page, priority ascending then created_at.
+          items:
+            $ref: '#/components/schemas/Signal'
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque cursor of the next page; null on the last page.
+    # --- Enum vocabularies (I1b reachable subset, ARCH-001 §4) -------------
+    Priority:
+      type: string
+      description: Urgency class of a signal (concept ch. 6.2, ch. 9.3); P1 is most urgent.
+      enum: [P1, P2, P3, P4]
+    SignalStatus:
+      type: string
+      description: Lifecycle state of a signal. I1b signals are always new; the full vocabulary arrives with I4.
+      enum: [new]
+    Confidence:
+      type: string
+      description: Reliability of the vulnerability-to-component assignment, derived from the match method (ADR-015).
+      enum: [high, medium, low, none]
+    MatchMethod:
+      type: string
+      description: How the vulnerability was matched to the component (ADR-015). The I1b reachable subset only; the full vocabulary grows with I3.
+      enum: [exact_identifier, canonical_product_range]
+    Criticality:
+      type: string
+      description: Business criticality of the asset (concept ch. 6.2).
+      enum: [critical, high, normal, low, unknown]
+    Exposure:
+      type: string
+      description: Exposure of the asset to the internet (concept ch. 6.2).
+      enum: [internet, internal, isolated, unknown]
+    # --- Error envelope (RFC 9457, ADR-011) --------------------------------
+    ProblemDetails:
+      type: object
+      description: |
+        RFC 9457 problem detail. Reusable across every API error: I1b uses
+        it for the 404 of getSignal; 400/5xx responses grow onto it with the
+        I1b handlers (WP-1b.08) and later iterations.
+      required:
+        - type
+        - title
+        - status
+        - correlation_id
+      properties:
+        type:
+          type: string
+          description: URI reference identifying the problem type; "about:blank" when no specific type applies.
+        title:
+          type: string
+          description: Short, human-readable summary of the problem type.
+        status:
+          type: integer
+          description: HTTP status code generated by the server for this occurrence.
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.
+        instance:
+          type: string
+          description: URI reference identifying the specific occurrence.
+        correlation_id:
+          type: string
+          description: Request correlation id (concept ch. 12.3), linking the problem to the server logs.
+  parameters:
+    # Declared now, operative from the I4 command endpoints (ARCH-001 §4,
+    # ADR-011): I1b declares no write operation, so no operation references
+    # these two yet.
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Client-generated idempotency key of a command (concept ch. 10.1).
+      schema:
+        type: string
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: Expected optimistic-lock version of the resource, for conditional writes (concept ch. 10.1).
+      schema:
+        type: string
