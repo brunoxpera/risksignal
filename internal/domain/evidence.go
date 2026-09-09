@@ -3,18 +3,28 @@ package domain
 import "fmt"
 
 // EvidenceType classifies an immutable source statement (ARCH-001 §1
-// evidences.type). The I1b set mirrors the synthetic source's output shapes
-// (synthetic_statement plus the typed factor evidences cvss/kev/epss so that
-// prioritisation reads the same evidence shapes I2 will feed from
-// NVD/KEV/EPSS); the vocabulary grows with the I2 source adapters.
+// evidences.type). The vocabulary is additive: the I1b set mirrors the
+// synthetic source's output shapes (synthetic_statement plus the typed
+// factor evidences cvss/kev/epss so that prioritisation reads the same
+// evidence shapes I2 will feed from NVD/KEV/EPSS); ARCH-002 §3 extends it
+// with the I2 evidence types of the NVD/KEV adapters.
 type EvidenceType string
 
-// Allowed EvidenceType values for I1b (ARCH-001 §1).
+// Allowed EvidenceType values (ARCH-001 §1, extended by ARCH-002 §3).
 const (
 	EvidenceTypeSyntheticStatement EvidenceType = "synthetic_statement"
 	EvidenceTypeCVSS               EvidenceType = "cvss"
 	EvidenceTypeKEV                EvidenceType = "kev"
 	EvidenceTypeEPSS               EvidenceType = "epss"
+
+	// I2 (ARCH-002 §2.1, §2.2, §3): the NVD adapter emits an
+	// nvd_statement (the canonical record excerpt of one CVE, hashed) and
+	// one reference evidence per advisory link; the KEV adapter
+	// historises removals as kev_removed — a new evidence version, never
+	// an in-place edit (ch. 6.1).
+	EvidenceTypeNVDStatement EvidenceType = "nvd_statement"
+	EvidenceTypeReference    EvidenceType = "reference"
+	EvidenceTypeKEVRemoved   EvidenceType = "kev_removed"
 )
 
 // Valid reports whether t is an allowed EvidenceType value.
@@ -23,7 +33,10 @@ func (t EvidenceType) Valid() bool {
 	case EvidenceTypeSyntheticStatement,
 		EvidenceTypeCVSS,
 		EvidenceTypeKEV,
-		EvidenceTypeEPSS:
+		EvidenceTypeEPSS,
+		EvidenceTypeNVDStatement,
+		EvidenceTypeReference,
+		EvidenceTypeKEVRemoved:
 		return true
 	}
 	return false
