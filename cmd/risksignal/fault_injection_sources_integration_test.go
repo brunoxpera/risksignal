@@ -373,6 +373,7 @@ func newSourceRunServiceWithOutbox(pool *pgxpool.Pool, clk clock.Clock, outbox a
 		Sources:         repo.NewSourceRepo(q),
 		Quarantine:      repo.NewQuarantineRepo(q),
 		Components:      repo.NewComponentRepo(q),
+		Inventory:       repo.NewInventoryRepo(q),
 		Clock:           clk,
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)

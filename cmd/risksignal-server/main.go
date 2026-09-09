@@ -173,6 +173,7 @@ func newSignalService(pool *pgxpool.Pool) *application.Service {
 		Sources:         repo.NewSourceRepo(q),
 		Quarantine:      repo.NewQuarantineRepo(q),
 		Components:      repo.NewComponentRepo(q),
+		Inventory:       repo.NewInventoryRepo(q),
 		Clock:           clock.RealClock{},
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)

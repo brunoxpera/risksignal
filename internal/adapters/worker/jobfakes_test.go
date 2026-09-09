@@ -373,6 +373,32 @@ func (s *jobStubRepo) method() error {
 	return fmt.Errorf("jobStubRepo.%s: unexpected call (not part of the run loop)", s.name)
 }
 
+// jobStubInventoryWriter is the InventoryWriter stub of the run-loop
+// tests: the run loop never touches the inventory commit path — the stub
+// satisfies the mandatory service dependency and fails loudly if a test
+// ever drives it.
+type jobStubInventoryWriter struct{}
+
+func (jobStubInventoryWriter) CurrentAssetOnTx(context.Context, application.Tx, string, string) (application.CurrentInventoryAsset, bool, error) {
+	return application.CurrentInventoryAsset{}, false, fmt.Errorf("jobStubInventoryWriter: unexpected call (inventory commit is not part of the run loop)")
+}
+
+func (jobStubInventoryWriter) UpsertAsset(context.Context, application.Tx, application.InventoryAsset, time.Time) (string, error) {
+	return "", fmt.Errorf("jobStubInventoryWriter: unexpected call (inventory commit is not part of the run loop)")
+}
+
+func (jobStubInventoryWriter) UpsertComponent(context.Context, application.Tx, string, application.InventoryComponent, time.Time) error {
+	return fmt.Errorf("jobStubInventoryWriter: unexpected call (inventory commit is not part of the run loop)")
+}
+
+func (jobStubInventoryWriter) InventorySnapshot(context.Context, application.Tx) (application.InventorySnapshot, error) {
+	return application.InventorySnapshot{}, fmt.Errorf("jobStubInventoryWriter: unexpected call (inventory commit is not part of the run loop)")
+}
+
+func (jobStubInventoryWriter) RuleVersions(context.Context, application.Tx) (int, int, error) {
+	return 0, 0, fmt.Errorf("jobStubInventoryWriter: unexpected call (inventory commit is not part of the run loop)")
+}
+
 func (s *jobStubRepo) Create(ctx context.Context, tx application.Tx, rec application.SignalRecord, createdAt time.Time) (domain.RiskSignal, error) {
 	return domain.RiskSignal{}, s.method()
 }
@@ -409,6 +435,7 @@ func newJobService(db *jobDB, clk clock.Clock) *application.Service {
 		Sources:         &jobSourceRepo{db: db},
 		Quarantine:      &jobQuarantineRepo{db: db},
 		Components:      &jobStubRepo{name: "components"},
+		Inventory:       &jobStubInventoryWriter{},
 		Clock:           clk,
 		RunTx:           (&jobRunner{db: db}).Run,
 	})

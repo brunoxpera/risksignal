@@ -18,6 +18,7 @@ type Service struct {
 	sources    SourceRepo
 	quarantine QuarantineRepo
 	comps      ComponentRepo
+	inventory  InventoryWriter
 	clock      Clock
 	runTx      TxRunner
 }
@@ -37,6 +38,7 @@ type ServiceDeps struct {
 	Sources         SourceRepo
 	Quarantine      QuarantineRepo
 	Components      ComponentRepo
+	Inventory       InventoryWriter
 	Clock           Clock
 	RunTx           TxRunner
 }
@@ -75,6 +77,9 @@ func NewService(deps ServiceDeps) *Service {
 	if deps.Components == nil {
 		panic("application: NewService: Components must not be nil")
 	}
+	if deps.Inventory == nil {
+		panic("application: NewService: Inventory must not be nil")
+	}
 	if deps.Clock == nil {
 		panic("application: NewService: Clock must not be nil")
 	}
@@ -92,6 +97,7 @@ func NewService(deps ServiceDeps) *Service {
 		sources:    deps.Sources,
 		quarantine: deps.Quarantine,
 		comps:      deps.Components,
+		inventory:  deps.Inventory,
 		clock:      deps.Clock,
 		runTx:      deps.RunTx,
 	}

@@ -202,6 +202,7 @@ func newCreateSignalService(pool *pgxpool.Pool, outbox application.OutboxRepo, c
 		Sources:         repo.NewSourceRepo(q),
 		Quarantine:      repo.NewQuarantineRepo(q),
 		Components:      repo.NewComponentRepo(q),
+		Inventory:       repo.NewInventoryRepo(q),
 		Clock:           clk,
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)

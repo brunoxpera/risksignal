@@ -22,6 +22,45 @@ ON CONFLICT (source, external_id) DO UPDATE SET
     owner       = EXCLUDED.owner
 RETURNING id;
 
+-- ImportUpsertAsset inserts or refreshes an inventory asset by its
+-- natural key (source, external_id) from an inventory import commit
+-- (ARCH-003 §1.1/§1.3, WP-3.05b / DEV-060). It is the UpsertAsset shape
+-- with the clock-stamped updated_at supplied explicitly: ARCH-003 §1.1
+-- pins "updated_at is stamped by the injected clock on upsert and drives
+-- the inventory_snapshot hash (§5)" — the import commit writes its stamp
+-- on insert AND on conflict refresh (the demo-seed UpsertAsset keeps the
+-- DB default backstop and refreshes no timestamp, the pre-I3 path). The
+-- refresh never touches created_at, deactivated_at or verified_at —
+-- deactivation is explicit lifecycle, never an import side effect
+-- (ARCH-003 §1.3 additive upsert: absence never deactivates), and a
+-- deactivated asset that reappears in an import stays deactivated.
+-- name: ImportUpsertAsset :one
+INSERT INTO assets (external_id, source, type, name, environment, criticality, exposure, owner, updated_at)
+VALUES (@external_id, @source, @type, @name, @environment, @criticality, @exposure, @owner, @updated_at)
+ON CONFLICT (source, external_id) DO UPDATE SET
+    type        = EXCLUDED.type,
+    name        = EXCLUDED.name,
+    environment = EXCLUDED.environment,
+    criticality = EXCLUDED.criticality,
+    exposure    = EXCLUDED.exposure,
+    owner       = EXCLUDED.owner,
+    updated_at  = EXCLUDED.updated_at
+RETURNING id;
+
+-- GetAssetBySourceExternalID resolves one asset by its import natural key
+-- (source, external_id, UQ (source, external_id) — ARCH-003 §1.1): the
+-- current-state read of the WP-3.05 import preview/commit (DEV-059/060,
+-- application.InventoryRepo.CurrentAsset). A missing row is pgx.ErrNoRows
+-- — the normal "created" outcome of the preview, not an error. The row
+-- carries the full lifecycle state (updated_at drives the
+-- inventory_snapshot hash; deactivated_at/verified_at are rendered as-is,
+-- never interpreted here).
+-- name: GetAssetBySourceExternalID :one
+SELECT id, external_id, source, type, name, environment, criticality, exposure, owner,
+       created_at, updated_at, deactivated_at, verified_at
+FROM assets
+WHERE source = @source AND external_id = @external_id;
+
 -- DeactivateAsset soft-deactivates one asset (ARCH-003 §1.1: "soft-
 -- deactivate, never delete — deactivated assets stay historically
 -- referenceable", ch. 6.1): deactivated_at and updated_at come from the

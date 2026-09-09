@@ -41,6 +41,102 @@ func (q *Queries) DeactivateAsset(ctx context.Context, arg DeactivateAssetParams
 	return result.RowsAffected(), nil
 }
 
+const getAssetBySourceExternalID = `-- name: GetAssetBySourceExternalID :one
+SELECT id, external_id, source, type, name, environment, criticality, exposure, owner,
+       created_at, updated_at, deactivated_at, verified_at
+FROM assets
+WHERE source = $1 AND external_id = $2
+`
+
+type GetAssetBySourceExternalIDParams struct {
+	Source     string
+	ExternalID string
+}
+
+// GetAssetBySourceExternalID resolves one asset by its import natural key
+// (source, external_id, UQ (source, external_id) — ARCH-003 §1.1): the
+// current-state read of the WP-3.05 import preview/commit (DEV-059/060,
+// application.InventoryRepo.CurrentAsset). A missing row is pgx.ErrNoRows
+// — the normal "created" outcome of the preview, not an error. The row
+// carries the full lifecycle state (updated_at drives the
+// inventory_snapshot hash; deactivated_at/verified_at are rendered as-is,
+// never interpreted here).
+func (q *Queries) GetAssetBySourceExternalID(ctx context.Context, arg GetAssetBySourceExternalIDParams) (Asset, error) {
+	row := q.db.QueryRow(ctx, getAssetBySourceExternalID, arg.Source, arg.ExternalID)
+	var i Asset
+	err := row.Scan(
+		&i.ID,
+		&i.ExternalID,
+		&i.Source,
+		&i.Type,
+		&i.Name,
+		&i.Environment,
+		&i.Criticality,
+		&i.Exposure,
+		&i.Owner,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeactivatedAt,
+		&i.VerifiedAt,
+	)
+	return i, err
+}
+
+const importUpsertAsset = `-- name: ImportUpsertAsset :one
+INSERT INTO assets (external_id, source, type, name, environment, criticality, exposure, owner, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (source, external_id) DO UPDATE SET
+    type        = EXCLUDED.type,
+    name        = EXCLUDED.name,
+    environment = EXCLUDED.environment,
+    criticality = EXCLUDED.criticality,
+    exposure    = EXCLUDED.exposure,
+    owner       = EXCLUDED.owner,
+    updated_at  = EXCLUDED.updated_at
+RETURNING id
+`
+
+type ImportUpsertAssetParams struct {
+	ExternalID  string
+	Source      string
+	Type        string
+	Name        string
+	Environment string
+	Criticality string
+	Exposure    string
+	Owner       pgtype.Text
+	UpdatedAt   pgtype.Timestamptz
+}
+
+// ImportUpsertAsset inserts or refreshes an inventory asset by its
+// natural key (source, external_id) from an inventory import commit
+// (ARCH-003 §1.1/§1.3, WP-3.05b / DEV-060). It is the UpsertAsset shape
+// with the clock-stamped updated_at supplied explicitly: ARCH-003 §1.1
+// pins "updated_at is stamped by the injected clock on upsert and drives
+// the inventory_snapshot hash (§5)" — the import commit writes its stamp
+// on insert AND on conflict refresh (the demo-seed UpsertAsset keeps the
+// DB default backstop and refreshes no timestamp, the pre-I3 path). The
+// refresh never touches created_at, deactivated_at or verified_at —
+// deactivation is explicit lifecycle, never an import side effect
+// (ARCH-003 §1.3 additive upsert: absence never deactivates), and a
+// deactivated asset that reappears in an import stays deactivated.
+func (q *Queries) ImportUpsertAsset(ctx context.Context, arg ImportUpsertAssetParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, importUpsertAsset,
+		arg.ExternalID,
+		arg.Source,
+		arg.Type,
+		arg.Name,
+		arg.Environment,
+		arg.Criticality,
+		arg.Exposure,
+		arg.Owner,
+		arg.UpdatedAt,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const upsertAsset = `-- name: UpsertAsset :one
 
 INSERT INTO assets (external_id, source, type, name, environment, criticality, exposure, owner)

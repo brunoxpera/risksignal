@@ -67,8 +67,13 @@ type CurrentInventoryComponent struct {
 
 // CurrentInventoryAsset is the persisted state of one asset, as the
 // preview diffs against it: the row's (source, external_id) identity, its
-// fields as plain strings (verbatim, NULL as "") and its components.
+// fields as plain strings (verbatim, NULL as "") and its components. ID
+// is the canonical row id (uuid) of the persisted asset — "" when no
+// such asset exists; the preview ignores it, the commit write path
+// (DEV-060) resolves the id of an already-persisted asset through it so
+// its components can upsert under the same row.
 type CurrentInventoryAsset struct {
+	ID          string
 	Source      string
 	ExternalID  string
 	Type        string
@@ -189,8 +194,25 @@ func PreviewInventoryCSV(ctx context.Context, r io.Reader, current InventoryRepo
 }
 
 // classifyAsset classifies one parsed asset and each of its components
-// against the current state.
+// against the current state: it fetches the persisted asset through the
+// read port and runs the pure diff of diffAsset. Preview uses this
+// path (pool-scoped read); the commit use case (DEV-060) fetches the
+// current state on its own transaction and calls diffAsset directly, so
+// the classification of a commit is the exact classification of the
+// preview — commit and preview always agree.
 func classifyAsset(ctx context.Context, asset *InventoryAsset, current InventoryRepo) (AssetDiff, error) {
+	cur, found, err := current.CurrentAsset(ctx, asset.Source, asset.ExternalID)
+	if err != nil {
+		return AssetDiff{}, fmt.Errorf("reading current state of asset (%s, %s): %w", asset.Source, asset.ExternalID, err)
+	}
+	return diffAsset(asset, cur, found), nil
+}
+
+// diffAsset is the pure asset/component classification of one parsed
+// asset against the fetched current state — the decision function of
+// both the preview and the commit (created / updated / unchanged per
+// ARCH-003 §1.3).
+func diffAsset(asset *InventoryAsset, cur CurrentInventoryAsset, found bool) AssetDiff {
 	diff := AssetDiff{
 		Source:     asset.Source,
 		ExternalID: asset.ExternalID,
@@ -198,10 +220,6 @@ func classifyAsset(ctx context.Context, asset *InventoryAsset, current Inventory
 		Asset:      *asset,
 	}
 
-	cur, found, err := current.CurrentAsset(ctx, asset.Source, asset.ExternalID)
-	if err != nil {
-		return AssetDiff{}, fmt.Errorf("reading current state of asset (%s, %s): %w", asset.Source, asset.ExternalID, err)
-	}
 	if !found {
 		// No persisted asset: the whole group is created — its
 		// components cannot exist without it (a component belongs to
@@ -210,7 +228,7 @@ func classifyAsset(ctx context.Context, asset *InventoryAsset, current Inventory
 		for _, comp := range asset.Components {
 			diff.Components = append(diff.Components, ComponentDiff{Line: comp.Line, Status: AssetCreated, IDs: comp.IDs})
 		}
-		return diff, nil
+		return diff
 	}
 
 	switch {
@@ -248,5 +266,5 @@ func classifyAsset(ctx context.Context, asset *InventoryAsset, current Inventory
 		}
 		diff.Components = append(diff.Components, state)
 	}
-	return diff, nil
+	return diff
 }

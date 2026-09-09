@@ -141,6 +141,17 @@ type fakeDB struct {
 	components []application.Component
 	// signalViews is the joined §4 read store, seeded by read-path tests.
 	signalViews []application.Signal
+	// assets is the committed inventory of the commit write path
+	// (DEV-060): staged wholesale per transaction (copy-on-write overlay),
+	// replaced on commit, discarded on rollback. nextAssetID is the id
+	// generator of the overlay (ids stay unique across rolled-back
+	// transactions — irrelevant to the assertions, ids are only compared
+	// for identity). aliasVersion/decisionVersion are the ruleset version
+	// counters of RuleVersions (0 until a test raises them).
+	assets          []fakeStoredAsset
+	nextAssetID     int
+	aliasVersion    int
+	decisionVersion int
 }
 
 func (d *fakeDB) hasSignalForMatch(matchID string) bool {
@@ -292,11 +303,21 @@ type fakeStaged struct {
 	qMutations  []domain.Quarantine
 	epssRows    []storedEpssRow
 	sourceHash  []sourceHashMutation
+	// assets is the copy-on-write overlay of the inventory commit path:
+	// nil until the inventory writer first stages on the transaction, then
+	// a deep clone of the committed assets the writer mutates (upserts by
+	// natural key) and commit publishes wholesale. A transaction that
+	// never touches inventory leaves it nil and commit leaves the
+	// committed assets alone.
+	assets []fakeStoredAsset
 }
 
 func (t *fakeTx) record(op string) { t.log = append(t.log, op) }
 
 func (t *fakeTx) commit() {
+	if t.staged.assets != nil {
+		t.db.assets = t.staged.assets
+	}
 	t.db.signalRows = append(t.db.signalRows, t.staged.signals...)
 	t.db.auditEvents = append(t.db.auditEvents, t.staged.audit...)
 	t.db.outboxEvents = append(t.db.outboxEvents, t.staged.outbox...)
@@ -917,6 +938,7 @@ type harness struct {
 	sources    *fakeSourceRepo
 	quarantine *fakeQuarantineRepo
 	comps      *fakeComponentRepo
+	inventory  *fakeInventoryWriter
 	clock      *clock.FakeClock
 
 	svc *application.Service
@@ -939,6 +961,7 @@ func newHarness(t *testing.T) *harness {
 	h.sources = &fakeSourceRepo{db: h.db}
 	h.quarantine = &fakeQuarantineRepo{db: h.db}
 	h.comps = &fakeComponentRepo{db: h.db}
+	h.inventory = &fakeInventoryWriter{db: h.db}
 	h.svc = application.NewService(application.ServiceDeps{
 		Signals:         h.signals,
 		Audit:           h.audit,
@@ -950,6 +973,7 @@ func newHarness(t *testing.T) *harness {
 		Sources:         h.sources,
 		Quarantine:      h.quarantine,
 		Components:      h.comps,
+		Inventory:       h.inventory,
 		Clock:           h.clock,
 		RunTx:           h.runner.Run,
 	})
