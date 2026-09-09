@@ -8,6 +8,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// Controlled vendor/product aliases (ch. 9.1, ARCH-003 §1.4): versioned auditable config; the alias closure resolves them at match time — never at write time
+type AliasRule struct {
+	ID pgtype.UUID
+	// Alias target: vendor | product
+	Scope string
+	// The alias/variant, already NFKC + trim + lowercase
+	FromValue string
+	// The canonical value, already NFKC + trim + lowercase
+	ToValue string
+	// Monotonic ruleset version; the composite effective rule version is a<alias.version>d<decision.version> (mapping.go)
+	Version int32
+	// Disabled rules are inert (never deleted — audited config)
+	Enabled bool
+	// Human rationale (audited)
+	Reason    pgtype.Text
+	CreatedAt pgtype.Timestamptz
+	// Last rule change from the injected clock (never the DB wall clock)
+	UpdatedAt pgtype.Timestamptz
+}
+
 // Inventory assets (ch. 6.1); type/environment/criticality/exposure hold the domain enum values (ARCH-001 §1)
 type Asset struct {
 	ID          pgtype.UUID
@@ -20,6 +40,12 @@ type Asset struct {
 	Exposure    string
 	Owner       pgtype.Text
 	CreatedAt   pgtype.Timestamptz
+	// Last inventory update from the injected clock (upsert-stamped; default now() backstop for pre-I3 writes) — drives the inventory_snapshot hash (ARCH-003 §5)
+	UpdatedAt pgtype.Timestamptz
+	// Soft-deactivation time (ch. 6.1): NULL while active — deactivated assets stay historically referenceable, never deleted
+	DeactivatedAt pgtype.Timestamptz
+	// Last manual data-quality verification (ch. 11.1); informational in I3, audited (ch. 13.2); NULL until the first verification
+	VerifiedAt pgtype.Timestamptz
 }
 
 // Append-only audit trail (ch. 13.1, ADR-014): one immutable row per state-changing action, written atomically with the change (ARCH-001 §1)
@@ -54,6 +80,54 @@ type Component struct {
 	Product   string
 	Version   string
 	CreatedAt pgtype.Timestamptz
+	// Original CPE 2.3 string, preserved verbatim (ch. 9.1); syntactically validated at import (ARCH-003 §2)
+	Cpe pgtype.Text
+	// Original package URL, preserved verbatim; syntactically validated at import, its type hints the version scheme
+	Purl pgtype.Text
+	// Original image reference registry/repository[:tag][@digest], preserved verbatim
+	Image pgtype.Text
+	// Immutable digest (sha256:…), preserved verbatim; stronger than a mutable tag — ranks above image in the natural key
+	Digest pgtype.Text
+	// Normalised vendor comparison key (NFKC + trim + lowercase at write time, no alias — aliases resolve at match time, ARCH-003 §2)
+	VendorNorm pgtype.Text
+	// Normalised product comparison key (NFKC + trim + lowercase at write time, no alias)
+	ProductNorm pgtype.Text
+	// Normalised version for the chosen scheme (kept raw in version); NULL when absent or not normalisable
+	VersionNorm pgtype.Text
+	// Version ordering scheme: semver | debian | rpm | maven | calver | generic | unknown — inferred per component at import (purl type -> CPE -> explicit column); unknown has no ordering and demotes matching (ARCH-003 §2)
+	VersionScheme string
+	// Deterministic import idempotency key (UQ asset_id, natural_key, ARCH-003 §1.3): sha-256 of the strongest identifier (cpe > purl > digest > image > vendor/product/version), prefix-tagged — legacy pre-I3 rows carry a 'legacy:' md5 placeholder
+	NaturalKey pgtype.Text
+	// Last inventory update from the injected clock (default now() backstop for pre-I3 writes)
+	UpdatedAt pgtype.Timestamptz
+	// Soft-deactivation time: NULL while active — components stay referenceable when deactivated (ARCH-003 §1.2)
+	DeactivatedAt pgtype.Timestamptz
+}
+
+// Manual match corrections and exclusions (ch. 9.2, ARCH-003 §1.4, ADR-015): auditable, versioned rules that survive matching.rebuild — matched rows reference the rule via matches.decision_rule_id
+type DecisionRule struct {
+	ID pgtype.UUID
+	// exclude (forces no_match) | override (forces method/confidence/score, computed starting point preserved in matches.auto_*)
+	Type string
+	// Applicability {cve_id?, vendor?, product?, component_id?}; empty field = wildcard, at least one field must be set
+	TargetScope []byte
+	// Forced outcome of an override {method, similarity?}; NULL for exclude
+	Action []byte
+	// Mandatory human rationale (ch. 9.2 — an audited correction without rationale is not a correction)
+	Reason string
+	// Author of the rule (audited)
+	ActorID string
+	// Validity window start; NULL = no lower bound
+	ValidFrom pgtype.Timestamptz
+	// Validity window end; NULL = open-ended until revoked (ch. 9.2 "bis sie abgelaufen oder aufgehoben ist")
+	ValidUntil pgtype.Timestamptz
+	// Monotonic ruleset version; the composite effective rule version is a<alias.version>d<decision.version> (mapping.go)
+	Version int32
+	// Explicit revocation time; NULL while the rule stands
+	RevokedAt pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+	// Last rule change from the injected clock (never the DB wall clock)
+	UpdatedAt pgtype.Timestamptz
 }
 
 // Current EPSS daily set (ADR-013, ARCH-002 §3): one row per scored CVE, replaced atomically by TRUNCATE + COPY; read by cve_id lookup
@@ -68,6 +142,20 @@ type EpssCurrent struct {
 	ModelVersion string
 	// Fetch time of the loaded set from the clock port (never the DB wall clock)
 	LoadedAt pgtype.Timestamptz
+}
+
+// Append-only EPSS history (ADR-013, ARCH-003 §7): per-day scores for inventory-relevant cve_ids, no FK onto epss_current — history must survive the current set's TRUNCATE + COPY swaps
+type EpssHistory struct {
+	// CVE id, history key half
+	CveID string
+	// Run date of the observed set, history key half — the daily append is idempotent on (cve_id, observed_on)
+	ObservedOn pgtype.Date
+	// EPSS score, the probability in [0,1] the CVE is exploited, as observed that day
+	Score pgtype.Numeric
+	// EPSS percentile in [0,1] of the score within the set, as observed that day
+	Percentile pgtype.Numeric
+	// EPSS scoring model/date of the observed set, e.g. 2026-09-09
+	ModelVersion string
 }
 
 // Immutable source statements per vulnerability (ch. 6.1); typed: synthetic_statement | cvss | kev | epss (ARCH-001 §1)
@@ -95,6 +183,16 @@ type Match struct {
 	Confidence  string
 	RuleVersion string
 	CreatedAt   pgtype.Timestamptz
+	// Auditable rationale list of the match (TR-007, ARCH-003 §3): jsonb array, '[]' for purely computed rows
+	Reasons []byte
+	// Decision rule that produced this match (exclusion or override, ADR-015); NULL = purely computed
+	DecisionRuleID pgtype.UUID
+	// Raw computed method preserved when a decision rule overrode it; NULL otherwise
+	AutoMethod pgtype.Text
+	// Raw computed confidence preserved when a decision rule overrode it; NULL otherwise
+	AutoConfidence pgtype.Text
+	// Raw computed score preserved when a decision rule overrode it; NULL otherwise
+	AutoScore pgtype.Int4
 }
 
 // Transactional outbox / job queue (ch. 7.1, 5.1, 7.3): one row per integration event or background job, written atomically with its state change (ARCH-001 §1)
