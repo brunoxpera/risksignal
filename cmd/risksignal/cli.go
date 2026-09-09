@@ -170,6 +170,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runMaintenance(e, commandArgs[1:])
 	case "diagnose":
 		return runDiagnose(e, commandArgs[1:])
+	case "demo":
+		return runDemo(e, commandArgs[1:])
 	default:
 		return e.emit(commandArgs[0], e.fail(exitValidation, classValidation,
 			"unknown command (run 'risksignal help' for usage)"))
@@ -264,6 +266,12 @@ commands:
                                     (sources, never secret values)
   diagnose connectivity             probe TCP reachability of the database host
   diagnose health                   report process and database connectivity
+  demo seed                         register the synthetic source, seed the
+                                    demo inventory and run the source once
+                                    (deterministic reference fixture, WP-1b.05)
+  demo run                          re-run the synthetic source (idempotent
+                                    no-op on re-run)
+  demo reset --yes                  truncate the I1b demo tables (dev-only)
   help                              show this help
 
 The CLI is strictly non-interactive: it never prompts and never reads hidden

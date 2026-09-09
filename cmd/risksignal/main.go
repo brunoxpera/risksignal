@@ -19,9 +19,11 @@
 // Implemented commands: maintenance migrate (WP-1a.04, checksum-guarded
 // runner), maintenance retention/recompute (stubs), diagnose config
 // (provenance report), diagnose connectivity (TCP probe of the database
-// host), diagnose health (process and connectivity report). Authentication
-// and authorisation exit codes are defined but not exercised until the
-// identity work package lands (non-goal of WP-1a.09).
+// host), diagnose health (process and connectivity report) and demo
+// seed|run|reset (WP-1b.05: the deterministic synthetic source and the demo
+// inventory behind the walking skeleton). Authentication and authorisation
+// exit codes are defined but not exercised until the identity work package
+// lands (non-goal of WP-1a.09).
 package main
 
 import (
