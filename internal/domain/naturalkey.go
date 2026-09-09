@@ -31,6 +31,17 @@ const (
 	naturalKeyVPP    naturalKeyTag = "vpp" // vendor/product(/version) fallback
 )
 
+// ComponentNaturalKey derives the natural key of one component row — the
+// exported form of componentNaturalKey for callers that assemble rows
+// before an id exists (the demo seed and the WP-3.05 import validate step
+// derive keys per inventory row, while NewComponent applies the same
+// derivation internally). The derivation is a pure function of the raw
+// identifiers and the write-time comparison keys, so the exported and the
+// internal form can never diverge.
+func ComponentNaturalKey(ids ComponentIdentifiers, vendorNorm, productNorm, versionNorm string) (string, error) {
+	return componentNaturalKey(ids, vendorNorm, productNorm, versionNorm)
+}
+
 // componentNaturalKey derives the natural key of one component row. The
 // strongest present identifier wins; the per-type normalisation is:
 //

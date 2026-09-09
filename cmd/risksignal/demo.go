@@ -18,10 +18,12 @@
 // clock.RealClock through the Clock port; timestamps, content hashes and
 // dedupe keys are deterministic functions of the fixture and the rule
 // version, ARCH-001 §3). Every write the seed and the run perform is
-// idempotent: sources/assets upsert by natural key and the component insert
-// is guarded by an in-transaction existence check (the I1b components table
-// deliberately carries no natural unique key, ARCH-001 §1), so `demo seed`
-// twice yields no duplicates.
+// idempotent: sources/assets upsert by natural key and component rows upsert
+// on UQ (asset_id, natural_key) — the I3 import idempotency key the seed
+// derives from each row's identity (naturalkey.go) — behind an in-
+// transaction existence check that keeps pre-I3 rows with NULL keys
+// duplicate-free too (00005's Expand phase), so `demo seed` twice yields no
+// duplicates.
 package main
 
 import (
@@ -30,6 +32,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -41,6 +44,7 @@ import (
 	"github.com/xpera/risksignal/internal/adapters/postgres/repo"
 	"github.com/xpera/risksignal/internal/adapters/sources/synthetic"
 	"github.com/xpera/risksignal/internal/application"
+	"github.com/xpera/risksignal/internal/domain"
 	"github.com/xpera/risksignal/internal/platform/clock"
 	"github.com/xpera/risksignal/internal/platform/config"
 )
@@ -141,7 +145,7 @@ func (e *cmdEnv) cmdDemoSeed(args []string) outcome {
 	}
 	defer pool.Close()
 
-	sourceID, counts, err := seedDemoInventory(ctx, pool, fix)
+	sourceID, counts, err := seedDemoInventory(ctx, pool, fix, clock.RealClock{}.Now())
 	if err != nil {
 		return demoErrorOutcome(err)
 	}
@@ -314,11 +318,14 @@ func newAppService(pool *pgxpool.Pool, clk clock.Clock) *application.Service {
 // assets/components in one transaction and returns the source id plus the
 // counts of seeded assets and components. Sources and assets upsert by
 // natural key (UQ (type, name); UQ (source, external_id)); component rows
-// are guarded by an in-transaction existence check on (asset_id, version)
-// because the I1b components table carries no natural unique key
-// (ARCH-001 §1) — the check keeps sequential seeds duplicate-free and the
-// whole seed atomic.
-func seedDemoInventory(ctx context.Context, pool *pgxpool.Pool, fix *synthetic.Fixture) (sourceID string, counts struct {
+// are written through the I3 write path — InsertComponent upserts on the
+// import idempotency key UQ (asset_id, natural_key), supplied together
+// with the normalised comparison keys and the version scheme (ARCH-003
+// §1.2/§1.3) — and stay guarded by an in-transaction existence check on
+// (asset_id, version) that also keeps pre-I3 rows with NULL keys
+// duplicate-free across sequential seeds (the Expand phase of 00005). The
+// updated_at stamp of every seed write comes from the given clock instant.
+func seedDemoInventory(ctx context.Context, pool *pgxpool.Pool, fix *synthetic.Fixture, now time.Time) (sourceID string, counts struct {
 	assets, components int
 }, err error) {
 	seedErr := postgres.WithTx(ctx, pool, func(tx pgx.Tx) error {
@@ -366,11 +373,27 @@ func seedDemoInventory(ctx context.Context, pool *pgxpool.Pool, fix *synthetic.F
 				if already {
 					continue
 				}
+				// The I3 write path (WP-3.03a / DEV-056): the demo inventory
+				// carries no CPE/purl/image/digest identity, so the write
+				// supplies NULL originals plus the vendor/product/version
+				// comparison keys, the 'unknown' scheme (no fabricated
+				// ordering — version inference is WP-3.04's) and the domain-
+				// derived natural key. version_norm stays NULL: 'unknown'
+				// normalises nothing.
+				vendorNorm, productNorm, key, err := seededComponentKey(comp.Vendor, comp.Product, comp.Version)
+				if err != nil {
+					return err
+				}
 				if _, err := qtx.InsertComponent(ctx, gen.InsertComponentParams{
-					AssetID: assetID,
-					Vendor:  comp.Vendor,
-					Product: comp.Product,
-					Version: comp.Version,
+					AssetID:       assetID,
+					Vendor:        comp.Vendor,
+					Product:       comp.Product,
+					Version:       comp.Version,
+					VendorNorm:    pgtype.Text{String: vendorNorm, Valid: true},
+					ProductNorm:   pgtype.Text{String: productNorm, Valid: true},
+					VersionScheme: string(domain.VersionSchemeUnknown),
+					NaturalKey:    pgtype.Text{String: key, Valid: true},
+					UpdatedAt:     pgtype.Timestamptz{Time: now, Valid: true},
 				}); err != nil {
 					return err
 				}
@@ -484,6 +507,30 @@ func demoErrorOutcome(err error) outcome {
 		}
 	}
 	return outcome{code: exitGeneric, class: classGeneric, message: err.Error()}
+}
+
+// seededComponentKey derives the normalised comparison keys and the import
+// idempotency natural key of one vendor/product/version-only inventory row
+// (the I3 write path, WP-3.03a / DEV-056): the demo inventory and the seed
+// fixtures carry no CPE/purl/image/digest identity, so the derivation
+// falls back to the vendor/product/version key of the domain (naturalkey.go
+// — ComponentNaturalKey is the same derivation NewComponent applies). The
+// comparison keys are the ASCII trim + lowercase fold of the originals,
+// mirroring how migration 00005 backfilled the pre-I3 rows; full NFKC
+// normalisation is the WP-3.04 import function. version_norm is not part
+// of the fold here: rows with the 'unknown' scheme are not normalisable.
+func seededComponentKey(vendor, product, version string) (vendorNorm, productNorm, naturalKey string, err error) {
+	vendorNorm = strings.ToLower(strings.TrimSpace(vendor))
+	productNorm = strings.ToLower(strings.TrimSpace(product))
+	key, err := domain.ComponentNaturalKey(domain.ComponentIdentifiers{
+		Vendor:  vendor,
+		Product: product,
+		Version: version,
+	}, vendorNorm, productNorm, "")
+	if err != nil {
+		return "", "", "", err
+	}
+	return vendorNorm, productNorm, key, nil
 }
 
 // demoTextOpt maps an optional string onto the nullable text column of the

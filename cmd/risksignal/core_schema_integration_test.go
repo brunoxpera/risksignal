@@ -36,6 +36,7 @@ import (
 	"github.com/xpera/risksignal/internal/adapters/postgres"
 	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
 	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/xpera/risksignal/internal/domain"
 )
 
 // mustTS parses an RFC 3339 timestamp as the pgx timestamptz of the fixed
@@ -140,8 +141,25 @@ func TestCoreSchemaMigratesAndSignalRoundTripThroughGeneratedQueries(t *testing.
 	}); err != nil || again != assetID {
 		t.Fatalf("UpsertAsset rerun = %v, %v; want the same asset id", again, err)
 	}
+	// The I3 write path (WP-3.03a / DEV-056): the seeded component row
+	// supplies the normalised comparison keys, the 'unknown' scheme and the
+	// domain-derived natural key (seededComponentKey →
+	// domain.ComponentNaturalKey), so the insert participates in the
+	// product index and the UQ (asset_id, natural_key) idempotency key.
+	vendorNorm, productNorm, naturalKey, err := seededComponentKey("acme", "portal", "2.4")
+	if err != nil {
+		t.Fatalf("seededComponentKey: %v", err)
+	}
 	componentID, err := q.InsertComponent(ctx, gen.InsertComponentParams{
-		AssetID: assetID, Vendor: "acme", Product: "portal", Version: "2.4",
+		AssetID:       assetID,
+		Vendor:        "acme",
+		Product:       "portal",
+		Version:       "2.4",
+		VendorNorm:    pgtype.Text{String: vendorNorm, Valid: true},
+		ProductNorm:   pgtype.Text{String: productNorm, Valid: true},
+		VersionScheme: string(domain.VersionSchemeUnknown),
+		NaturalKey:    pgtype.Text{String: naturalKey, Valid: true},
+		UpdatedAt:     mustTS(t, "2026-09-09T08:00:00Z"),
 	})
 	if err != nil {
 		t.Fatalf("InsertComponent: %v", err)

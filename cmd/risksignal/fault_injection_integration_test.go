@@ -133,8 +133,27 @@ func seedCreateSignalFixture(t *testing.T, pool *pgxpool.Pool, at time.Time) str
 	if err != nil {
 		t.Fatalf("UpsertAsset: %v", err)
 	}
+	// The I3 write path (WP-3.03a / DEV-056): the fixture component row
+	// supplies the normalised comparison keys, the 'unknown' scheme and the
+	// domain-derived natural key (seededComponentKey →
+	// domain.ComponentNaturalKey) like the demo seed does — the generated
+	// InsertComponent writes these columns unconditionally, and the row
+	// must participate in the product index and UQ (asset_id,
+	// natural_key).
+	vendorNorm, productNorm, naturalKey, err := seededComponentKey("acme", "portal", "2.4")
+	if err != nil {
+		t.Fatalf("seededComponentKey: %v", err)
+	}
 	componentID, err := q.InsertComponent(ctx, gen.InsertComponentParams{
-		AssetID: assetID, Vendor: "acme", Product: "portal", Version: "2.4",
+		AssetID:       assetID,
+		Vendor:        "acme",
+		Product:       "portal",
+		Version:       "2.4",
+		VendorNorm:    pgtype.Text{String: vendorNorm, Valid: true},
+		ProductNorm:   pgtype.Text{String: productNorm, Valid: true},
+		VersionScheme: string(domain.VersionSchemeUnknown),
+		NaturalKey:    pgtype.Text{String: naturalKey, Valid: true},
+		UpdatedAt:     pgtype.Timestamptz{Time: at, Valid: true},
 	})
 	if err != nil {
 		t.Fatalf("InsertComponent: %v", err)
