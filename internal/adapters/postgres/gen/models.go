@@ -22,6 +22,30 @@ type Asset struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+// Append-only audit trail (ch. 13.1, ADR-014): one immutable row per state-changing action, written atomically with the change (ARCH-001 §1)
+type AuditEvent struct {
+	ID pgtype.UUID
+	// Type of the changed aggregate, e.g. risk_signal
+	AggregateType string
+	// UUID of the changed aggregate (polymorphic — no FK, the aggregate type disambiguates)
+	AggregateID pgtype.UUID
+	// Principal kind: system in I1b (e.g. synthetic-source, demo-seed); user from I5a
+	ActorType string
+	ActorID   string
+	// Display name at event time; cleared by the ADR-014 pseudonymisation stage, never relied on for identity
+	ActorDisplayName pgtype.Text
+	// Action name, e.g. signal.created
+	Action string
+	// Event time from the injected clock (never the DB wall clock)
+	OccurredAt pgtype.Timestamptz
+	// Minimised state snapshot before the change, NULL for creates (ch. 13.5; no secrets)
+	Before []byte
+	// Minimised state snapshot after the change (ch. 13.5; no secrets)
+	After []byte
+	// Request/command correlation id linking the audit row to the outbox row of the same command
+	CorrelationID string
+}
+
 // One component row per asset (ch. 6.1); vendor/product/version only in I1b (ARCH-001 §1), CPE/purl/digest arrive with I3
 type Component struct {
 	ID        pgtype.UUID
@@ -57,6 +81,29 @@ type Match struct {
 	Confidence  string
 	RuleVersion string
 	CreatedAt   pgtype.Timestamptz
+}
+
+// Transactional outbox / job queue (ch. 7.1, 5.1, 7.3): one row per integration event or background job, written atomically with its state change (ARCH-001 §1)
+type Outbox struct {
+	ID pgtype.UUID
+	// Row discriminator: event or job type, e.g. signal.created
+	Type string
+	// Event/job payload: { event_id, type, signal_id, match_id, cve_id, priority, occurred_at, correlation_id } for signal.created
+	Payload []byte
+	// pending -> claimed -> done | dead_letter (ARCH-001 §2); claimed rows are re-claimable once lease_until passes
+	Status string
+	// Earliest time the row may be claimed; scheduled/job rows set it in the future
+	AvailableAt pgtype.Timestamptz
+	// Crash-recovery lease (TAT-05): NULL while pending, set by every claim, expiry makes the row re-claimable
+	LeaseUntil pgtype.Timestamptz
+	// Delivery attempts; incremented by every claim (relay may dead-letter past the ch. 14.2 attempt cap)
+	Attempts int32
+	// Error text of the failed delivery that led to dead_letter
+	LastError pgtype.Text
+	// Command-level idempotency key, e.g. signal.created:<signal_id>; unique for the row lifetime (ADR-012 consequence)
+	DedupeKey string
+	// Row creation time from the injected clock (never the DB wall clock)
+	CreatedAt pgtype.Timestamptz
 }
 
 // Raw source documents, stored unchanged and hashed (ch. 8.1 step 4); the natural key makes ingest idempotent (ARCH-001 §1)
