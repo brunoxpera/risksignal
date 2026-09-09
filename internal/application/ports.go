@@ -238,3 +238,20 @@ type QuarantineRepo interface {
 type ComponentRepo interface {
 	ListByVendorProduct(ctx context.Context, vendor, product string) ([]Component, error)
 }
+
+// AliasRuleRepo resolves the effective alias rules the match-time alias
+// closure reads through (ARCH-003 §2 item 2, WP-3.04/DEV-047): the
+// enabled alias rules of the current ruleset version, which the matcher
+// feeds to normalise.AliasClosure / normalise.ValidateAliasRules — one
+// closure per (scope, value), both the CVE side and the component side
+// closed before the semi-join (ADR-012). The adapter implementation lands
+// with the matching engine (WP-3.06); the port is declared here so the
+// matching use case programs against the read, never against the
+// alias_rules table. Disabled rules and stale ruleset versions are inert
+// and must not be returned.
+type AliasRuleRepo interface {
+	// Effective returns the enabled alias rules of the current ruleset
+	// version (both scopes). A ruleset with no rules yet yields an empty
+	// slice, never an error.
+	Effective(ctx context.Context) ([]domain.AliasRule, error)
+}
