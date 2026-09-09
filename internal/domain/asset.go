@@ -144,3 +144,99 @@ func ParseExposure(s string) (Exposure, error) {
 	}
 	return v, nil
 }
+
+// Asset is an inventoried asset (ch. 6.1, ARCH-001 §1 assets; ARCH-003 §1.1
+// extends the I1b aggregate). The field block mirrors the table columns
+// (minus the timestamps, which belong to the application layer behind the
+// clock port, package doc): external_id/source are the import idempotency
+// key UQ (source, external_id), the vocabulary fields use the enums above.
+//
+// Deactivation is explicit and never implicit: only the guarded Deactivate
+// transition sets Deactivated (the deactivated_at stamp is applied by the
+// application layer), so an import that stops carrying an asset can never
+// accidentally deactivate it (ARCH-003 §1.3). Verified records the last
+// manual data-quality verification (ch. 11.1 "letzte Verifikation",
+// ARCH-003 §1.1 verified_at); it is informational, never a state gate.
+// Use NewAsset to construct with the invariants; the persistence layer
+// scans rows back into plain structs.
+type Asset struct {
+	ID          string // uuid
+	ExternalID  string // import idempotency key half (UQ source, external_id)
+	Source      string // import idempotency key half
+	Type        AssetType
+	Name        string
+	Environment Environment
+	Criticality Criticality
+	Exposure    Exposure
+	Owner       string // "" when unassigned
+
+	Deactivated bool // soft-deactivate; deactivated_at stamped by the application layer
+	Verified    bool // last manual data-quality verification; verified_at stamped there too
+}
+
+// NewAsset validates and assembles an Asset (ARCH-001 §1 assets). id,
+// externalID, source and name are required (NOT NULL columns); the type and
+// the three context vocabularies must be known values (unknown enum values
+// are still representable on the boundary as typed "unknown" members, but
+// a typo never passes silently). A new asset is active (Deactivated false)
+// and not yet verified.
+func NewAsset(id, externalID, source, name, owner string, typ AssetType, env Environment, crit Criticality, exp Exposure) (Asset, error) {
+	if id == "" {
+		return Asset{}, fmt.Errorf("domain: asset id must not be empty")
+	}
+	if externalID == "" {
+		return Asset{}, fmt.Errorf("domain: asset external_id must not be empty")
+	}
+	if source == "" {
+		return Asset{}, fmt.Errorf("domain: asset source must not be empty")
+	}
+	if name == "" {
+		return Asset{}, fmt.Errorf("domain: asset name must not be empty")
+	}
+	if !typ.Valid() {
+		return Asset{}, fmt.Errorf("domain: invalid AssetType %q", typ)
+	}
+	if !env.Valid() {
+		return Asset{}, fmt.Errorf("domain: invalid Environment %q", env)
+	}
+	if !crit.Valid() {
+		return Asset{}, fmt.Errorf("domain: invalid Criticality %q", crit)
+	}
+	if !exp.Valid() {
+		return Asset{}, fmt.Errorf("domain: invalid Exposure %q", exp)
+	}
+	return Asset{
+		ID:          id,
+		ExternalID:  externalID,
+		Source:      source,
+		Type:        typ,
+		Name:        name,
+		Environment: env,
+		Criticality: crit,
+		Exposure:    exp,
+		Owner:       owner,
+	}, nil
+}
+
+// Deactivate soft-deactivates the asset (ARCH-003 §1.1: "soft-deactivate,
+// never delete — deactivated assets stay historically referenceable"). The
+// transition is explicit and guarded: an already-deactivated asset cannot
+// be deactivated again (a repeated import must not silently re-stamp the
+// lifecycle — deactivation is an operator action). The deactivated_at
+// timestamp is applied by the application layer.
+func (a Asset) Deactivate() (Asset, error) {
+	if a.Deactivated {
+		return Asset{}, fmt.Errorf("domain: asset %s is already deactivated", a.ID)
+	}
+	a.Deactivated = true
+	return a, nil
+}
+
+// Verify records a manual data-quality verification (ARCH-003 §1.1
+// verified_at: "last manual data-quality verification; informational in
+// I3"). Verification is repeatable — every operator check re-verifies the
+// row — and is independent of the deactivation state.
+func (a Asset) Verify() (Asset, error) {
+	a.Verified = true
+	return a, nil
+}
