@@ -64,15 +64,15 @@ func ParsePURL(input string) (PURL, error) {
 	rest := input[len(purlSchemePrefix):]
 	slash := strings.IndexByte(rest, '/')
 	if slash < 0 {
-		return PURL{}, syntaxError("purl", "type", 1, input, "missing '/' after the type — a purl is pkg:type/namespace/name@version")
+		return PURL{}, syntaxError("purl", "type", 0, input, "missing '/' after the type — a purl is pkg:type/namespace/name@version")
 	}
 	typ := rest[:slash]
 	if !validPURLType(typ) {
-		return PURL{}, syntaxError("purl", "type", 1, input, "type must be a lowercase ASCII letter followed by lowercase ASCII letters/digits, '.', '+' or '-'")
+		return PURL{}, syntaxError("purl", "type", 0, input, "type must be a lowercase ASCII letter followed by lowercase ASCII letters/digits, '.', '+' or '-'")
 	}
 	rest = rest[slash+1:]
 	if rest == "" {
-		return PURL{}, syntaxError("purl", "name", 2, input, "missing name after the type")
+		return PURL{}, syntaxError("purl", "name", 0, input, "missing name after the type")
 	}
 
 	p := PURL{Type: typ}
@@ -90,12 +90,12 @@ func ParsePURL(input string) (PURL, error) {
 	segs := strings.Split(path, "/")
 	name := segs[len(segs)-1]
 	if name == "" {
-		return PURL{}, syntaxError("purl", "name", 2, input, "name must not be empty")
+		return PURL{}, syntaxError("purl", "name", 0, input, "name must not be empty")
 	}
 	if len(segs) > 1 {
 		for _, seg := range segs[:len(segs)-1] {
 			if seg == "" {
-				return PURL{}, syntaxError("purl", "namespace", 2, input, "namespace must not contain an empty segment")
+				return PURL{}, syntaxError("purl", "namespace", 0, input, "namespace must not contain an empty segment")
 			}
 		}
 		p.Namespace = strings.Join(segs[:len(segs)-1], "/")

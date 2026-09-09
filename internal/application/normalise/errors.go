@@ -18,7 +18,10 @@ type SyntaxError struct {
 	// field count, empty input).
 	Field string
 	// Index is the 1-based attribute position in the ordered
-	// decomposition; 0 when the whole string fails. It is the
+	// decomposition — meaningful for grammars with a fixed attribute
+	// order (the 11 CPE 2.3 attributes); 0 everywhere else (purl and
+	// image failures identify the offending part through Field, and
+	// whole-string failures always carry 0). It is the
 	// machine-readable half of the position/reason pair.
 	Index int
 	// Reason is the human-readable half of the pair.
