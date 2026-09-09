@@ -178,6 +178,9 @@ func newCreateSignalService(pool *pgxpool.Pool, outbox application.OutboxRepo, c
 		Vulnerabilities: repo.NewVulnerabilityRepo(q),
 		Matches:         repo.NewMatchRepo(q),
 		SourceRuns:      repo.NewSourceRunRepo(q),
+		RawRecords:      repo.NewRawRecordRepo(q),
+		Sources:         repo.NewSourceRepo(q),
+		Quarantine:      repo.NewQuarantineRepo(q),
 		Components:      repo.NewComponentRepo(q),
 		Clock:           clk,
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {

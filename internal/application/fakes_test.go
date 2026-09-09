@@ -23,6 +23,7 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -68,8 +69,9 @@ type storedMatch struct {
 }
 
 type storedRawRecord struct {
-	id, sourceID, externalID, contentHash string
-	fetchedAt                             time.Time
+	id, sourceID, externalID, contentHash, contentEncoding string
+	payload                                                []byte
+	fetchedAt                                              time.Time
 }
 
 type storedSourceRun struct {
@@ -77,16 +79,19 @@ type storedSourceRun struct {
 	status       string
 	counters     application.SourceRunCounters
 	errText      string
+	cursorBefore json.RawMessage
+	cursorAfter  json.RawMessage
 	startedAt    time.Time
 	finishedAt   time.Time
 }
 
 type storedRunCompletion struct {
-	runID      string
-	status     application.SourceRunStatus
-	counters   application.SourceRunCounters
-	errText    string
-	finishedAt time.Time
+	runID       string
+	status      application.SourceRunStatus
+	counters    application.SourceRunCounters
+	cursorAfter json.RawMessage
+	errText     string
+	finishedAt  time.Time
 }
 
 // fakeDB is the committed state of the fake persistence: rows are visible
@@ -100,6 +105,8 @@ type fakeDB struct {
 	matchRows    []storedMatch
 	rawRecords   []storedRawRecord
 	sourceRuns   []storedSourceRun
+	sources      []application.SourceDescriptor
+	quarantine   []domain.Quarantine
 	// components is the seeded inventory (demo seed data), written by the
 	// test before a run and only ever read by the matcher fake.
 	components []application.Component
@@ -152,6 +159,43 @@ func (d *fakeDB) rawRecordExists(sourceID, externalID, hash string) (string, boo
 	return "", false
 }
 
+func (d *fakeDB) rawRecordByID(id string) (storedRawRecord, bool) {
+	for _, r := range d.rawRecords {
+		if r.id == id {
+			return r, true
+		}
+	}
+	return storedRawRecord{}, false
+}
+
+func (d *fakeDB) sourceByID(id string) (application.SourceDescriptor, bool) {
+	for _, s := range d.sources {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return application.SourceDescriptor{}, false
+}
+
+func (d *fakeDB) quarantineByID(id string) (domain.Quarantine, bool) {
+	for _, q := range d.quarantine {
+		if q.ID == id {
+			return q, true
+		}
+	}
+	return domain.Quarantine{}, false
+}
+
+func (d *fakeDB) applyQuarantine(q domain.Quarantine) {
+	for i := range d.quarantine {
+		if d.quarantine[i].ID == q.ID {
+			d.quarantine[i] = q
+			return
+		}
+	}
+	d.quarantine = append(d.quarantine, q)
+}
+
 func (d *fakeDB) applyCompletion(c storedRunCompletion) error {
 	for i := range d.sourceRuns {
 		if d.sourceRuns[i].id == c.runID {
@@ -159,6 +203,15 @@ func (d *fakeDB) applyCompletion(c storedRunCompletion) error {
 			d.sourceRuns[i].counters = c.counters
 			d.sourceRuns[i].errText = c.errText
 			d.sourceRuns[i].finishedAt = c.finishedAt
+			// The cursor advances only after the commit of a successful
+			// run (ch. 6.1): the fake mirrors the generated CASE guard of
+			// CompleteSourceRun, which writes cursor_after on 'succeeded'
+			// and forces NULL on every other terminal status.
+			if c.status == application.SourceRunStatusSucceeded {
+				d.sourceRuns[i].cursorAfter = c.cursorAfter
+			} else {
+				d.sourceRuns[i].cursorAfter = nil
+			}
 			return nil
 		}
 	}
@@ -193,6 +246,8 @@ type fakeStaged struct {
 	rawRecords  []storedRawRecord
 	runs        []storedSourceRun
 	completions []storedRunCompletion
+	quarantine  []domain.Quarantine
+	qMutations  []domain.Quarantine
 }
 
 func (t *fakeTx) record(op string) { t.log = append(t.log, op) }
@@ -206,6 +261,12 @@ func (t *fakeTx) commit() {
 	t.db.matchRows = append(t.db.matchRows, t.staged.matches...)
 	t.db.rawRecords = append(t.db.rawRecords, t.staged.rawRecords...)
 	t.db.sourceRuns = append(t.db.sourceRuns, t.staged.runs...)
+	for _, q := range t.staged.quarantine {
+		t.db.applyQuarantine(q)
+	}
+	for _, q := range t.staged.qMutations {
+		t.db.applyQuarantine(q)
+	}
 	for _, c := range t.staged.completions {
 		if err := t.db.applyCompletion(c); err != nil {
 			panic(err) // a completion of a missing run is a test bug
@@ -429,23 +490,7 @@ func (f *fakeMatchRepo) Insert(ctx context.Context, tx application.Tx, rec appli
 
 type fakeSourceRunRepo struct{ db *fakeDB }
 
-func (f *fakeSourceRunRepo) InsertRawRecord(ctx context.Context, tx application.Tx, sourceID, externalID string, payload []byte, contentHash string, fetchedAt time.Time) (string, error) {
-	ftx, err := fakeTxOf(tx)
-	if err != nil {
-		return "", err
-	}
-	ftx.record("raw")
-	if id, ok := f.db.rawRecordExists(sourceID, externalID, contentHash); ok {
-		return id, nil
-	}
-	id := uuid.New()
-	ftx.staged.rawRecords = append(ftx.staged.rawRecords, storedRawRecord{
-		id: id, sourceID: sourceID, externalID: externalID, contentHash: contentHash, fetchedAt: fetchedAt,
-	})
-	return id, nil
-}
-
-func (f *fakeSourceRunRepo) Open(ctx context.Context, tx application.Tx, sourceID string, startedAt time.Time) (string, error) {
+func (f *fakeSourceRunRepo) Open(ctx context.Context, tx application.Tx, sourceID string, cursorBefore json.RawMessage, startedAt time.Time) (string, error) {
 	ftx, err := fakeTxOf(tx)
 	if err != nil {
 		return "", err
@@ -453,21 +498,175 @@ func (f *fakeSourceRunRepo) Open(ctx context.Context, tx application.Tx, sourceI
 	ftx.record("run.open")
 	id := uuid.New()
 	ftx.staged.runs = append(ftx.staged.runs, storedSourceRun{
-		id: id, sourceID: sourceID, status: "running", startedAt: startedAt,
+		id: id, sourceID: sourceID, status: "running", cursorBefore: cursorBefore, startedAt: startedAt,
 	})
 	return id, nil
 }
 
-func (f *fakeSourceRunRepo) Complete(ctx context.Context, tx application.Tx, runID string, status application.SourceRunStatus, counters application.SourceRunCounters, errText string, finishedAt time.Time) error {
+func (f *fakeSourceRunRepo) Complete(ctx context.Context, tx application.Tx, runID string, status application.SourceRunStatus, counters application.SourceRunCounters, cursorAfter json.RawMessage, errText string, finishedAt time.Time) error {
 	ftx, err := fakeTxOf(tx)
 	if err != nil {
 		return err
 	}
 	ftx.record("run.complete")
 	ftx.staged.completions = append(ftx.staged.completions, storedRunCompletion{
-		runID: runID, status: status, counters: counters, errText: errText, finishedAt: finishedAt,
+		runID: runID, status: status, counters: counters, cursorAfter: cursorAfter, errText: errText, finishedAt: finishedAt,
 	})
 	return nil
+}
+
+type fakeRawRecordRepo struct{ db *fakeDB }
+
+func (f *fakeRawRecordRepo) Insert(ctx context.Context, tx application.Tx, sourceID, externalID string, payload []byte, contentHash, contentEncoding string, fetchedAt time.Time) (string, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return "", err
+	}
+	ftx.record("raw")
+	if id, ok := f.db.rawRecordExists(sourceID, externalID, contentHash); ok {
+		return id, nil // ON CONFLICT DO NOTHING: identical earlier ingest
+	}
+	id := uuid.New()
+	ftx.staged.rawRecords = append(ftx.staged.rawRecords, storedRawRecord{
+		id: id, sourceID: sourceID, externalID: externalID, contentHash: contentHash,
+		payload: payload, contentEncoding: contentEncoding, fetchedAt: fetchedAt,
+	})
+	return id, nil
+}
+
+func (f *fakeRawRecordRepo) GetByID(ctx context.Context, id string) (application.RawRecord, error) {
+	row, ok := f.db.rawRecordByID(id)
+	if !ok {
+		return application.RawRecord{}, application.NotFoundError("raw_record.get_by_id", fmt.Errorf("raw record %s not found", id))
+	}
+	return application.RawRecord{
+		ID: row.id, SourceID: row.sourceID, ExternalID: row.externalID,
+		ContentHash: row.contentHash, Payload: row.payload, ContentEncoding: row.contentEncoding,
+		FetchedAt: row.fetchedAt,
+	}, nil
+}
+
+type fakeSourceRepo struct{ db *fakeDB }
+
+func (f *fakeSourceRepo) GetByID(ctx context.Context, id string) (application.SourceDescriptor, error) {
+	desc, ok := f.db.sourceByID(id)
+	if !ok {
+		return application.SourceDescriptor{}, application.NotFoundError("source.get_by_id", fmt.Errorf("source %s not found", id))
+	}
+	return desc, nil
+}
+
+type fakeQuarantineRepo struct{ db *fakeDB }
+
+func (f *fakeQuarantineRepo) Insert(ctx context.Context, tx application.Tx, sourceID, sourceRunID, rawRecordID, position, reason, payloadHash string, now time.Time) (string, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return "", err
+	}
+	ftx.record("quarantine.insert")
+	q, err := domain.NewQuarantine(uuid.New(), sourceID, sourceRunID, rawRecordID, position, reason, payloadHash)
+	if err != nil {
+		return "", application.ValidationError("quarantine.insert", err)
+	}
+	ftx.staged.quarantine = append(ftx.staged.quarantine, q)
+	return q.ID, nil
+}
+
+func (f *fakeQuarantineRepo) GetByID(ctx context.Context, id string) (domain.Quarantine, error) {
+	q, ok := f.db.quarantineByID(id)
+	if !ok {
+		return domain.Quarantine{}, application.NotFoundError("quarantine.get_by_id", fmt.Errorf("quarantine %s not found", id))
+	}
+	return q, nil
+}
+
+func (f *fakeQuarantineRepo) List(ctx context.Context, status *domain.QuarantineStatus, sourceID string, limit int) ([]domain.Quarantine, error) {
+	if limit < 1 {
+		return nil, application.Validationf("quarantine.list", "limit %d must be >= 1", limit)
+	}
+	var rows []domain.Quarantine
+	for _, q := range f.db.quarantine {
+		if status != nil && q.Status != *status {
+			continue
+		}
+		if sourceID != "" && q.SourceID != sourceID {
+			continue
+		}
+		rows = append(rows, q)
+	}
+	// committed rows are appended in created order; creation time is
+	// monotonic in the fakes, so insertion order is the SQL ordering.
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
+func (f *fakeQuarantineRepo) mutate(ctx context.Context, tx application.Tx, id string, want []domain.QuarantineStatus, fn func(domain.Quarantine) domain.Quarantine) (domain.Quarantine, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.Quarantine{}, err
+	}
+	q, ok := f.db.quarantineByID(id)
+	if !ok {
+		// Mirrors the guarded UPDATE ... RETURNING of the generated
+		// statements: a row that is not there (or not in the guarded
+		// status) matches zero rows.
+		return domain.Quarantine{}, application.ConflictError("quarantine.transition", fmt.Errorf("no %s row for id %s", want, id))
+	}
+	allowed := false
+	for _, s := range want {
+		if q.Status == s {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return domain.Quarantine{}, application.ConflictError("quarantine.transition", fmt.Errorf("quarantine %s is %s; transition wants one of %v", id, q.Status, want))
+	}
+	next := fn(q)
+	ftx.staged.qMutations = append(ftx.staged.qMutations, next)
+	return next, nil
+}
+
+func (f *fakeQuarantineRepo) Acknowledge(ctx context.Context, tx application.Tx, id, acknowledgedBy, note string, now time.Time) (domain.Quarantine, error) {
+	return f.mutate(ctx, tx, id, []domain.QuarantineStatus{domain.QuarantineStatusNew}, func(q domain.Quarantine) domain.Quarantine {
+		next, err := q.Acknowledge(acknowledgedBy, note)
+		if err != nil {
+			panic(err) // guarded above; a mismatch is a fake bug
+		}
+		return next
+	})
+}
+
+func (f *fakeQuarantineRepo) MarkReadyForRetry(ctx context.Context, tx application.Tx, id string, now time.Time) (domain.Quarantine, error) {
+	return f.mutate(ctx, tx, id, []domain.QuarantineStatus{domain.QuarantineStatusNew, domain.QuarantineStatusAcknowledged}, func(q domain.Quarantine) domain.Quarantine {
+		next, err := q.MarkReadyForRetry()
+		if err != nil {
+			panic(err)
+		}
+		return next
+	})
+}
+
+func (f *fakeQuarantineRepo) MarkResolved(ctx context.Context, tx application.Tx, id, resolvedVulnerabilityID, resolvedEvidenceID, note string, now time.Time) (domain.Quarantine, error) {
+	return f.mutate(ctx, tx, id, []domain.QuarantineStatus{domain.QuarantineStatusReadyForRetry, domain.QuarantineStatusNew}, func(q domain.Quarantine) domain.Quarantine {
+		next, err := q.ReprocessSucceeded(resolvedVulnerabilityID, resolvedEvidenceID, note)
+		if err != nil {
+			panic(err)
+		}
+		return next
+	})
+}
+
+func (f *fakeQuarantineRepo) IncrementAttempts(ctx context.Context, tx application.Tx, id string, now time.Time) (domain.Quarantine, error) {
+	return f.mutate(ctx, tx, id, []domain.QuarantineStatus{domain.QuarantineStatusNew, domain.QuarantineStatusReadyForRetry}, func(q domain.Quarantine) domain.Quarantine {
+		next, err := q.ReprocessFailed()
+		if err != nil {
+			panic(err)
+		}
+		return next
+	})
 }
 
 type fakeComponentRepo struct{ db *fakeDB }
@@ -491,14 +690,17 @@ type harness struct {
 	db     *fakeDB
 	runner *fakeTxRunner
 
-	signals *fakeSignalRepo
-	audit   *fakeAuditRepo
-	outbox  *fakeOutboxRepo
-	vulns   *fakeVulnerabilityRepo
-	matches *fakeMatchRepo
-	runs    *fakeSourceRunRepo
-	comps   *fakeComponentRepo
-	clock   *clock.FakeClock
+	signals    *fakeSignalRepo
+	audit      *fakeAuditRepo
+	outbox     *fakeOutboxRepo
+	vulns      *fakeVulnerabilityRepo
+	matches    *fakeMatchRepo
+	runs       *fakeSourceRunRepo
+	raws       *fakeRawRecordRepo
+	sources    *fakeSourceRepo
+	quarantine *fakeQuarantineRepo
+	comps      *fakeComponentRepo
+	clock      *clock.FakeClock
 
 	svc *application.Service
 }
@@ -516,6 +718,9 @@ func newHarness(t *testing.T) *harness {
 	h.vulns = &fakeVulnerabilityRepo{db: h.db}
 	h.matches = &fakeMatchRepo{db: h.db}
 	h.runs = &fakeSourceRunRepo{db: h.db}
+	h.raws = &fakeRawRecordRepo{db: h.db}
+	h.sources = &fakeSourceRepo{db: h.db}
+	h.quarantine = &fakeQuarantineRepo{db: h.db}
 	h.comps = &fakeComponentRepo{db: h.db}
 	h.svc = application.NewService(application.ServiceDeps{
 		Signals:         h.signals,
@@ -524,6 +729,9 @@ func newHarness(t *testing.T) *harness {
 		Vulnerabilities: h.vulns,
 		Matches:         h.matches,
 		SourceRuns:      h.runs,
+		RawRecords:      h.raws,
+		Sources:         h.sources,
+		Quarantine:      h.quarantine,
 		Components:      h.comps,
 		Clock:           h.clock,
 		RunTx:           h.runner.Run,

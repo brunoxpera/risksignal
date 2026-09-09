@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -101,24 +102,98 @@ type MatchRepo interface {
 	Insert(ctx context.Context, tx Tx, rec MatchRecord, createdAt time.Time) (string, error)
 }
 
-// SourceRunRepo owns the source-run lifecycle and its raw document
-// (ARCH-001 §1 source_runs + raw_records, §3 steps 1, 2 and 6): opening a
-// run, storing the unchanged document (idempotent by UQ (source_id,
-// external_id, content_hash)) and committing the terminal state with the
-// counters.
-type SourceRunRepo interface {
-	// InsertRawRecord stores the unchanged source document and returns the
-	// row id — newly inserted or already existing.
-	InsertRawRecord(ctx context.Context, tx Tx, sourceID, externalID string, payload []byte, contentHash string, fetchedAt time.Time) (string, error)
+// SourceRepo resolves the sources row of a run, a raw record or a
+// quarantined record into the adapter descriptor (ARCH-002 §1): the
+// descriptor read every run use case starts from and the scheduler reads
+// to enqueue a fetch.
+type SourceRepo interface {
+	// GetByID resolves the sources row by its id (sources.id — the
+	// attribution key of source_runs, raw_records and quarantine rows). A
+	// missing row is a not-found Error.
+	GetByID(ctx context.Context, id string) (SourceDescriptor, error)
+}
 
+// RawRecordRepo persists the unchanged raw source documents (ARCH-002 §1,
+// §3 raw_records) and reads them back for a normalise pass. The insert is
+// idempotent on the natural key (source_id, external_id, content_hash); the
+// read returns the stored bytes of the reprocess path (ARCH-002 §4).
+type RawRecordRepo interface {
+	// Insert stores the unchanged source document and returns the row id —
+	// newly inserted, or the already existing one of an identical earlier
+	// ingest. contentEncoding describes the payload bytes ('identity' |
+	// 'gzip' | 'json'; "" stores NULL).
+	Insert(ctx context.Context, tx Tx, sourceID, externalID string, payload []byte, contentHash, contentEncoding string, fetchedAt time.Time) (string, error)
+
+	// GetByID returns the stored document with its payload bytes. A
+	// missing record is a not-found Error.
+	GetByID(ctx context.Context, id string) (RawRecord, error)
+}
+
+// SourceRunRepo owns the source-run lifecycle (ARCH-001 §1 source_runs,
+// §3 steps 1 and 6; cursor bookkeeping ARCH-002 §1): opening a run from
+// the source cursor and committing the terminal state with the counters
+// and the advanced cursor. The raw document of a run is stored through
+// RawRecordRepo.
+type SourceRunRepo interface {
 	// Open starts a run in status 'running' and returns its id.
-	Open(ctx context.Context, tx Tx, sourceID string, startedAt time.Time) (string, error)
+	// cursorBefore records the source cursor value the run opens from (the
+	// value the fetch half read off sources.cursor; nil for full-set
+	// sources and the I1b synthetic source).
+	Open(ctx context.Context, tx Tx, sourceID string, cursorBefore json.RawMessage, startedAt time.Time) (string, error)
 
 	// Complete closes a run with its terminal state: status succeeded or
 	// failed, finishedAt, the committed counters and the error text of a
-	// failed run (concept ch. 8.1 step 5: the E1 error is counted and
-	// recorded, it does not abort the other cases).
-	Complete(ctx context.Context, tx Tx, runID string, status SourceRunStatus, counters SourceRunCounters, errText string, finishedAt time.Time) error
+	// failed run. cursorAfter is committed with a successful run only —
+	// the persistence layer guards it on the succeeded status, so a failed
+	// run can never advance the cursor (ch. 6.1: the cursor advances only
+	// after the commit of a successful run; ARCH-002 §1/§6) — pass nil for
+	// full-set sources and failures.
+	Complete(ctx context.Context, tx Tx, runID string, status SourceRunStatus, counters SourceRunCounters, cursorAfter json.RawMessage, errText string, finishedAt time.Time) error
+}
+
+// QuarantineRepo persists the ch. 8.6 isolation state machine (ARCH-002
+// §3/§4 quarantine): the isolation insert, the reads (list + by-id) and
+// the guarded state transitions. Every transition is guarded on the source
+// status in SQL and returns the updated row; a transition that does not
+// apply to the current state — the state changed concurrently between the
+// caller's read and the write — is a conflict Error (one command, one
+// transaction: the audit event of a transition that did not happen must
+// not be written, ch. 13.2).
+type QuarantineRepo interface {
+	// Insert isolates one failed record slice in status 'new' and returns
+	// its id. sourceID, position, reason and payloadHash are required;
+	// sourceRunID and rawRecordID may be "" (NULL — the isolation is not
+	// yet attributed to a run/raw record).
+	Insert(ctx context.Context, tx Tx, sourceID, sourceRunID, rawRecordID, position, reason, payloadHash string, now time.Time) (string, error)
+
+	// GetByID returns one quarantined row. A missing row is a not-found
+	// Error.
+	GetByID(ctx context.Context, id string) (domain.Quarantine, error)
+
+	// List returns the working list ordered by created_at then id
+	// (oldest isolation first). status and sourceID filter optionally; nil
+	// / "" keep the filter open. limit is the page size (>= 1).
+	List(ctx context.Context, status *domain.QuarantineStatus, sourceID string, limit int) ([]domain.Quarantine, error)
+
+	// Acknowledge records the operator review (new -> acknowledged) and
+	// returns the updated row.
+	Acknowledge(ctx context.Context, tx Tx, id, acknowledgedBy, note string, now time.Time) (domain.Quarantine, error)
+
+	// MarkReadyForRetry moves a reviewed row to the retryable state (new /
+	// acknowledged -> ready_for_retry) and returns the updated row.
+	MarkReadyForRetry(ctx context.Context, tx Tx, id string, now time.Time) (domain.Quarantine, error)
+
+	// MarkResolved is the terminal transition of a successful reprocess
+	// (ready_for_retry or new -> resolved) and returns the updated row.
+	// The resolution links the new domain object via
+	// resolvedVulnerabilityID/resolvedEvidenceID ("" for none) and
+	// documents the outcome in note (which may carry a justified discard).
+	MarkResolved(ctx context.Context, tx Tx, id, resolvedVulnerabilityID, resolvedEvidenceID, note string, now time.Time) (domain.Quarantine, error)
+
+	// IncrementAttempts records a failed reprocess (new / ready_for_retry
+	// -> attempts + 1, the row stays retryable) and returns the updated
+	// row.
+	IncrementAttempts(ctx context.Context, tx Tx, id string, now time.Time) (domain.Quarantine, error)
 }
 
 // ComponentRepo is the I1b matcher's read path over the seeded inventory

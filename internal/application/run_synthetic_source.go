@@ -226,10 +226,10 @@ func (s *Service) RunSyntheticSource(ctx context.Context, in RunSyntheticSourceI
 
 	now := s.clock.Now()
 
-	// 1) open the run (status running).
+	// 1) open the run (status running). The synthetic source has no cursor.
 	var runID string
 	if err := s.runTx(ctx, func(tx Tx) error {
-		id, err := s.runs.Open(ctx, tx, in.SourceID, now)
+		id, err := s.runs.Open(ctx, tx, in.SourceID, nil, now)
 		if err != nil {
 			return err
 		}
@@ -270,7 +270,7 @@ func (s *Service) RunSyntheticSource(ctx context.Context, in RunSyntheticSourceI
 
 	var pairs []matchedPair
 	ingestErr := s.runTx(ctx, func(tx Tx) error {
-		rawID, err := s.runs.InsertRawRecord(ctx, tx, in.SourceID, in.ExternalID, payload, contentHash(payload), now)
+		rawID, err := s.raws.Insert(ctx, tx, in.SourceID, in.ExternalID, payload, contentHash(payload), "", now)
 		if err != nil {
 			return err
 		}
@@ -403,7 +403,7 @@ func (s *Service) RunSyntheticSource(ctx context.Context, in RunSyntheticSourceI
 	if len(runErrors) > 0 {
 		status = SourceRunStatusFailed
 	}
-	if err := s.completeRun(ctx, op, runID, status, counters, strings.Join(runErrors, "; ")); err != nil {
+	if err := s.completeRun(ctx, op, runID, status, counters, nil, strings.Join(runErrors, "; ")); err != nil {
 		return RunSyntheticSourceResult{}, err
 	}
 	return RunSyntheticSourceResult{RunID: runID, Status: status, Counters: counters, Errors: runErrors}, nil
@@ -445,18 +445,23 @@ func (s *Service) insertCaseEvidences(ctx context.Context, tx Tx, vulnID, rawID 
 
 // failRun closes a run that aborted on an infrastructure error: status
 // failed with the error text and the counters so far, then returns the
-// original error (unwrapped) for the caller.
+// original error (unwrapped) for the caller. A failed run never advances
+// the cursor — the persistence layer guards cursor_after on the succeeded
+// status (ch. 6.1, ARCH-002 §1) — so cursorAfter is always nil here.
 func (s *Service) failRun(ctx context.Context, op, runID string, counters SourceRunCounters, cause error, runErrors []string) error {
 	text := cause.Error()
 	if len(runErrors) > 0 {
 		text = text + "; " + strings.Join(runErrors, "; ")
 	}
-	_ = s.completeRun(ctx, op, runID, SourceRunStatusFailed, counters, text)
+	_ = s.completeRun(ctx, op, runID, SourceRunStatusFailed, counters, nil, text)
 	return cause
 }
 
-func (s *Service) completeRun(ctx context.Context, op, runID string, status SourceRunStatus, counters SourceRunCounters, errText string) error {
+// completeRun closes a run with its terminal state inside one transaction.
+// cursorAfter is committed with a successful run only; pass nil for failed
+// runs and cursor-less sources.
+func (s *Service) completeRun(ctx context.Context, op, runID string, status SourceRunStatus, counters SourceRunCounters, cursorAfter json.RawMessage, errText string) error {
 	return s.runTx(ctx, func(tx Tx) error {
-		return s.runs.Complete(ctx, tx, runID, status, counters, errText, s.clock.Now())
+		return s.runs.Complete(ctx, tx, runID, status, counters, cursorAfter, errText, s.clock.Now())
 	})
 }

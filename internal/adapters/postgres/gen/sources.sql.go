@@ -11,6 +11,34 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getSourceByID = `-- name: GetSourceByID :one
+SELECT id, type, name, endpoint, schedule, enabled, cursor, config, created_at
+FROM sources
+WHERE id = $1
+`
+
+// GetSourceByID loads one source row by id — the descriptor read the I2
+// run use cases (FetchSource / RunSource / quarantine reprocess, ARCH-002
+// §1) resolve a run's or raw record's source from (the scheduler and the
+// source registry read the same row; runs, raw records and quarantine rows
+// all attribute by sources.id).
+func (q *Queries) GetSourceByID(ctx context.Context, id pgtype.UUID) (Source, error) {
+	row := q.db.QueryRow(ctx, getSourceByID, id)
+	var i Source
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Name,
+		&i.Endpoint,
+		&i.Schedule,
+		&i.Enabled,
+		&i.Cursor,
+		&i.Config,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getSourceByTypeAndName = `-- name: GetSourceByTypeAndName :one
 SELECT id, type, name, endpoint, schedule, enabled, cursor, config, created_at
 FROM sources

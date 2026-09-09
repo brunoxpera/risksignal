@@ -20,3 +20,13 @@ RETURNING id;
 SELECT id, type, name, endpoint, schedule, enabled, cursor, config, created_at
 FROM sources
 WHERE type = @type AND name = @name;
+
+-- GetSourceByID loads one source row by id — the descriptor read the I2
+-- run use cases (FetchSource / RunSource / quarantine reprocess, ARCH-002
+-- §1) resolve a run's or raw record's source from (the scheduler and the
+-- source registry read the same row; runs, raw records and quarantine rows
+-- all attribute by sources.id).
+-- name: GetSourceByID :one
+SELECT id, type, name, endpoint, schedule, enabled, cursor, config, created_at
+FROM sources
+WHERE id = @id;

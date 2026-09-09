@@ -291,6 +291,9 @@ func (e *cmdEnv) demoService(ctx context.Context, cfg *config.Config) (*pgxpool.
 		Vulnerabilities: repo.NewVulnerabilityRepo(q),
 		Matches:         repo.NewMatchRepo(q),
 		SourceRuns:      repo.NewSourceRunRepo(q),
+		RawRecords:      repo.NewRawRecordRepo(q),
+		Sources:         repo.NewSourceRepo(q),
+		Quarantine:      repo.NewQuarantineRepo(q),
 		Components:      repo.NewComponentRepo(q),
 		Clock:           clock.RealClock{},
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {

@@ -91,12 +91,26 @@ type Component struct {
 }
 
 // SourceRunCounters are the counters of a source run (ARCH-001 §1
-// source_runs.counters: {records, matched, signals}), committed with the
-// terminal status.
+// source_runs.counters; extended by ARCH-002 §1 to
+// {records, normalized, errors, quarantined, matched, signals}), committed
+// with the terminal status. The I2 keys exist from the first I2 run on so
+// the source monitor renders a uniform shape; matched/signals stay 0 in I2
+// (no inventory matching yet, ARCH-002 §1).
+//
+// records counts the raw documents/record slices the run processed (1 for a
+// fetch or a full-cycle run, the per-pass count for a normalise pass);
+// normalized counts the domain records a normalise pass persisted;
+// errors counts the isolated records of a pass (each one also becomes a
+// quarantine row, so quarantined mirrors errors); an I2 normalise run with
+// errors still succeeds (ch. 8.1 step 5 — an isolated error is counted, not
+// fatal).
 type SourceRunCounters struct {
-	Records int `json:"records"` // cases in the document, incl. malformed ones
-	Matched int `json:"matched"` // confirmed vulnerability-component matches
-	Signals int `json:"signals"` // signals created by the run
+	Records     int `json:"records"`     // documents/slices processed by the run
+	Normalized  int `json:"normalized"`  // domain records persisted by the normalise pass
+	Errors      int `json:"errors"`      // records isolated by the normalise pass
+	Quarantined int `json:"quarantined"` // quarantine rows written by the pass
+	Matched     int `json:"matched"`     // confirmed vulnerability-component matches (0 in I2)
+	Signals     int `json:"signals"`     // signals created by the run (0 in I2)
 }
 
 // SignalRecord is the field set the risk_signals insert persists (ARCH-001
@@ -111,11 +125,39 @@ type SignalRecord struct {
 }
 
 // VulnerabilityRecord is the field set the vulnerabilities upsert persists
-// (ARCH-001 §1); the id is assigned by the database and returned by the
-// natural-key upsert (UQ cve_id).
+// (ARCH-001 §1; extended by ARCH-002 §3 with the I2 NVD fields); the id is
+// assigned by the database and returned by the natural-key upsert (UQ
+// cve_id). The descriptive fields are optional — the I1b synthetic and KEV
+// skeleton writes carry identity + summary only — and a statement only
+// writes what it carries (a refresh with absent fields sets them NULL again,
+// as the sqlc upsert semantics pin).
 type VulnerabilityRecord struct {
 	CVEID   string
 	Summary string
+
+	// I2 (ARCH-002 §2.1/§3): the full NVD descriptive fields. CVSS is the
+	// metrics summary, References the advisory links, CPECfg the raw NVD
+	// configurations block (opaque here, normalised into the product index
+	// in I3).
+	Description string
+	CVSS        *domain.CVSSMetrics
+	References  []domain.Reference
+	CPECfg      any
+}
+
+// RawRecord is the stored raw document of a source (ARCH-002 §1, §3): the
+// unchanged source bytes plus their self-describing content encoding, the
+// read the normalise/reprocess paths start from. ContentEncoding is
+// 'identity' | 'gzip' | 'json' as stamped at insert time; "" when the
+// storing caller did not set it.
+type RawRecord struct {
+	ID              string
+	SourceID        string
+	ExternalID      string
+	ContentHash     string
+	Payload         []byte
+	ContentEncoding string
+	FetchedAt       time.Time
 }
 
 // EvidenceRecord is one immutable evidence row to insert (ARCH-001 §1
