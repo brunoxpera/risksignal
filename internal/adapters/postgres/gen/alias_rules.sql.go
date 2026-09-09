@@ -127,6 +127,57 @@ func (q *Queries) ListAliasRules(ctx context.Context) ([]AliasRule, error) {
 	return items, nil
 }
 
+const listEffectiveAliasRules = `-- name: ListEffectiveAliasRules :many
+SELECT id, scope, from_value, to_value, version, enabled, reason, created_at, updated_at
+FROM (
+    SELECT DISTINCT ON (scope, from_value)
+        id, scope, from_value, to_value, version, enabled, reason, created_at, updated_at
+    FROM alias_rules
+    ORDER BY scope, from_value, version DESC
+) AS standing
+WHERE enabled
+ORDER BY scope, from_value
+`
+
+// ListEffectiveAliasRules returns the standing alias rules of the current
+// ruleset — the enabled rules the matching engine feeds to the symmetric
+// one-hop alias closure at match time (ARCH-003 §2 item 2, WP-3.06/
+// DEV-065): per (scope, from_value), the newest row (the latest remap of
+// an alias wins; UQ (scope, from_value, version) keeps the superseded
+// rows readable at their own version) that stands enabled — disabled
+// rules are inert, never deleted. Both scopes are returned, ordered by
+// scope then from_value for a deterministic read; a ruleset with no
+// rules yields no rows, never an error.
+func (q *Queries) ListEffectiveAliasRules(ctx context.Context) ([]AliasRule, error) {
+	rows, err := q.db.Query(ctx, listEffectiveAliasRules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AliasRule
+	for rows.Next() {
+		var i AliasRule
+		if err := rows.Scan(
+			&i.ID,
+			&i.Scope,
+			&i.FromValue,
+			&i.ToValue,
+			&i.Version,
+			&i.Enabled,
+			&i.Reason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setAliasRuleEnabled = `-- name: SetAliasRuleEnabled :execrows
 UPDATE alias_rules
 SET enabled    = $1,

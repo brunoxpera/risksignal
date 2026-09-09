@@ -58,3 +58,23 @@ ORDER BY version DESC, scope, from_value;
 -- name: GetLatestAliasRulesVersion :one
 SELECT COALESCE(max(version), 0)::integer AS version
 FROM alias_rules;
+
+-- ListEffectiveAliasRules returns the standing alias rules of the current
+-- ruleset — the enabled rules the matching engine feeds to the symmetric
+-- one-hop alias closure at match time (ARCH-003 §2 item 2, WP-3.06/
+-- DEV-065): per (scope, from_value), the newest row (the latest remap of
+-- an alias wins; UQ (scope, from_value, version) keeps the superseded
+-- rows readable at their own version) that stands enabled — disabled
+-- rules are inert, never deleted. Both scopes are returned, ordered by
+-- scope then from_value for a deterministic read; a ruleset with no
+-- rules yields no rows, never an error.
+-- name: ListEffectiveAliasRules :many
+SELECT id, scope, from_value, to_value, version, enabled, reason, created_at, updated_at
+FROM (
+    SELECT DISTINCT ON (scope, from_value)
+        id, scope, from_value, to_value, version, enabled, reason, created_at, updated_at
+    FROM alias_rules
+    ORDER BY scope, from_value, version DESC
+) AS standing
+WHERE enabled
+ORDER BY scope, from_value;

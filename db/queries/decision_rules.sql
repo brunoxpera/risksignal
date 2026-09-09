@@ -65,3 +65,16 @@ ORDER BY version DESC, created_at DESC, id;
 -- name: GetLatestDecisionRulesVersion :one
 SELECT COALESCE(max(version), 0)::integer AS version
 FROM decision_rules;
+
+-- ListEffectiveDecisionRules returns the decision rules of the current
+-- ruleset — every unrevoked rule (ch. 9.2: a decision rule stands "bis
+-- sie abgelaufen oder aufgehoben ist", so nothing supersedes it but the
+-- explicit revocation), ordered by id for a deterministic read (the
+-- engine re-sorts by (version, id) before applying the rules). Revoked
+-- rules are inert and excluded; a ruleset with no rules yields no rows.
+-- name: ListEffectiveDecisionRules :many
+SELECT id, type, target_scope, action, reason, actor_id,
+       valid_from, valid_until, version, revoked_at, created_at, updated_at
+FROM decision_rules
+WHERE revoked_at IS NULL
+ORDER BY id;

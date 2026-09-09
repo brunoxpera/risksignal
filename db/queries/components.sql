@@ -103,3 +103,37 @@ SELECT id, asset_id, vendor, product, version, created_at,
 FROM components
 WHERE asset_id = @asset_id
 ORDER BY natural_key;
+
+-- ListComponentsPage returns the components whose id is greater than
+-- afterID, ascending by id, at most limit rows — the bounded keyset walk
+-- of the matching.rebuild inventory loop (ARCH-003 §5: components in
+-- batches of 500, WP-3.08/DEV-064). The full I3 row set is returned (the
+-- same columns as the product-index read above) so every walked row maps
+-- onto the application read model; deactivated rows are returned like
+-- active ones — a deactivated component stays referenceable and matchable
+-- (ARCH-003 §1.2). The zero uuid afterID selects the first page (the
+-- walk starts before every stored id).
+-- name: ListComponentsPage :many
+SELECT id, asset_id, vendor, product, version, created_at,
+       cpe, purl, image, digest,
+       vendor_norm, product_norm, version_norm, version_scheme,
+       natural_key, updated_at, deactivated_at
+FROM components
+WHERE id > @after_id
+ORDER BY id
+LIMIT @page_limit;
+
+-- ListComponentsByIDs returns the full I3 row set of the given component
+-- ids, ascending by id — the candidate row read of the matching.recompute
+-- loop (WP-3.08/DEV-064: the pre-filter resolved the ids off the very
+-- same inventory index, so every id has a row; a missing row is a torn
+-- read the adapter reports). ids is a jsonb array of canonical uuid
+-- strings; an id-less query returns no rows.
+-- name: ListComponentsByIDs :many
+SELECT id, asset_id, vendor, product, version, created_at,
+       cpe, purl, image, digest,
+       vendor_norm, product_norm, version_norm, version_scheme,
+       natural_key, updated_at, deactivated_at
+FROM components
+WHERE id IN (SELECT value::uuid FROM jsonb_array_elements_text(@ids::jsonb))
+ORDER BY id;

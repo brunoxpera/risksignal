@@ -139,6 +139,53 @@ func (q *Queries) ListDecisionRules(ctx context.Context) ([]DecisionRule, error)
 	return items, nil
 }
 
+const listEffectiveDecisionRules = `-- name: ListEffectiveDecisionRules :many
+SELECT id, type, target_scope, action, reason, actor_id,
+       valid_from, valid_until, version, revoked_at, created_at, updated_at
+FROM decision_rules
+WHERE revoked_at IS NULL
+ORDER BY id
+`
+
+// ListEffectiveDecisionRules returns the decision rules of the current
+// ruleset — every unrevoked rule (ch. 9.2: a decision rule stands "bis
+// sie abgelaufen oder aufgehoben ist", so nothing supersedes it but the
+// explicit revocation), ordered by id for a deterministic read (the
+// engine re-sorts by (version, id) before applying the rules). Revoked
+// rules are inert and excluded; a ruleset with no rules yields no rows.
+func (q *Queries) ListEffectiveDecisionRules(ctx context.Context) ([]DecisionRule, error) {
+	rows, err := q.db.Query(ctx, listEffectiveDecisionRules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DecisionRule
+	for rows.Next() {
+		var i DecisionRule
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.TargetScope,
+			&i.Action,
+			&i.Reason,
+			&i.ActorID,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.Version,
+			&i.RevokedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeDecisionRule = `-- name: RevokeDecisionRule :execrows
 UPDATE decision_rules
 SET revoked_at = $1,

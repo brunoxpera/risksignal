@@ -164,6 +164,60 @@ func (q *Queries) ListComponentsByAsset(ctx context.Context, assetID pgtype.UUID
 	return items, nil
 }
 
+const listComponentsByIDs = `-- name: ListComponentsByIDs :many
+SELECT id, asset_id, vendor, product, version, created_at,
+       cpe, purl, image, digest,
+       vendor_norm, product_norm, version_norm, version_scheme,
+       natural_key, updated_at, deactivated_at
+FROM components
+WHERE id IN (SELECT value::uuid FROM jsonb_array_elements_text($1::jsonb))
+ORDER BY id
+`
+
+// ListComponentsByIDs returns the full I3 row set of the given component
+// ids, ascending by id — the candidate row read of the matching.recompute
+// loop (WP-3.08/DEV-064: the pre-filter resolved the ids off the very
+// same inventory index, so every id has a row; a missing row is a torn
+// read the adapter reports). ids is a jsonb array of canonical uuid
+// strings; an id-less query returns no rows.
+func (q *Queries) ListComponentsByIDs(ctx context.Context, ids []byte) ([]Component, error) {
+	rows, err := q.db.Query(ctx, listComponentsByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Component
+	for rows.Next() {
+		var i Component
+		if err := rows.Scan(
+			&i.ID,
+			&i.AssetID,
+			&i.Vendor,
+			&i.Product,
+			&i.Version,
+			&i.CreatedAt,
+			&i.Cpe,
+			&i.Purl,
+			&i.Image,
+			&i.Digest,
+			&i.VendorNorm,
+			&i.ProductNorm,
+			&i.VersionNorm,
+			&i.VersionScheme,
+			&i.NaturalKey,
+			&i.UpdatedAt,
+			&i.DeactivatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listComponentsByVendorProduct = `-- name: ListComponentsByVendorProduct :many
 SELECT id, asset_id, vendor, product, version, created_at
 FROM components
@@ -246,6 +300,69 @@ type ListComponentsByVendorProductNormParams struct {
 // referenceable when deactivated).
 func (q *Queries) ListComponentsByVendorProductNorm(ctx context.Context, arg ListComponentsByVendorProductNormParams) ([]Component, error) {
 	rows, err := q.db.Query(ctx, listComponentsByVendorProductNorm, arg.VendorNorm, arg.ProductNorm)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Component
+	for rows.Next() {
+		var i Component
+		if err := rows.Scan(
+			&i.ID,
+			&i.AssetID,
+			&i.Vendor,
+			&i.Product,
+			&i.Version,
+			&i.CreatedAt,
+			&i.Cpe,
+			&i.Purl,
+			&i.Image,
+			&i.Digest,
+			&i.VendorNorm,
+			&i.ProductNorm,
+			&i.VersionNorm,
+			&i.VersionScheme,
+			&i.NaturalKey,
+			&i.UpdatedAt,
+			&i.DeactivatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listComponentsPage = `-- name: ListComponentsPage :many
+SELECT id, asset_id, vendor, product, version, created_at,
+       cpe, purl, image, digest,
+       vendor_norm, product_norm, version_norm, version_scheme,
+       natural_key, updated_at, deactivated_at
+FROM components
+WHERE id > $1
+ORDER BY id
+LIMIT $2
+`
+
+type ListComponentsPageParams struct {
+	AfterID   pgtype.UUID
+	PageLimit int32
+}
+
+// ListComponentsPage returns the components whose id is greater than
+// afterID, ascending by id, at most limit rows — the bounded keyset walk
+// of the matching.rebuild inventory loop (ARCH-003 §5: components in
+// batches of 500, WP-3.08/DEV-064). The full I3 row set is returned (the
+// same columns as the product-index read above) so every walked row maps
+// onto the application read model; deactivated rows are returned like
+// active ones — a deactivated component stays referenceable and matchable
+// (ARCH-003 §1.2). The zero uuid afterID selects the first page (the
+// walk starts before every stored id).
+func (q *Queries) ListComponentsPage(ctx context.Context, arg ListComponentsPageParams) ([]Component, error) {
+	rows, err := q.db.Query(ctx, listComponentsPage, arg.AfterID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
