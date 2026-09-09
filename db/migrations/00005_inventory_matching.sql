@@ -1,17 +1,23 @@
--- 00005_inventory_matching.sql — I3 inventory & matching schema (ARCH-003,
--- WP-3.02 / DEV-045).
+-- 00005_inventory_matching.sql — I3 inventory & matching schema, Expand
+-- phase (ARCH-003, WP-3.02 / DEV-045, DEV-055).
 --
 -- Extends the I1b/I2 schema (migrations 00002/00003/00004) for iteration
 -- I3, inventory & matching. Every change is an extension — nothing is
 -- renamed, no I1b/I2 column or constraint changes meaning — so the schema
--- stays forward-only (ADR-010):
+-- stays forward-only (ADR-010). The components extension follows
+-- Expand-Migrate-Contract (implementation concept ch. 7.4): this
+-- migration is the Expand phase — comparison keys and natural_key arrive
+-- nullable and the legacy rows are backfilled — while the pre-I3
+-- 4-column InsertComponent write path stays live. The Contract phase
+-- (SET NOT NULL on the comparison keys and natural_key + the identifier
+-- CHECK) is migration 00006 (DEV-046), applied together with the switch
+-- to the I3 write path:
 --   * assets:  updated_at / deactivated_at / verified_at (lifecycle,
 --              ARCH-003 §1.1); UQ (source, external_id) unchanged;
 --   * components: cpe/purl/image/digest originals, vendor_norm/
---     product_norm/version_norm comparison keys, version_scheme,
---     natural_key, updated_at/deactivated_at (ARCH-003 §1.2); the
---     identifier CHECK includes image (a row identified by image alone is
---     valid — DEV-044 reconciliation), the version_scheme CHECK enumerates
+--     product_norm/version_norm comparison keys (nullable in the Expand
+--     phase), version_scheme, natural_key (nullable), updated_at/
+--     deactivated_at (ARCH-003 §1.2); the version_scheme CHECK enumerates
 --     all seven domain values (version.go); the I1b plain (vendor, product)
 --     index is replaced by the inventory product index (vendor_norm,
 --     product_norm) (ADR-012, ARCH-003 §4); UQ (asset_id, natural_key) is
@@ -33,10 +39,13 @@
 -- deterministic placeholder natural key derived from their identity. The
 -- md5 here is a backfill discriminator only: the domain's sha-256
 -- derivation (internal/domain/naturalkey.go) is not available in SQL, and
--- rows written from 00005 on always carry a proper application-derived
--- key. Identical legacy components under one asset would violate
--- UQ (asset_id, natural_key) and abort the migration loudly instead of
--- silently merging duplicate inventory.
+-- rows written through the I3 path from 00005 on always carry a proper
+-- application-derived key (rows written through the still-live pre-I3
+-- InsertComponent leave the keys NULL until DEV-046 switches the write
+-- path — the columns stay nullable in this Expand phase). Identical
+-- legacy components under one asset would violate UQ (asset_id,
+-- natural_key) and abort the migration loudly instead of silently merging
+-- duplicate inventory.
 --
 -- No Down migration: migrations are forward-only (implementation concept
 -- ch. 7.4); rollbacks run the previous application image, not SQL.
@@ -64,16 +73,21 @@ COMMENT ON COLUMN assets.deactivated_at IS
 COMMENT ON COLUMN assets.verified_at IS
     'Last manual data-quality verification (ch. 11.1); informational in I3, audited (ch. 13.2); NULL until the first verification';
 
--- components extension (ARCH-003 §1.2/§1.3/§4). Raw originals are
--- preserved verbatim (cpe/purl/image/digest nullable; vendor/product/
--- version stay NOT NULL as in I1b) while the normalised comparison keys
--- (vendor_norm/product_norm/version_norm, NFKC + trim + lowercase at write
--- time, no alias — aliases resolve at match time) and the inferred
--- version_scheme are stored separately (ch. 9.1 "Originalwerte bleiben
--- erhalten"). natural_key is the deterministic import idempotency key
--- (UQ (asset_id, natural_key), §1.3). The new NOT NULL columns are added
--- nullable, backfilled with safe defaults for the pre-I3 rows, then
--- locked NOT NULL.
+-- components extension (ARCH-003 §1.2/§1.3/§4) — Expand phase. Raw
+-- originals are preserved verbatim (cpe/purl/image/digest nullable;
+-- vendor/product/version stay NOT NULL as in I1b) while the normalised
+-- comparison keys (vendor_norm/product_norm/version_norm, NFKC + trim +
+-- lowercase at write time, no alias — aliases resolve at match time) and
+-- the inferred version_scheme are stored separately (ch. 9.1
+-- "Originalwerte bleiben erhalten"). natural_key is the deterministic
+-- import idempotency key (UQ (asset_id, natural_key), §1.3). The new
+-- comparison-key columns and natural_key are added nullable and
+-- backfilled with safe defaults for the pre-I3 rows; they stay nullable
+-- through this migration so the still-live pre-I3 4-column InsertComponent
+-- keeps working — SET NOT NULL and the identifier CHECK are the Contract
+-- phase of migration 00006 (DEV-046), applied together with the switch to
+-- the I3 write path. version_scheme and updated_at are NOT NULL with DB
+-- defaults, so the pre-I3 write path never touches them.
 ALTER TABLE components
     ADD COLUMN cpe            text        NULL,
     ADD COLUMN purl           text        NULL,
@@ -109,25 +123,16 @@ UPDATE components
        )
  WHERE vendor_norm IS NULL;
 
-ALTER TABLE components
-    ALTER COLUMN vendor_norm  SET NOT NULL,
-    ALTER COLUMN product_norm SET NOT NULL,
-    ALTER COLUMN natural_key  SET NOT NULL;
-
--- The identifier CHECK: a row must be matchable — it carries at least one
--- identity (cpe, purl, digest or image) or the vendor/product comparison
--- key pair. image is included (DEV-044 reconciliation: ARCH-003 §1.2's
--- enumeration omits it, but the domain treats an image-only component as
--- valid — hasAnyIdentifier in internal/domain/component.go). The
--- version_scheme CHECK enumerates exactly the seven domain values of
+-- The version_scheme CHECK enumerates exactly the seven domain values of
 -- internal/domain/version.go (semver/debian/rpm/maven/calver/generic/
 -- unknown); 'unknown' is a first-class value — no ordering — never an
--- error (ARCH-003 §2).
+-- error (ARCH-003 §2). The identifier CHECK — a row must be matchable,
+-- carrying at least one identity (cpe, purl, digest or image, image
+-- included per DEV-044 reconciliation) or the vendor_norm/product_norm
+-- pair — is deliberately NOT added here: it is the Contract phase of
+-- migration 00006 (DEV-046) and must not reject the pre-I3 InsertComponent
+-- writes that are still live until the write path switches.
 ALTER TABLE components
-    ADD CONSTRAINT components_identifier_check CHECK (
-        cpe IS NOT NULL OR purl IS NOT NULL OR digest IS NOT NULL OR image IS NOT NULL
-        OR (vendor_norm <> '' AND product_norm <> '')
-    ),
     ADD CONSTRAINT components_version_scheme_check CHECK (
         version_scheme IN ('semver', 'debian', 'rpm', 'maven', 'calver', 'generic', 'unknown')
     );
