@@ -1,10 +1,16 @@
 package main
 
 // Integration test of the WP-3.02 migration 00005 at the composition root
-// (DEV-045): the I3 inventory & matching extensions must land on top of the
-// I1b/I2 schema without breaking the pre-I3 rows. cmd/risksignal is the
-// composition root that may wire the embedded migration set (db/migrations)
-// together with the runner, so the real files are exercised here.
+// (DEV-045 / DEV-055): the I3 inventory & matching extensions must land on
+// top of the I1b/I2 schema without breaking the pre-I3 rows — and without
+// breaking the still-live pre-I3 InsertComponent write path. 00005 is the
+// Expand phase of Expand-Migrate-Contract (implementation concept ch. 7.4):
+// the comparison keys and natural key arrive nullable and the legacy rows
+// are backfilled; the Contract phase (SET NOT NULL + identifier CHECK) is
+// migration 00006 (DEV-046), applied together with the switch to the I3
+// write path. cmd/risksignal is the composition root that may wire the
+// embedded migration set (db/migrations) together with the runner, so the
+// real files are exercised here.
 //
 // The test migrates a scratch database up to 00004 (the I2 schema, applied
 // from the real embedded files), seeds I1b-shaped rows exactly like the
@@ -17,11 +23,13 @@ package main
 //     UQ (source, external_id);
 //   - the legacy components were backfilled with safe defaults (comparison
 //     keys, version_scheme 'unknown', a deterministic 'legacy:' natural
-//     key) and the new schema locks them in: NOT NULL comparison keys and
-//     natural key, UQ (asset_id, natural_key), the inventory product index
+//     key). Expand phase: vendor_norm/product_norm/natural_key stay
+//     nullable and the pre-I3 4-column InsertComponent still succeeds,
+//     while UQ (asset_id, natural_key), the inventory product index
 //     (vendor_norm, product_norm) replacing the I1b (vendor, product)
-//     index, IX (asset_id), the identifier CHECK — image included (DEV-044
-//     reconciliation) — and the 7-value version_scheme CHECK;
+//     index, IX (asset_id) and the 7-value version_scheme CHECK are live;
+//     the identifier CHECK is absent — it is the Contract phase of 00006 /
+//     DEV-046 (image included per DEV-044 reconciliation);
 //   - alias_rules/decision_rules exist per ARCH-003 §1.4 with their
 //     versioning UQ/columns;
 //   - the seeded match survived with reasons '[]', the auto_* triple NULL,
@@ -29,11 +37,10 @@ package main
 //     UQ (vulnerability_id, component_id, rule_version);
 //   - epss_history exists append-only with UQ (cve_id, observed_on) and no
 //     foreign key onto epss_current (ADR-013);
-//   - the identifier/version_scheme CHECKs enforce: image-only rows are
-//     valid, identifier-less rows and unknown schemes are rejected, and
-//     the pre-I3 component insert shape (no comparison keys) is rejected —
-//     the schema is I3-shaped from 00005 on (DEV-046 regenerates the
-//     component queries).
+//   - the version_scheme CHECK is enforced (an unknown scheme is
+//     rejected); identifier-less and image-only rows are accepted in the
+//     Expand phase — the identifier contract only lands with 00006
+//     (DEV-046).
 //
 // The database server is the compose `db` service (make up) or any other
 // PostgreSQL reachable through RISKSIGNAL_TEST_DATABASE_URL; when none is
@@ -201,30 +208,33 @@ func TestMigration00005ExtendsInventoryAndMatchingSchema(t *testing.T) {
 		t.Fatal("two distinct legacy components must not share a natural key")
 	}
 
-	// New columns: identifier originals nullable, keys locked NOT NULL.
-	for _, col := range []string{"cpe", "purl", "image", "digest", "version_norm", "deactivated_at"} {
+	// New columns — Expand phase: the identifier originals and the
+	// comparison keys / natural key stay nullable (the pre-I3 4-column
+	// InsertComponent is still the live write path); only version_scheme
+	// and updated_at are NOT NULL, and their DB defaults keep the pre-I3
+	// inserts flowing. SET NOT NULL on the keys is 00006's Contract phase.
+	for _, col := range []string{"cpe", "purl", "image", "digest", "version_norm", "vendor_norm", "product_norm", "natural_key", "deactivated_at"} {
 		if !columnNullable(t, ctx, db, "components", col) {
-			t.Fatalf("components.%s must be nullable", col)
+			t.Fatalf("components.%s must be nullable in the Expand phase", col)
 		}
 	}
-	for _, col := range []string{"vendor_norm", "product_norm", "natural_key", "version_scheme", "updated_at"} {
+	for _, col := range []string{"version_scheme", "updated_at"} {
 		if columnNullable(t, ctx, db, "components", col) {
 			t.Fatalf("components.%s must be NOT NULL", col)
 		}
 	}
 
-	// Constraints and indexes: import idempotency UQ, identifier CHECK with
-	// image (DEV-044 reconciliation), 7-value version_scheme CHECK, product
-	// index replacing the I1b (vendor, product) index, asset_id index.
+	// Constraints and indexes: the import idempotency UQ and the 7-value
+	// version_scheme CHECK are live from the Expand phase on; the product
+	// index replaces the I1b (vendor, product) index; the asset_id index
+	// serves the asset -> components read. The identifier CHECK is absent
+	// — it is the Contract phase of 00006 (DEV-046), image included
+	// (DEV-044 reconciliation).
 	if def := constraintDef(t, ctx, db, "components", "components_asset_id_natural_key_key"); !strings.HasPrefix(def, "UNIQUE (asset_id, natural_key)") {
 		t.Fatalf("components UQ = %q, want UNIQUE (asset_id, natural_key)", def)
 	}
-	identDef := constraintDef(t, ctx, db, "components", "components_identifier_check")
-	if !strings.Contains(identDef, "image IS NOT NULL") {
-		t.Fatalf("components_identifier_check = %q, want image included", identDef)
-	}
-	if !strings.Contains(identDef, "vendor_norm <> ''") || !strings.Contains(identDef, "product_norm <> ''") {
-		t.Fatalf("components_identifier_check = %q, want the vendor_norm/product_norm pair branch", identDef)
+	if def := constraintDef(t, ctx, db, "components", "components_identifier_check"); def != "" {
+		t.Fatalf("components_identifier_check = %q, want absent after the Expand phase (00006 / DEV-046 contracts it)", def)
 	}
 	schemeDef := constraintDef(t, ctx, db, "components", "components_version_scheme_check")
 	for _, v := range []string{"semver", "debian", "rpm", "maven", "calver", "generic", "unknown"} {
@@ -253,30 +263,33 @@ func TestMigration00005ExtendsInventoryAndMatchingSchema(t *testing.T) {
 		t.Fatal("I1b index components_vendor_product_idx must be gone (replaced by the product index)")
 	}
 
-	// CHECK enforcement: an image-only component is valid (image is an
-	// identifier), an identifier-less row and an unknown version_scheme are
-	// rejected, and the pre-I3 insert shape (no comparison keys) is
-	// rejected — rows are I3-shaped from 00005 on (DEV-046 regenerates the
-	// component queries for the new required columns).
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO components (asset_id, vendor, product, version, image, vendor_norm, product_norm, version_scheme, natural_key)
-		VALUES ($1::uuid, '', '', '', 'registry.example.com/acme/portal@sha256:abcdef', '', '', 'unknown', 'probe-image-only')`, assetID); err != nil {
-		t.Fatalf("image-only component must be accepted (image is an identifier): %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO components (asset_id, vendor, product, version, vendor_norm, product_norm, version_scheme, natural_key)
-		VALUES ($1::uuid, '', '', '', '', '', 'unknown', 'probe-no-identifier')`, assetID); err == nil {
-		t.Fatal("identifier-less component must be rejected by components_identifier_check")
-	}
+	// Enforcement after the Expand phase: the version_scheme CHECK is live
+	// (an unknown scheme is rejected), while the identifier contract is
+	// not — the pre-I3 4-column InsertComponent shape
+	// (db/queries/components.sql) must still succeed and land a row whose
+	// comparison keys and natural key are NULL until the I3 write path
+	// supplies them. Rejecting identifier-less or image-only rows is
+	// 00006's Contract phase (DEV-046).
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO components (asset_id, vendor, product, version, vendor_norm, product_norm, version_scheme, natural_key)
 		VALUES ($1::uuid, 'x', 'y', '1', 'x', 'y', 'fancy', 'probe-bad-scheme')`, assetID); err == nil {
 		t.Fatal("unknown version_scheme must be rejected by components_version_scheme_check")
 	}
-	if _, err := db.ExecContext(ctx, `
+	var preI3Component string
+	if err := db.QueryRowContext(ctx, `
 		INSERT INTO components (asset_id, vendor, product, version)
-		VALUES ($1::uuid, 'acme', 'portal', '9.9')`, assetID); err == nil {
-		t.Fatal("pre-I3 component insert shape (no comparison keys) must be rejected after 00005")
+		VALUES ($1::uuid, 'acme', 'tool', '1.2.3')
+		RETURNING id::text`, assetID).Scan(&preI3Component); err != nil {
+		t.Fatalf("pre-I3 4-column InsertComponent must still succeed after 00005 (Expand phase): %v", err)
+	}
+	var vn, pn, nk sql.NullString
+	if err := db.QueryRowContext(ctx, `
+		SELECT vendor_norm, product_norm, natural_key
+		FROM components WHERE id = $1::uuid`, preI3Component).Scan(&vn, &pn, &nk); err != nil {
+		t.Fatalf("read pre-I3-shaped row: %v", err)
+	}
+	if vn.Valid || pn.Valid || nk.Valid {
+		t.Fatalf("pre-I3-shaped row must carry NULL keys after 00005, got vendor_norm %v product_norm %v natural_key %v", vn, pn, nk)
 	}
 
 	// --- alias_rules / decision_rules (ARCH-003 §1.4) --------------------
