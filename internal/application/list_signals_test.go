@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -39,14 +40,11 @@ func seedViews(h *harness, n int) {
 }
 
 func viewID(i int) string {
-	return string(rune('a'+i%26)) + string(rune('0'+i/26)) // not a uuid; ids are opaque strings in the fakes
+	return fmt.Sprintf("%c%d", 'a'+i%26, i/26) // not a uuid; ids are opaque strings in the fakes
 }
 
 func pad(i int) string {
-	if i < 10 {
-		return "000" + string(rune('0'+i))
-	}
-	return "00" + string(rune('0'+i/10)) + string(rune('0'+i%10))
+	return fmt.Sprintf("%04d", i)
 }
 
 // TestListSignalsPagesThroughTheWholeList walks cursor pages of size 2 over
