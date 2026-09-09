@@ -4,9 +4,29 @@ import "fmt"
 
 // MatchRuleVersion tags the hard-coded ADR-015 method→confidence/score
 // mapping below (ARCH-001 §1 matches.rule_version). It is the placeholder
-// for the versioned rule configuration: I4 replaces the constants in this
-// file with the priority_rules/rule tables without touching the pipeline.
+// for the versioned rule configuration. I3 matching replaces it with the
+// composite ruleset version derived from the alias_rules and
+// decision_rules version counters — RulesetVersion — which the matching
+// use case computes and stamps on every match row; the I1b synthetic path
+// keeps this constant.
 const MatchRuleVersion = "i1b-1"
+
+// RulesetVersion derives the effective matching rule version (ARCH-003
+// §1.4/§3): the composite "a<alias.version>d<decision.version>" of the
+// current alias_rules and decision_rules version counters — a change to
+// either table bumps the composite, which flows into matches.rule_version
+// and the matching.rebuild dedupe key. The counters are the monotonic
+// rule versions of the two tables (0 when a table has no rules yet);
+// negative counters are a caller error.
+func RulesetVersion(aliasVersion, decisionVersion int) (string, error) {
+	if aliasVersion < 0 {
+		return "", fmt.Errorf("domain: ruleset version: alias version %d must be >= 0", aliasVersion)
+	}
+	if decisionVersion < 0 {
+		return "", fmt.Errorf("domain: ruleset version: decision version %d must be >= 0", decisionVersion)
+	}
+	return fmt.Sprintf("a%dd%d", aliasVersion, decisionVersion), nil
+}
 
 // candidateScoreMin and candidateScoreMax bound the actually computed
 // candidate similarity. ADR-015 reserves the 1–54 band for candidate: below
