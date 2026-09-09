@@ -175,6 +175,7 @@ func seedCreateSignalFixture(t *testing.T, pool *pgxpool.Pool, at time.Time) str
 		Confidence:      "high",
 		RuleVersion:     "i1b-1",
 		CreatedAt:       mustTS(t, at.Format(time.RFC3339)),
+		Reasons:         []byte("[]"),
 	})
 	if err != nil {
 		t.Fatalf("InsertMatch: %v", err)

@@ -235,9 +235,13 @@ func TestCoreSchemaMigratesAndSignalRoundTripThroughGeneratedQueries(t *testing.
 	}
 
 	// --- match path (ARCH-001 §3 step 4, ADR-015) --------------------------
+	// reasons is a jsonb NOT NULL column (default '[]'); the gen-level write
+	// passes the purely-computed default explicitly (the repository layer
+	// does the same for application.MatchRecord).
 	matchID, err := q.InsertMatch(ctx, gen.InsertMatchParams{
 		VulnerabilityID: vulnID, ComponentID: componentID, Method: "exact_identifier",
 		Score: 100, Confidence: "high", RuleVersion: "i1b-1", CreatedAt: fetched,
+		Reasons: []byte("[]"),
 	})
 	if err != nil {
 		t.Fatalf("InsertMatch: %v", err)
@@ -245,6 +249,7 @@ func TestCoreSchemaMigratesAndSignalRoundTripThroughGeneratedQueries(t *testing.
 	if again, err := q.InsertMatch(ctx, gen.InsertMatchParams{
 		VulnerabilityID: vulnID, ComponentID: componentID, Method: "exact_identifier",
 		Score: 100, Confidence: "high", RuleVersion: "i1b-1", CreatedAt: fetched,
+		Reasons: []byte("[]"),
 	}); err != nil || again != matchID {
 		t.Fatalf("InsertMatch rerun = %v, %v; want the same match id", again, err)
 	}

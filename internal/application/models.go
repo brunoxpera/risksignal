@@ -186,6 +186,15 @@ type EvidenceRecord struct {
 // through the versioned mapping (domain.MatchMethod.Derive) before the
 // write; the id is assigned by the database and returned (the natural key
 // (vulnerability_id, component_id, rule_version) makes re-runs idempotent).
+//
+// The I3 decision-rule state mirrors domain.Match (ARCH-003 §3, ADR-015):
+// Reasons is the auditable TR-007 rationale list (jsonb, '[]' for purely
+// computed rows), DecisionRuleID the decision rule that produced the match
+// (an exclusion or an override — nil for purely computed matches), and
+// AutoMethod/AutoConfidence/AutoScore the raw computed triple preserved
+// when a decision rule overrode the match (nil when no rule overrode). A
+// purely computed record carries nil Reasons/DecisionRuleID/auto_*; the
+// repository persists that as '[]' + NULLs.
 type MatchRecord struct {
 	VulnerabilityID string
 	ComponentID     string
@@ -193,4 +202,13 @@ type MatchRecord struct {
 	Confidence      domain.Confidence
 	Score           int
 	RuleVersion     string
+
+	Reasons        []string // TR-007 rationale list; nil/empty persists as jsonb '[]'
+	DecisionRuleID *string  // decision rule that produced the match; nil = purely computed
+
+	// AutoMethod/AutoConfidence/AutoScore preserve the raw computed triple
+	// when a decision rule overrode it; nil when no rule overrode.
+	AutoMethod     *domain.MatchMethod
+	AutoConfidence *domain.Confidence
+	AutoScore      *int
 }
