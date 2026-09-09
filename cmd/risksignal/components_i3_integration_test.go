@@ -87,10 +87,10 @@ func TestComponentI3WritePathUpsertAndProductIndexLookup(t *testing.T) {
 		Vendor:        "Acme",
 		Product:       "Portal",
 		Version:       "2.4",
-		VendorNorm:    pgtype.Text{String: vendorNorm, Valid: true},
-		ProductNorm:   pgtype.Text{String: productNorm, Valid: true},
+		VendorNorm:    vendorNorm,
+		ProductNorm:   productNorm,
 		VersionScheme: string(domain.VersionSchemeUnknown),
-		NaturalKey:    pgtype.Text{String: naturalKey, Valid: true},
+		NaturalKey:    naturalKey,
 		UpdatedAt:     updatedAt,
 	}
 	portalID, err := q.InsertComponent(ctx, portalParams)
@@ -130,10 +130,10 @@ func TestComponentI3WritePathUpsertAndProductIndexLookup(t *testing.T) {
 		Vendor:        "Acme",
 		Product:       "Gateway",
 		Version:       "1.0",
-		VendorNorm:    pgtype.Text{String: gatewayNormVendor, Valid: true},
-		ProductNorm:   pgtype.Text{String: gatewayNormProduct, Valid: true},
+		VendorNorm:    gatewayNormVendor,
+		ProductNorm:   gatewayNormProduct,
 		VersionScheme: string(domain.VersionSchemeUnknown),
-		NaturalKey:    pgtype.Text{String: gatewayKey, Valid: true},
+		NaturalKey:    gatewayKey,
 		UpdatedAt:     updatedAt,
 	})
 	if err != nil {
@@ -145,8 +145,8 @@ func TestComponentI3WritePathUpsertAndProductIndexLookup(t *testing.T) {
 	// ("acme"/"portal") — IX components_product_idx (vendor_norm,
 	// product_norm), ADR-012 / ARCH-003 §4.
 	rows, err := q.ListComponentsByVendorProductNorm(ctx, gen.ListComponentsByVendorProductNormParams{
-		VendorNorm:  pgtype.Text{String: "acme", Valid: true},
-		ProductNorm: pgtype.Text{String: "portal", Valid: true},
+		VendorNorm:  "acme",
+		ProductNorm: "portal",
 	})
 	if err != nil {
 		t.Fatalf("ListComponentsByVendorProductNorm: %v", err)
@@ -165,14 +165,14 @@ func TestComponentI3WritePathUpsertAndProductIndexLookup(t *testing.T) {
 	if got.Vendor != "Acme" || got.Product != "Portal" || got.Version != "2.4" {
 		t.Fatalf("product index row raw originals = %s/%s/%s, want Acme/Portal/2.4", got.Vendor, got.Product, got.Version)
 	}
-	if got.VendorNorm.String != vendorNorm || got.ProductNorm.String != productNorm {
-		t.Fatalf("product index row norms = %q/%q, want %q/%q", got.VendorNorm.String, got.ProductNorm.String, vendorNorm, productNorm)
+	if got.VendorNorm != vendorNorm || got.ProductNorm != productNorm {
+		t.Fatalf("product index row norms = %q/%q, want %q/%q", got.VendorNorm, got.ProductNorm, vendorNorm, productNorm)
 	}
 	if got.VersionScheme != string(domain.VersionSchemeUnknown) {
 		t.Fatalf("product index row version_scheme = %q, want unknown", got.VersionScheme)
 	}
-	if got.NaturalKey.String != naturalKey {
-		t.Fatalf("product index row natural_key = %q, want the derived %q", got.NaturalKey.String, naturalKey)
+	if got.NaturalKey != naturalKey {
+		t.Fatalf("product index row natural_key = %q, want the derived %q", got.NaturalKey, naturalKey)
 	}
 	if got.VersionNorm.Valid {
 		t.Fatalf("product index row version_norm = %q, want NULL ('unknown' normalises nothing)", got.VersionNorm.String)
@@ -192,8 +192,8 @@ func TestComponentI3WritePathUpsertAndProductIndexLookup(t *testing.T) {
 
 	// A lookup by a norm pair with no inventory matches nothing.
 	none, err := q.ListComponentsByVendorProductNorm(ctx, gen.ListComponentsByVendorProductNormParams{
-		VendorNorm:  pgtype.Text{String: "acme", Valid: true},
-		ProductNorm: pgtype.Text{String: "missing", Valid: true},
+		VendorNorm:  "acme",
+		ProductNorm: "missing",
 	})
 	if err != nil || len(none) != 0 {
 		t.Fatalf("product index lookup (acme/missing) = %+v, %v; want no rows", none, err)
@@ -202,8 +202,8 @@ func TestComponentI3WritePathUpsertAndProductIndexLookup(t *testing.T) {
 	// The lookup filters by the normalised product pair: the gateway row of
 	// the same asset/vendor is not a portal candidate.
 	gatewayRows, err := q.ListComponentsByVendorProductNorm(ctx, gen.ListComponentsByVendorProductNormParams{
-		VendorNorm:  pgtype.Text{String: "acme", Valid: true},
-		ProductNorm: pgtype.Text{String: "gateway", Valid: true},
+		VendorNorm:  "acme",
+		ProductNorm: "gateway",
 	})
 	if err != nil || len(gatewayRows) != 1 || gatewayRows[0].ID != gatewayID {
 		t.Fatalf("product index lookup (acme/gateway) = %+v, %v; want exactly the gateway component", gatewayRows, err)

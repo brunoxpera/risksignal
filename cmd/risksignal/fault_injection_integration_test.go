@@ -149,10 +149,10 @@ func seedCreateSignalFixture(t *testing.T, pool *pgxpool.Pool, at time.Time) str
 		Vendor:        "acme",
 		Product:       "portal",
 		Version:       "2.4",
-		VendorNorm:    pgtype.Text{String: vendorNorm, Valid: true},
-		ProductNorm:   pgtype.Text{String: productNorm, Valid: true},
+		VendorNorm:    vendorNorm,
+		ProductNorm:   productNorm,
 		VersionScheme: string(domain.VersionSchemeUnknown),
-		NaturalKey:    pgtype.Text{String: naturalKey, Valid: true},
+		NaturalKey:    naturalKey,
 		UpdatedAt:     pgtype.Timestamptz{Time: at, Valid: true},
 	})
 	if err != nil {

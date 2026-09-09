@@ -1,13 +1,16 @@
 -- components: the inventory component statements (ARCH-003 §1.2/§1.3/§4,
--- WP-3.03a / DEV-056). The I1b 4-column seed write becomes the I3
--- natural-key upsert: every write through this file supplies the identifier
--- originals, the normalised comparison keys, the inferred version scheme
--- and the deterministic import idempotency key. The columns stay nullable
--- through the Expand phase of migration 00005 — SET NOT NULL and the
--- identifier CHECK are the Contract phase of 00006 (DEV-057) — but the I3
--- write path never leaves them NULL, so legacy rows written before this
--- switch stay distinguishable (NULL keys, no UQ participation) and are
--- backfilled/rewritten by the next import of their identity.
+-- WP-3.03a / DEV-056; contract phase WP-3.03b / DEV-057). The I1b
+-- 4-column seed write becomes the I3 natural-key upsert: every write
+-- through this file supplies the identifier originals, the normalised
+-- comparison keys, the inferred version scheme and the deterministic
+-- import idempotency key. Migration 00005 (Expand phase) introduced the
+-- columns nullable so the pre-I3 write path kept flowing; migration 00006
+-- (Contract phase) set vendor_norm/product_norm/natural_key NOT NULL and
+-- added components_identifier_check — the I3 write path never leaves the
+-- keys NULL, so every row it writes satisfies the contract, and legacy
+-- rows written before the DEV-056 switch stay distinguishable (they were
+-- backfilled by 00005 and are rewritten by the next import of their
+-- identity).
 
 -- InsertComponent upserts one component row of an asset by its import
 -- idempotency key UQ (asset_id, natural_key) (ARCH-003 §1.2/§1.3) and

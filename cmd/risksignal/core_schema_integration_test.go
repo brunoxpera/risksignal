@@ -155,10 +155,10 @@ func TestCoreSchemaMigratesAndSignalRoundTripThroughGeneratedQueries(t *testing.
 		Vendor:        "acme",
 		Product:       "portal",
 		Version:       "2.4",
-		VendorNorm:    pgtype.Text{String: vendorNorm, Valid: true},
-		ProductNorm:   pgtype.Text{String: productNorm, Valid: true},
+		VendorNorm:    vendorNorm,
+		ProductNorm:   productNorm,
 		VersionScheme: string(domain.VersionSchemeUnknown),
-		NaturalKey:    pgtype.Text{String: naturalKey, Valid: true},
+		NaturalKey:    naturalKey,
 		UpdatedAt:     mustTS(t, "2026-09-09T08:00:00Z"),
 	})
 	if err != nil {

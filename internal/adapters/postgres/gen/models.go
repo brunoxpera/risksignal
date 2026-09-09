@@ -88,16 +88,16 @@ type Component struct {
 	Image pgtype.Text
 	// Immutable digest (sha256:…), preserved verbatim; stronger than a mutable tag — ranks above image in the natural key
 	Digest pgtype.Text
-	// Normalised vendor comparison key (NFKC + trim + lowercase at write time, no alias — aliases resolve at match time, ARCH-003 §2)
-	VendorNorm pgtype.Text
-	// Normalised product comparison key (NFKC + trim + lowercase at write time, no alias)
-	ProductNorm pgtype.Text
+	// Normalised vendor comparison key (NFKC + trim + lowercase at write time, no alias — aliases resolve at match time, ARCH-003 §2); NOT NULL from the 00006 contract phase on
+	VendorNorm string
+	// Normalised product comparison key (NFKC + trim + lowercase at write time, no alias); NOT NULL from the 00006 contract phase on
+	ProductNorm string
 	// Normalised version for the chosen scheme (kept raw in version); NULL when absent or not normalisable
 	VersionNorm pgtype.Text
 	// Version ordering scheme: semver | debian | rpm | maven | calver | generic | unknown — inferred per component at import (purl type -> CPE -> explicit column); unknown has no ordering and demotes matching (ARCH-003 §2)
 	VersionScheme string
-	// Deterministic import idempotency key (UQ asset_id, natural_key, ARCH-003 §1.3): sha-256 of the strongest identifier (cpe > purl > digest > image > vendor/product/version), prefix-tagged — legacy pre-I3 rows carry a 'legacy:' md5 placeholder
-	NaturalKey pgtype.Text
+	// Deterministic import idempotency key (UQ asset_id, natural_key, ARCH-003 §1.3): sha-256 of the strongest identifier (cpe > purl > digest > image > vendor/product/version), prefix-tagged — legacy pre-I3 rows carry a 'legacy:' md5 placeholder; NOT NULL from the 00006 contract phase on
+	NaturalKey string
 	// Last inventory update from the injected clock (default now() backstop for pre-I3 writes)
 	UpdatedAt pgtype.Timestamptz
 	// Soft-deactivation time: NULL while active — components stay referenceable when deactivated (ARCH-003 §1.2)

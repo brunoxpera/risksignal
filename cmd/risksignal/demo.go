@@ -389,10 +389,10 @@ func seedDemoInventory(ctx context.Context, pool *pgxpool.Pool, fix *synthetic.F
 					Vendor:        comp.Vendor,
 					Product:       comp.Product,
 					Version:       comp.Version,
-					VendorNorm:    pgtype.Text{String: vendorNorm, Valid: true},
-					ProductNorm:   pgtype.Text{String: productNorm, Valid: true},
+					VendorNorm:    vendorNorm,
+					ProductNorm:   productNorm,
 					VersionScheme: string(domain.VersionSchemeUnknown),
-					NaturalKey:    pgtype.Text{String: key, Valid: true},
+					NaturalKey:    key,
 					UpdatedAt:     pgtype.Timestamptz{Time: now, Valid: true},
 				}); err != nil {
 					return err
