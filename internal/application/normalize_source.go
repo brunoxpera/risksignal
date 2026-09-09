@@ -69,24 +69,26 @@ func (s *Service) NormalizeSource(ctx context.Context, in NormalizeSourceInput) 
 	counters := SourceRunCounters{Records: 1}
 	passErr := s.runTx(ctx, func(tx Tx) error {
 		sink := newNormalizeSink(s, tx, desc.ID, runID, rawRec.ID, now)
-		// Note (DEV-032 follow-up): the KEV full-set path must populate
-		// NormalizeInput.PreviousKEVCVEs from the CVE ids of the source's
-		// previously stored raw record — the repo read for them does not
-		// exist yet, so removal historisation (kev_removed evidence)
-		// activates with that wiring.
-		// Note (DEV-033 follow-up): the EPSS full-set path must populate
-		// NormalizeInput.EpssBulk — a BulkRowWriter over this transaction,
-		// stamping model_version (the file's date) and loaded_at — before
-		// the daily set can be COPY-loaded. Until the wiring lands the
-		// EPSS adapter rejects the pass (the run fails, the previous day's
-		// set stays intact).
-		res, err := in.Adapter.Normalize(ctx, NormalizeInput{
-			RawRecordID: rawRec.ID,
-			Payload:     rawRec.Payload,
-			ContentHash: rawRec.ContentHash,
-			Meta:        meta,
-		}, sink)
+		// The pass input carries the additive full-set specialisations at
+		// the use-case boundary (DEV-041): the EPSS pass receives the
+		// bulk writer over this transaction (TRUNCATE + COPY, loaded by
+		// finish below), the KEV pass the previous catalog's CVE set
+		// (removal historisation). Every other source reads neither.
+		input, finish, err := s.sourcePassInput(ctx, tx, in.Adapter.Type(),
+			desc.ID, rawRec.ID, rawRec.ExternalID, rawRec.FetchedAt,
+			rawRec.Payload, rawRec.ContentHash, meta, now)
 		if err != nil {
+			return err
+		}
+		res, err := in.Adapter.Normalize(ctx, input, sink)
+		if err != nil {
+			return err
+		}
+		// The EPSS bulk load runs on the pass transaction after the pass
+		// succeeded — the daily-set swap commits atomically with the run
+		// and its counters (ADR-013); a failing load aborts the pass and
+		// rolls everything back, leaving the previous day's set intact.
+		if err := finish(ctx); err != nil {
 			return err
 		}
 		counters = normalizeCounters(counters, res)

@@ -105,22 +105,26 @@ func (s *Service) RunSource(ctx context.Context, in RunSourceInput) (RunSourceRe
 		rawID = id
 
 		sink := newNormalizeSink(s, tx, desc.ID, runID, rawID, now)
-		// Note (DEV-032 follow-up): as in NormalizeSource, the KEV
-		// full-set path must populate NormalizeInput.PreviousKEVCVEs from
-		// the source's previously stored catalog before removal
-		// historisation (kev_removed evidence) can fire.
-		// Note (DEV-033 follow-up): as in NormalizeSource, the EPSS
-		// full-set path must populate NormalizeInput.EpssBulk (the
-		// BulkRowWriter over this transaction) before the daily set can be
-		// COPY-loaded; until the wiring lands the EPSS adapter rejects the
-		// pass.
-		res, err := in.Adapter.Normalize(ctx, NormalizeInput{
-			RawRecordID: rawID,
-			Payload:     out.Payload,
-			ContentHash: out.ContentHash,
-			Meta:        out.Meta,
-		}, sink)
+		// The pass input carries the additive full-set specialisations at
+		// the use-case boundary (DEV-041): the EPSS pass receives the
+		// bulk writer over this transaction (TRUNCATE + COPY, loaded by
+		// finish below), the KEV pass the previous catalog's CVE set
+		// (removal historisation). Every other source reads neither.
+		input, finish, err := s.sourcePassInput(ctx, tx, in.Adapter.Type(),
+			desc.ID, rawID, out.ExternalID, out.FetchedAt,
+			out.Payload, out.ContentHash, out.Meta, now)
 		if err != nil {
+			return err
+		}
+		res, err := in.Adapter.Normalize(ctx, input, sink)
+		if err != nil {
+			return err
+		}
+		// The EPSS bulk load runs on the pass transaction after the pass
+		// succeeded — the daily-set swap commits atomically with the run
+		// and its counters (ADR-013); a failing load aborts the pass and
+		// rolls everything back, leaving the previous day's set intact.
+		if err := finish(ctx); err != nil {
 			return err
 		}
 		counters = normalizeCounters(counters, res)

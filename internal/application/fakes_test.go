@@ -27,10 +27,13 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/xpera/risksignal/internal/application"
 	"github.com/xpera/risksignal/internal/domain"
@@ -85,6 +88,18 @@ type storedSourceRun struct {
 	finishedAt   time.Time
 }
 
+// storedEpssRow is one epss_current row the fake EPSS bulk load stages: the
+// tuple values the application's bulk writer sends through the fake
+// CopyFrom (cve id + the COPY-ready decimals, model_version and loaded_at
+// stamped by the writer — ARCH-002 §3).
+type storedEpssRow struct {
+	cveID        string
+	score        pgtype.Numeric
+	percentile   pgtype.Numeric
+	modelVersion string
+	loadedAt     time.Time
+}
+
 type storedRunCompletion struct {
 	runID       string
 	status      application.SourceRunStatus
@@ -107,6 +122,7 @@ type fakeDB struct {
 	sourceRuns   []storedSourceRun
 	sources      []application.SourceDescriptor
 	quarantine   []domain.Quarantine
+	epssRows     []storedEpssRow
 	// components is the seeded inventory (demo seed data), written by the
 	// test before a run and only ever read by the matcher fake.
 	components []application.Component
@@ -225,12 +241,16 @@ func (d *fakeDB) applyCompletion(c storedRunCompletion) error {
 // commit publishes them into the shared database, rollback discards them.
 // pgx.Tx is embedded so the fake satisfies the application.Tx alias; its
 // methods are never invoked by the fakes (they stage on the struct, they do
-// not run SQL).
+// not run SQL) except the two the application's EPSS bulk writer issues
+// directly on the transaction — Exec (the TRUNCATE) and CopyFrom (the
+// COPY) — which this fake stages into epssRows (DEV-041).
 type fakeTx struct {
 	pgx.Tx
 	db     *fakeDB
 	log    []string
 	staged fakeStaged
+
+	copyErr error // armed failpoint of the EPSS COPY (flush path)
 
 	committed  bool
 	rolledBack bool
@@ -248,6 +268,7 @@ type fakeStaged struct {
 	completions []storedRunCompletion
 	quarantine  []domain.Quarantine
 	qMutations  []domain.Quarantine
+	epssRows    []storedEpssRow
 }
 
 func (t *fakeTx) record(op string) { t.log = append(t.log, op) }
@@ -261,6 +282,7 @@ func (t *fakeTx) commit() {
 	t.db.matchRows = append(t.db.matchRows, t.staged.matches...)
 	t.db.rawRecords = append(t.db.rawRecords, t.staged.rawRecords...)
 	t.db.sourceRuns = append(t.db.sourceRuns, t.staged.runs...)
+	t.db.epssRows = append(t.db.epssRows, t.staged.epssRows...)
 	for _, q := range t.staged.quarantine {
 		t.db.applyQuarantine(q)
 	}
@@ -280,16 +302,58 @@ func (t *fakeTx) rollback() {
 	t.staged = fakeStaged{}
 }
 
+// Exec implements the one statement class the application issues directly
+// on a transaction: the EPSS bulk writer's TRUNCATE epss_current (DEV-041
+// — every other write travels through the repository fakes and their
+// staging). An unexpected statement is a test bug.
+func (t *fakeTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if strings.Contains(sql, "TRUNCATE") && strings.Contains(sql, "epss_current") {
+		t.record("epss.truncate")
+		return pgconn.NewCommandTag("TRUNCATE TABLE"), nil
+	}
+	return pgconn.CommandTag{}, fmt.Errorf("fake: unexpected Exec statement %q", sql)
+}
+
+// CopyFrom implements the application's EPSS bulk COPY on the fake
+// transaction: the row source is drained into the staged epss_current rows
+// (the bulk writer sends cve ids as strings, the COPY-ready numerics, the
+// model_version and the loaded_at instant — the exact tuple of the real
+// COPY). The armed copyErr failpoint makes the COPY fail like a real
+// infrastructure failure of the flush path.
+func (t *fakeTx) CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error) {
+	if t.copyErr != nil {
+		return 0, t.copyErr
+	}
+	t.record("epss.copy")
+	var n int64
+	for rowSrc.Next() {
+		values, err := rowSrc.Values()
+		if err != nil {
+			return n, err
+		}
+		t.staged.epssRows = append(t.staged.epssRows, storedEpssRow{
+			cveID:        values[0].(string),
+			score:        values[1].(pgtype.Numeric),
+			percentile:   values[2].(pgtype.Numeric),
+			modelVersion: values[3].(string),
+			loadedAt:     values[4].(time.Time),
+		})
+		n++
+	}
+	return n, rowSrc.Err()
+}
+
 // fakeTxRunner plays postgres.WithTx: commit on nil, rollback and the
 // original error (unwrapped) otherwise. Every transaction it opens stays
 // observable for assertions (write order, commit/rollback state).
 type fakeTxRunner struct {
-	db  *fakeDB
-	txs []*fakeTx
+	db      *fakeDB
+	txs     []*fakeTx
+	copyErr error // armed on every opened transaction (EPSS flush fault seam)
 }
 
 func (r *fakeTxRunner) Run(ctx context.Context, fn func(tx application.Tx) error) error {
-	ftx := &fakeTx{db: r.db}
+	ftx := &fakeTx{db: r.db, copyErr: r.copyErr}
 	r.txs = append(r.txs, ftx)
 	if err := fn(ftx); err != nil {
 		ftx.rollback()
