@@ -24,11 +24,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
 	"github.com/xpera/risksignal/internal/application"
+	"github.com/xpera/risksignal/internal/platform/clock"
 )
 
 // plannedInterval maps a source's schedule string onto its planned run
@@ -356,3 +362,249 @@ type monitorDataError struct{ err error }
 
 func (e monitorDataError) Error() string { return e.err.Error() }
 func (e monitorDataError) Unwrap() error { return e.err }
+
+// cmdSourceList renders the monitor projection of every registered source
+// (ARCH-002 §5, ch. 11.3): one monitor entry per source — the latest run,
+// data age, degraded flag, open quarantine count and the current metric
+// values — as text lines or as the --output json envelope (result: the
+// ordered sources array). The command is strictly a read.
+func (e *cmdEnv) cmdSourceList(args []string) outcome {
+	fs := newFlagSet(e, "usage: risksignal source list")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return outcome{}
+		}
+		return e.fail(exitValidation, classValidation, "%v", err)
+	}
+	if fs.NArg() > 0 {
+		return e.fail(exitValidation, classValidation, "unexpected argument %q", fs.Arg(0))
+	}
+
+	cfg, out := loadConfig(e)
+	if !out.ok() {
+		return out
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sourceCommandTimeout)
+	defer cancel()
+
+	pool, _, out := e.dbService(ctx, cfg)
+	if !out.ok() {
+		return out
+	}
+	defer pool.Close()
+
+	entries, err := loadMonitor(ctx, gen.New(pool), clock.RealClock{}.Now())
+	if err != nil {
+		return e.monitorFailure(err)
+	}
+	if e.format == formatText {
+		printSourceList(e.stdout, entries)
+	}
+	return e.ok(sourceListResult{Sources: entries})
+}
+
+// cmdSourceStatus renders the detailed monitor view of the named source
+// (ARCH-002 §5: status renders the monitor view, --output json for
+// automation). The argument is the source id or its type when exactly one
+// source of that type is registered (the resolution of `source run`,
+// resolveSourceRef); without an argument every source is reported, so a
+// bare `source status --output json` is the full monitor snapshot.
+func (e *cmdEnv) cmdSourceStatus(args []string) outcome {
+	fs := newFlagSet(e, "usage: risksignal source status [<type|id>]\n"+
+		"  with no argument every registered source is reported")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return outcome{}
+		}
+		return e.fail(exitValidation, classValidation, "%v", err)
+	}
+	if fs.NArg() > 1 {
+		return e.fail(exitValidation, classValidation,
+			"source status takes at most one argument: the source id or its type")
+	}
+
+	cfg, out := loadConfig(e)
+	if !out.ok() {
+		return out
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sourceCommandTimeout)
+	defer cancel()
+
+	pool, _, out := e.dbService(ctx, cfg)
+	if !out.ok() {
+		return out
+	}
+	defer pool.Close()
+	q := gen.New(pool)
+
+	entries, err := loadMonitor(ctx, q, clock.RealClock{}.Now())
+	if err != nil {
+		return e.monitorFailure(err)
+	}
+	if fs.NArg() == 1 {
+		sourceID, err := resolveSourceRef(ctx, q, fs.Arg(0))
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return e.fail(exitGeneric, classGeneric, "no source with id %q registered", fs.Arg(0))
+			}
+			return e.fail(exitGeneric, classGeneric, "%v", err)
+		}
+		filtered := make([]monitorEntry, 0, 1)
+		for _, entry := range entries {
+			if entry.SourceID == sourceID {
+				filtered = append(filtered, entry)
+			}
+		}
+		entries = filtered
+	}
+
+	if e.format == formatText {
+		printSourceStatus(e.stdout, entries)
+	}
+	return e.ok(sourceListResult{Sources: entries})
+}
+
+// monitorFailure classifies a monitor read failure: a database failure of
+// the projection reads is infrastructure (exit 6); a corrupt stored
+// counters shape is a data problem reported as generic (exit 1).
+func (e *cmdEnv) monitorFailure(err error) outcome {
+	var dataErr monitorDataError
+	if errors.As(err, &dataErr) {
+		return e.fail(exitGeneric, classGeneric, "%v", err)
+	}
+	return e.fail(exitInfrastructure, classInfrastructure, "%v", err)
+}
+
+// scheduleText renders the schedule of a monitor entry for text output.
+func scheduleText(entry monitorEntry) string {
+	if entry.Schedule == nil {
+		return "none (operator-triggered)"
+	}
+	return *entry.Schedule
+}
+
+// ageText renders the data age of a monitor entry for text output.
+func ageText(entry monitorEntry) string {
+	if entry.DataAgeSeconds == nil {
+		return "no successful run yet"
+	}
+	return durationText(*entry.DataAgeSeconds)
+}
+
+// durationText renders a duration in seconds as the compact Go form
+// (e.g. "3h0m0s"), rounded to whole seconds for readability.
+func durationText(seconds float64) string {
+	return (time.Duration(seconds * float64(time.Second))).Round(time.Second).String()
+}
+
+// intervalText renders the planned interval of a monitor entry.
+func intervalText(entry monitorEntry) string {
+	if entry.PlannedIntervalSeconds == nil {
+		return "none"
+	}
+	return durationText(*entry.PlannedIntervalSeconds)
+}
+
+// lastRunText renders the latest run outcome of a monitor entry for the
+// list line: the status, or "never" when the source has not run.
+func lastRunText(entry monitorEntry) string {
+	if entry.LastRun == nil {
+		return "never"
+	}
+	return entry.LastRun.Status
+}
+
+// printSourceList renders the compact list form: one line per source.
+func printSourceList(w io.Writer, entries []monitorEntry) {
+	fmt.Fprintf(w, "source list: %d source(s)\n", len(entries))
+	for _, entry := range entries {
+		fmt.Fprintf(w, "%s / %s: %s, schedule %s, last run %s, data age %s, degraded %v, quarantine open %d\n",
+			entry.Type, entry.Name,
+			enabledText(entry), scheduleText(entry),
+			lastRunText(entry), ageText(entry),
+			entry.Degraded, entry.QuarantineOpen)
+	}
+}
+
+// printSourceStatus renders the verbose monitor block of one source per
+// entry: the full latest-run facts, counters, error, rate-limit flag,
+// data age, degraded verdict and the current metric values.
+func printSourceStatus(w io.Writer, entries []monitorEntry) {
+	for i, entry := range entries {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "source %s (type %s, id %s): %s\n",
+			entry.Name, entry.Type, entry.SourceID, enabledText(entry))
+		fmt.Fprintf(w, "  endpoint %s; schedule %s; planned interval %s\n",
+			endpointText(entry), scheduleText(entry), intervalText(entry))
+		if run := entry.LastRun; run != nil {
+			fmt.Fprintf(w, "  last run %s status %s\n", run.RunID, run.Status)
+			fmt.Fprintf(w, "    started %s; finished %s\n",
+				entryTimeText(run.StartedAt), optionalTimeText(run.FinishedAt))
+			fmt.Fprintf(w, "    counters: {records %d, normalized %d, errors %d, quarantined %d, matched %d, signals %d}\n",
+				run.Counters.Records, run.Counters.Normalized, run.Counters.Errors,
+				run.Counters.Quarantined, run.Counters.Matched, run.Counters.Signals)
+			fmt.Fprintf(w, "    error: %s\n", errorText(run))
+			fmt.Fprintf(w, "    rate limited: %v\n", run.RateLimited)
+		} else {
+			fmt.Fprintln(w, "  last run: never")
+		}
+		fmt.Fprintf(w, "  data age: %s\n", ageText(entry))
+		fmt.Fprintf(w, "  degraded: %v (stale when data age exceeds 2 x planned interval)\n", entry.Degraded)
+		fmt.Fprintf(w, "  quarantine open: %d\n", entry.QuarantineOpen)
+		fmt.Fprintf(w, "  metrics: source_run_duration_seconds %s, source_records_total %v, "+
+			"source_errors_total %v, source_data_age_seconds %s, source_rate_limited %v, epss_rows_total %v\n",
+			optionalNumberText(entry.Metrics.SourceRunDurationSeconds),
+			entry.Metrics.SourceRecordsTotal,
+			entry.Metrics.SourceErrorsTotal,
+			optionalNumberText(entry.Metrics.SourceDataAgeSeconds),
+			entry.Metrics.SourceRateLimited,
+			entry.Metrics.EpssRowsTotal)
+	}
+}
+
+// enabledText renders the enabled state of a source for text output.
+func enabledText(entry monitorEntry) string {
+	if entry.Enabled {
+		return "enabled"
+	}
+	return "disabled"
+}
+
+// endpointText renders the endpoint of a source for text output.
+func endpointText(entry monitorEntry) string {
+	if entry.Endpoint == "" {
+		return "none"
+	}
+	return entry.Endpoint
+}
+
+// errorText renders the error of the latest run for text output.
+func errorText(run *monitorLastRun) string {
+	if run.Error == nil {
+		return "none"
+	}
+	return *run.Error
+}
+
+// entryTimeText renders a clock timestamp in RFC 3339.
+func entryTimeText(t time.Time) string {
+	return t.UTC().Format(time.RFC3339)
+}
+
+// optionalTimeText renders an optional timestamp, "running" when unset.
+func optionalTimeText(t *time.Time) string {
+	if t == nil {
+		return "still running"
+	}
+	return entryTimeText(*t)
+}
+
+// optionalNumberText renders an optional metric value, "none" when unset.
+func optionalNumberText(v *float64) string {
+	if v == nil {
+		return "none"
+	}
+	return fmt.Sprintf("%v", *v)
+}

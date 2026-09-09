@@ -277,6 +277,12 @@ commands:
   source run <type|id>              enqueue one manual source.fetch job for the
                                     named source (the worker runs it, bypassing
                                     the schedule; dedupe source_id + request_id)
+  source list                       show the source monitor projection of every
+                                    registered source: latest run, data age,
+                                    degraded flag, quarantine open count
+  source status [<type|id>]         render the detailed monitor view of the
+                                    named source (all sources without an
+                                    argument) with the current metric values
   help                              show this help
 
 The CLI is strictly non-interactive: it never prompts and never reads hidden

@@ -1,12 +1,16 @@
-// source subcommands (WP-2.08 / DEV-042, ARCH-002 §5): `source run` is the
-// operator's manual trigger of the source.run loop — it enqueues one
-// source.fetch job (dedupe key source_id + request_id) so the background
-// worker's relay picks it up on its next drain and runs the fetch half of
-// the source, bypassing the schedule. The command is strictly an enqueuer:
-// it writes one outbox row on the database the worker shares and returns;
-// the worker process delivers the job (a manual trigger is idempotent per
-// request id — a repeated run with the same id enqueues nothing new, a
-// fresh id always enqueues a fresh job).
+// source subcommands (WP-2.08/DEV-042 + WP-2.08b/DEV-043, ARCH-002 §5):
+// `source run` is the operator's manual trigger of the source.run loop — it
+// enqueues one source.fetch job (dedupe key source_id + request_id) so the
+// background worker's relay picks it up on its next drain and runs the
+// fetch half of the source, bypassing the schedule. The command is strictly
+// an enqueuer: it writes one outbox row on the database the worker shares
+// and returns; the worker process delivers the job (a manual trigger is
+// idempotent per request id — a repeated run with the same id enqueues
+// nothing new, a fresh id always enqueues a fresh job).
+//
+// `source list` and `source status` (DEV-043) render the source monitor
+// projection — the read-only view of ARCH-002 §5; they live in
+// source_monitor.go.
 //
 // Composition: cmd/risksignal is the composition root of the command path.
 // It opens the pool, wires the postgres repositories behind the application
@@ -14,9 +18,6 @@
 // or by its type when exactly one source of that type is registered — with
 // the sqlc query set directly (an operator resolution read, not a domain
 // command, following the demo seed convention).
-//
-// The source monitor surface (`source list|status`) is WP-2.08b / DEV-043
-// and intentionally absent here.
 package main
 
 import (
@@ -39,21 +40,24 @@ import (
 // database (same convention as the demo commands).
 const sourceCommandTimeout = 5 * time.Minute
 
-// runSource dispatches `risksignal source ...`. The monitor subcommands
-// (list, status) land with DEV-043; only the manual run trigger exists so
-// far (ARCH-002 §5).
+// runSource dispatches `risksignal source ...`: the manual run trigger
+// (run) and the monitor surface (list, status — DEV-043, ARCH-002 §5).
 func runSource(e *cmdEnv, args []string) int {
 	if len(args) < 1 {
 		return e.emit("source", e.fail(exitValidation, classValidation,
-			"missing subcommand (supported: run)"))
+			"missing subcommand (supported: run, list, status)"))
 	}
 	command := "source " + args[0]
 	switch args[0] {
 	case "run":
 		return e.emit(command, e.cmdSourceRun(args[1:]))
+	case "list":
+		return e.emit(command, e.cmdSourceList(args[1:]))
+	case "status":
+		return e.emit(command, e.cmdSourceStatus(args[1:]))
 	default:
 		return e.emit(command, e.fail(exitValidation, classValidation,
-			"unknown subcommand (supported: run)"))
+			"unknown subcommand (supported: run, list, status)"))
 	}
 }
 
