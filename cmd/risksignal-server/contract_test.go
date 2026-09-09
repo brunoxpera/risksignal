@@ -482,6 +482,9 @@ func demoSeedBinary(t *testing.T) string {
 			return
 		}
 		demoSeedBinaryPath = filepath.Join(dir, "risksignal")
+		//nolint:gosec // G204: the module path and build flags are constants;
+		// only the scratch output path varies (a MkdirTemp dir this test
+		// owns). No shell, no user input and no network reach the process.
 		cmd := exec.Command("go", "build", "-o", demoSeedBinaryPath, "github.com/xpera/risksignal/cmd/risksignal")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			demoSeedBinaryErr = fmt.Errorf("build demo CLI: %w (%s)", err, out)
@@ -503,6 +506,9 @@ func seedDemo(t *testing.T, dbURL string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
+	//nolint:gosec // G204: bin is the demo CLI this test built itself above
+	// and the seed command runs a fixed argument list against the scratch
+	// database of this test — no shell, no user-controlled input.
 	cmd := exec.CommandContext(ctx, bin, "demo", "seed", "--output", "json")
 	cmd.Env = cliEnv(dbURL)
 	out, err := cmd.CombinedOutput()
