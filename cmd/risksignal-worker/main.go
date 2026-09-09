@@ -5,13 +5,17 @@
 // and notifications. WP-1a.02: it loads and validates its configuration on
 // startup (defaults -> optional JSON config file -> RISKSIGNAL_* environment
 // variables) and prints a provenance summary; an invalid configuration exits
-// 1 without starting. WP-1a.10: it then runs the scheduler loop of
-// internal/adapters/worker — a heartbeat and one empty scheduler run per
-// worker.interval (no job types yet), with worker health recording the
-// heartbeat and the last successful run (concept ch. 16.3) and time read
-// through the injectable clock port of internal/platform/clock (ch. 7.2,
-// TR-009). SIGINT/SIGTERM shuts the loop down cleanly within a grace period.
-// Job polling and dispatch land in later work packages (ch. 14).
+// 1 without starting. WP-1a.10 + WP-1b.06: it then runs the scheduler loop
+// of internal/adapters/worker — a heartbeat and one scheduler run per
+// worker.interval, where the run is the outbox relay drain of ARCH-001 §2:
+// the loop claims the due outbox batch (lease-based, SKIP LOCKED),
+// dispatches every row to the handler registered for its type (in I1b: the
+// signal.created sink, a no-op standing in for the I4 notification adapter)
+// and acks or dead-letters each row. Worker health records the heartbeat
+// and the last successful run (concept ch. 16.3) and time is read through
+// the injectable clock port of internal/platform/clock (ch. 7.2, TR-009).
+// SIGINT/SIGTERM shuts the loop down cleanly within a grace period. Further
+// job types land in later work packages (ch. 14).
 package main
 
 import (
@@ -24,7 +28,10 @@ import (
 	"time"
 
 	"github.com/xpera/risksignal/internal/adapters/postgres"
+	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/xpera/risksignal/internal/adapters/postgres/repo"
 	"github.com/xpera/risksignal/internal/adapters/worker"
+	"github.com/xpera/risksignal/internal/application"
 	"github.com/xpera/risksignal/internal/platform/buildinfo"
 	"github.com/xpera/risksignal/internal/platform/clock"
 	"github.com/xpera/risksignal/internal/platform/config"
@@ -72,19 +79,32 @@ func run(cfg *config.Config, logger *slog.Logger) error {
 // composition-root tests can drive the shutdown without sending signals to
 // the test process.
 func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
-	// The pool is opened for the job-processing work packages: no job type
-	// exists yet (WP-1a.10), so nothing queries it, and it is lazy
-	// (postgres.NewPool, WP-1a.05): a database that is down at startup must
-	// not stop the worker — the heartbeat needs no database, and the pool
-	// recovers on its own once the database is back.
+	// The pool backs the outbox relay store. It is lazy (postgres.NewPool,
+	// WP-1a.05): a database that is down at startup must not stop the worker
+	// — the heartbeat needs no database, the drain fails per cycle until the
+	// pool recovers on its own, and the loop stays alive either way
+	// (ch. 16.3).
 	pool, err := postgres.NewPool(context.Background(), cfg.Database.URL)
 	if err != nil {
 		return fmt.Errorf("create database pool: %w", err)
 	}
 	defer pool.Close()
 
+	// The outbox relay (WP-1b.06, ARCH-001 §2) executes one drain per
+	// scheduler cycle. Its dispatch registry carries the I1b signal.created
+	// sink — a no-op standing in for the I4 notification adapter, which
+	// grows onto the same registry key in I4 (ch. 14.3 notification.deliver)
+	// alongside the job types of I2/I3.
+	relay, err := worker.NewRelay(repo.NewOutboxRelay(gen.New(pool)), logger)
+	if err != nil {
+		return fmt.Errorf("configure outbox relay: %w", err)
+	}
+	if err := relay.Register(application.EventTypeSignalCreated, worker.SignalCreatedSink(logger)); err != nil {
+		return fmt.Errorf("configure outbox relay: %w", err)
+	}
+
 	health := worker.NewHealth()
-	sched, err := worker.NewScheduler(cfg.Worker.Interval, clock.RealClock{}, logger, health)
+	sched, err := worker.NewScheduler(cfg.Worker.Interval, clock.RealClock{}, logger, health, relay.Drain)
 	if err != nil {
 		return fmt.Errorf("configure scheduler: %w", err)
 	}

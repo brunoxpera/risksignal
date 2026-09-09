@@ -1,12 +1,14 @@
 package main
 
-// Composition-root test of the WP-1a.10 wiring: runWithContext starts the
-// scheduler loop, the process logs a heartbeat and completed scheduler
-// runs, and cancelling the context shuts the loop down cleanly (Run returns
-// nil). The signal path (run) is deliberately not driven with real signals
-// inside tests — a signal sent to the test process could race the handler
-// registration — so the SIGINT/SIGTERM behaviour is exercised by the manual
-// verification of the work package instead.
+// Composition-root test of the WP-1a.10 wiring as extended by WP-1b.06:
+// runWithContext starts the scheduler loop wired to the outbox relay drain
+// (one drain per scheduler cycle, ARCH-001 §2), the process logs a
+// heartbeat and the outcome of each scheduler run, and cancelling the
+// context shuts the loop down cleanly (Run returns nil). The signal path
+// (run) is deliberately not driven with real signals inside tests — a
+// signal sent to the test process could race the handler registration — so
+// the SIGINT/SIGTERM behaviour is exercised by the manual verification of
+// the work package instead.
 
 import (
 	"bytes"
@@ -23,7 +25,8 @@ import (
 // workerTestConfig returns a valid local configuration for the worker
 // composition-root tests. The database URL points at a port that refuses
 // connections: the pool is lazy (WP-1a.05) and the heartbeat needs no
-// database, so no PostgreSQL is required.
+// database, so no PostgreSQL is required — the relay drain fails per cycle
+// and the test asserts the failure path of the wired loop.
 func workerTestConfig(interval time.Duration) *config.Config {
 	return &config.Config{
 		SchemaVersion: config.SchemaVersion,
@@ -69,9 +72,13 @@ func waitForLog(t *testing.T, buf *lockedBuffer, fragment string, timeout time.D
 }
 
 // TestRunWithContextHeartbeatsAndShutsDownCleanly drives the WP-1a.10 exit
-// criterion through the composition root: the worker starts, emits a
-// heartbeat and completed-run records, and cancelling the context stops the
-// loop cleanly — including the clean-shutdown record.
+// criterion through the composition root as wired by WP-1b.06: with the
+// database unreachable the outbox relay drain fails every cycle — the loop
+// logs the failed run (the last-successful-run timestamp stays zero), keeps
+// beating its heartbeat and stays alive, and cancelling the context stops
+// the loop cleanly, including the clean-shutdown record. The successful
+// end-to-end drain against a real database is the relay integration test of
+// this package (relay_integration_test.go).
 func TestRunWithContextHeartbeatsAndShutsDownCleanly(t *testing.T) {
 	buf := &lockedBuffer{}
 	logger := slog.New(slog.NewTextHandler(buf, nil))
@@ -82,7 +89,7 @@ func TestRunWithContextHeartbeatsAndShutsDownCleanly(t *testing.T) {
 
 	waitForLog(t, buf, "scheduler started", 5*time.Second)
 	waitForLog(t, buf, "scheduler heartbeat", 5*time.Second)
-	waitForLog(t, buf, "scheduler run complete", 5*time.Second)
+	waitForLog(t, buf, "scheduler run failed", 5*time.Second)
 
 	cancel()
 	select {

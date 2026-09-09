@@ -47,7 +47,7 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 // is cancelled.
 func TestSchedulerHeartbeatsAndShutsDownCleanly(t *testing.T) {
 	health := NewHealth()
-	s, err := NewScheduler(10*time.Millisecond, clock.RealClock{}, discardLogger(), health)
+	s, err := NewScheduler(10*time.Millisecond, clock.RealClock{}, discardLogger(), health, nil)
 	if err != nil {
 		t.Fatalf("NewScheduler: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestSchedulerUsesInjectedClock(t *testing.T) {
 	t0 := time.Date(2026, 9, 9, 0, 0, 0, 0, time.UTC)
 	fc := clock.NewFakeClock(t0)
 	health := NewHealth()
-	s, err := NewScheduler(5*time.Millisecond, fc, discardLogger(), health)
+	s, err := NewScheduler(5*time.Millisecond, fc, discardLogger(), health, nil)
 	if err != nil {
 		t.Fatalf("NewScheduler: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestSchedulerSurvivesFailedRuns(t *testing.T) {
 	fail.Store(true)
 
 	health := NewHealth()
-	s, err := NewScheduler(5*time.Millisecond, clock.RealClock{}, discardLogger(), health)
+	s, err := NewScheduler(5*time.Millisecond, clock.RealClock{}, discardLogger(), health, nil)
 	if err != nil {
 		t.Fatalf("NewScheduler: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestSchedulerSurvivesFailedRuns(t *testing.T) {
 // TestRunWithCancelledContext: a scheduler started with an already
 // cancelled context stops immediately instead of running a cycle.
 func TestRunWithCancelledContext(t *testing.T) {
-	s, err := NewScheduler(10*time.Millisecond, clock.RealClock{}, discardLogger(), NewHealth())
+	s, err := NewScheduler(10*time.Millisecond, clock.RealClock{}, discardLogger(), NewHealth(), nil)
 	if err != nil {
 		t.Fatalf("NewScheduler: %v", err)
 	}

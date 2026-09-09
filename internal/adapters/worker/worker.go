@@ -7,15 +7,17 @@
 // under internal/adapters and is allowed to depend on the application and
 // domain layers once job dispatch lands.
 //
-// WP-1a.10 scaffolds the loop without job types: the scheduler ticks on the
-// configured interval (config worker.interval), emits a heartbeat, records
-// worker health (heartbeat and last successful run, concept ch. 16.3) and
-// stops cleanly when its context is cancelled. Time is read through the
-// injectable clock port of internal/platform/clock (ch. 7.2, TR-009), so
-// tests drive the worker's notion of time with a FakeClock instead of
-// waiting. Job polling and dispatch land in later work packages (ch. 14);
-// heartbeat and health state are the observable contract the
-// operator-facing reporting will read.
+// WP-1a.10 scaffolds the scheduler loop; WP-1b.06 fills in the run: the
+// scheduler ticks on the configured interval (config worker.interval),
+// emits a heartbeat, executes one scheduler run per cycle — in production
+// the outbox relay drain of ARCH-001 §2 (relay.Drain), wired through
+// NewScheduler — records worker health (heartbeat and last successful run,
+// concept ch. 16.3) and stops cleanly when its context is cancelled. Time
+// is read through the injectable clock port of internal/platform/clock
+// (ch. 7.2, TR-009), so tests drive the worker's notion of time with a
+// FakeClock instead of waiting. Further job types land in later work
+// packages (ch. 14); heartbeat and health state are the observable contract
+// the operator-facing reporting will read.
 package worker
 
 import (
@@ -101,29 +103,34 @@ func (h *Health) Snapshot() State {
 }
 
 // Scheduler drives the periodic worker loop (WP-1a.10): every interval it
-// beats a heartbeat and executes one scheduler run. The run currently does
-// nothing — job types do not exist yet — and the loop is the skeleton the
-// job-polling work packages fill in (ch. 14).
+// beats a heartbeat and executes one scheduler run. The run is injected at
+// construction (NewScheduler): WP-1b.06 wires the outbox relay drain — one
+// claim, dispatch and ack/dead-letter pass over the outbox batch (ARCH-001
+// §2) — into the loop, and later job types (ch. 14) join or replace it.
 type Scheduler struct {
 	interval time.Duration
 	clk      clock.Clock
 	logger   *slog.Logger
 	health   *Health
 
-	// runOnce executes one scheduler run. The scaffold ships a no-op that
-	// succeeds immediately; later work packages replace it with job polling
-	// and dispatch. A run returning an error keeps the loop alive (the next
-	// cycle still beats) but does not advance the last successful run.
+	// runOnce executes one scheduler run per cycle. The WP-1a.10 scaffold
+	// shipped a no-op; WP-1b.06 wires the outbox relay drain in as the run
+	// (relay.Drain, ARCH-001 §2). A run returning an error keeps the loop
+	// alive (the next cycle still beats) but does not advance the last
+	// successful run.
 	runOnce func(ctx context.Context) error
 }
 
 // NewScheduler builds a scheduler that runs one cycle every interval,
-// reading time through clk and recording health into health. A nil clk,
-// logger or health falls back to the production clock, a silent logger or a
-// fresh health state respectively. interval must be positive — config
-// validation (WP-1a.02) enforces it for configured values; anything else is
-// a programming error reported here.
-func NewScheduler(interval time.Duration, clk clock.Clock, logger *slog.Logger, health *Health) (*Scheduler, error) {
+// reading time through clk and recording health into health. run executes
+// the scheduler run of each cycle — in production the outbox relay drain
+// (relay.Drain, WP-1b.06, ARCH-001 §2); a nil run keeps the no-op default
+// of the WP-1a.10 scaffold for callers that inject a run afterwards. A nil
+// clk, logger or health falls back to the production clock, a silent
+// logger or a fresh health state respectively. interval must be positive —
+// config validation (WP-1a.02) enforces it for configured values; anything
+// else is a programming error reported here.
+func NewScheduler(interval time.Duration, clk clock.Clock, logger *slog.Logger, health *Health, run func(context.Context) error) (*Scheduler, error) {
 	if interval <= 0 {
 		return nil, fmt.Errorf("worker: scheduler interval must be positive (got %s)", interval)
 	}
@@ -136,12 +143,15 @@ func NewScheduler(interval time.Duration, clk clock.Clock, logger *slog.Logger, 
 	if health == nil {
 		health = NewHealth()
 	}
+	if run == nil {
+		run = func(context.Context) error { return nil } // no run configured (scaffold default)
+	}
 	return &Scheduler{
 		interval: interval,
 		clk:      clk,
 		logger:   logger,
 		health:   health,
-		runOnce:  func(context.Context) error { return nil }, // no job types yet (WP-1a.10)
+		runOnce:  run,
 	}, nil
 }
 
