@@ -63,6 +63,8 @@ const twofoldNvdConfig = `{"window": 24.0, "overlap": 24.0}`
 // (testdata/, documented fetch dates in testdata/README.md).
 func readFixture(t *testing.T, name string) []byte {
 	t.Helper()
+	// #nosec G304 — name is a compile-time constant of this file; the read
+	// is pinned to the package's testdata/ directory, never caller input.
 	b, err := os.ReadFile("testdata/" + name)
 	if err != nil {
 		t.Fatalf("read fixture testdata/%s: %v", name, err)
@@ -71,24 +73,46 @@ func readFixture(t *testing.T, name string) []byte {
 }
 
 // serveBytes serves one fixed fixture body with a JSON content type — the
-// network-free stand-in of the public source endpoint. nvdPage marks an NVD
-// API 2.0 window response: the fixture is served for the first page of a
-// walk (startIndex 0) and every further page answers the terminating empty
-// page — the walk must terminate on an empty page, never on totalResults
-// (ARCH-002 §2.1) — so a multi-page request sequence cannot loop.
-func serveBytes(body []byte, nvdPage bool) *httptest.Server {
+// network-free stand-in of a full-set source endpoint (KEV catalog).
+func serveBytes(body []byte) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Last-Modified", "Wed, 09 Sep 2026 04:00:00 GMT")
-		if nvdPage && r.URL.Query().Get("startIndex") != "0" {
-			fmt.Fprint(w, `{"resultsPerPage":2000,"startIndex":0,"totalResults":2,"vulnerabilities":[]}`)
-			return
-		}
 		if _, err := w.Write(body); err != nil {
 			panic(err) // serving an in-memory fixture cannot fail
 		}
 	}))
 	return srv
+}
+
+// emptyNvdPage is the terminating empty page of an NVD window walk (the
+// walk must terminate on an empty page, never on totalResults — ARCH-002
+// §2.1).
+const emptyNvdPage = `{"resultsPerPage":2000,"startIndex":0,"totalResults":0,"vulnerabilities":[]}`
+
+// writeNvdWindowPage writes one NVD API 2.0 window response: the fixture
+// page for the first page of a walk (startIndex 0) and the terminating
+// empty page for every further page, so a multi-page request sequence
+// cannot loop.
+func writeNvdWindowPage(w http.ResponseWriter, body []byte, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Last-Modified", "Wed, 09 Sep 2026 04:00:00 GMT")
+	if r.URL.Query().Get("startIndex") != "0" {
+		fmt.Fprint(w, emptyNvdPage)
+		return
+	}
+	if _, err := w.Write(body); err != nil {
+		panic(err) // serving an in-memory fixture cannot fail
+	}
+}
+
+// serveNvdWindow serves one NVD window fixture (the network-free stand-in
+// of the NVD API for the window of the tests): the fixture page on the
+// first request of a walk, the terminating empty page afterwards.
+func serveNvdWindow(body []byte) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeNvdWindowPage(w, body, r)
+	}))
 }
 
 // TestTwofoldNvdImportProducesNoDuplicateRows is the NVD leg of exit
@@ -104,10 +128,9 @@ func TestTwofoldNvdImportProducesNoDuplicateRows(t *testing.T) {
 	clk := clock.NewFakeClock(sourceRunClockStart)
 
 	// The versioned 2026-09-09 window fixture (two reduced CVE records,
-	// testdata/README.md) is served for the window of both runs (as an NVD
-	// page: the fixture on startIndex 0, the terminating empty page after).
+	// testdata/README.md) is served for the window of both runs.
 	window := readFixture(t, "nvd-window-2026-09-09.json")
-	srv := serveBytes(window, true)
+	srv := serveNvdWindow(window)
 	t.Cleanup(srv.Close)
 
 	q := gen.New(pool)
@@ -215,7 +238,7 @@ func TestTwofoldKevImportProducesNoDuplicateRows(t *testing.T) {
 	clk := clock.NewFakeClock(sourceRunClockStart)
 
 	catalog := readFixture(t, "kev-catalog-2026-09-09.json")
-	srv := serveBytes(catalog, false)
+	srv := serveBytes(catalog)
 	t.Cleanup(srv.Close)
 
 	q := gen.New(pool)
