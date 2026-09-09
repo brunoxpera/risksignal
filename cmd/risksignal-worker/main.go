@@ -158,6 +158,34 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 		return fmt.Errorf("configure source jobs: %w", err)
 	}
 
+	// The matching job handlers (ARCH-003 §5, DEV-064/DEV-065) run the
+	// WP-3.08 bulk matching runs on the application service (the matching
+	// core) over the postgres matching read adapters: the rule state
+	// (effective rules + version counters), the component reads (keyset
+	// page walk, by-id candidate rows, the product index) and the
+	// vulnerability-side reads (the cpe_config statement decomposition
+	// and the reverse pair read). Registering them on the relay makes the
+	// matching.rebuild row every inventory commit enqueues (DEV-060)
+	// consumable — without the registration the row would dead-letter
+	// ("no handler registered") and the committed inventory would never
+	// match. matching.recompute rows (the WP-3.09 NVD incremental path)
+	// are served by the same registry keys.
+	matchingRunner, err := application.NewMatchingRunner(svc,
+		repo.NewRuleRepo(q),
+		repo.NewComponentRepo(q),
+		repo.NewVulnerabilityMatchRepo(q),
+		clock.RealClock{}, logger)
+	if err != nil {
+		return fmt.Errorf("configure matching runner: %w", err)
+	}
+	matchingJobs, err := worker.NewMatchingJobs(matchingRunner, logger)
+	if err != nil {
+		return fmt.Errorf("configure matching jobs: %w", err)
+	}
+	if err := matchingJobs.RegisterHandlers(relay); err != nil {
+		return fmt.Errorf("configure matching jobs: %w", err)
+	}
+
 	health := worker.NewHealth()
 	// One scheduler cycle runs the source scan first (ARCH-002 §5: enqueue
 	// the source.fetch jobs of the due schedule slots — the dedupe keys of
