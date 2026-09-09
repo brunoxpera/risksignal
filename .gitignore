@@ -47,3 +47,6 @@ coverage.html
 # --- Local tooling --------------------------------------------------------
 # Node (if a toolchain is added later)
 node_modules/
+
+# scratch dirs from other local tools
+Claude outputs/
