@@ -81,7 +81,7 @@ SBOM_DIR := $(ARTIFACT_DIR)/sbom
 SCAN_DIR := $(ARTIFACT_DIR)/scan
 
 .PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
-	verify-connectivity ci-lint ci-test test-contract ci-build check-gofmt vet lint-golangci \
+	verify-connectivity ci-lint ci-test test-contract ci-build demo check-gofmt vet lint-golangci \
 	lint-licenses lint-secrets up-db image sbom scan sign
 
 ## build: compile all three binaries into bin/ with build metadata injected
@@ -131,6 +131,22 @@ test-contract: up-db
 ## ci-build: WP-1a.12 build stage — `make build` is the definition of the
 ##           stage (three binaries with build metadata).
 ci-build: build
+
+## demo: WP-1b.11 E2E walking-skeleton demonstration — one command from a
+##       clean checkout to the iteration I1b exit criterion (ARCH-001): the
+##       compose db is started (up-db) and migrated, `demo seed` runs the
+##       deterministic synthetic source (DEV-019), the server starts on
+##       127.0.0.1:18080 and the script (scripts/demo.sh) asserts that
+##       GET /api/v1/signals serves the four reference signals with the
+##       expected P1/P2/P2/P3 priorities — the exit-criterion read — via
+##       the list and the detail endpoint, then tears the demo server down
+##       (the compose db stays up, like ci-test; `make down` stops it).
+##       Deterministic and runnable locally: synthetic seed data only,
+##       loopback bindings only (see scripts/demo.sh for the env overrides
+##       RISKSIGNAL_DATABASE_URL / RISKSIGNAL_OIDC_ISSUER /
+##       RISKSIGNAL_HTTP_ADDR).
+demo: build
+	@scripts/demo.sh
 
 ## image: build the production container images (WP-1a.13) from the
 ##        deploy/server and deploy/worker Containerfiles — multi-stage, non-root
