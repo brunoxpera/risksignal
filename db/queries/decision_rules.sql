@@ -1,0 +1,67 @@
+-- decision_rules: the versioned, auditable decision rule statements
+-- (ARCH-003 §1.4, ch. 9.2, ADR-015, WP-3.03a / DEV-056). Decision rules
+-- are manual match corrections and exclusions that must survive automatic
+-- recompute: an exclude rule forces a visible no_match, an override rule
+-- forces its action while the match preserves the raw computed triple in
+-- auto_method/auto_confidence/auto_score (matches.decision_rule_id
+-- references the rule). reason is mandatory, actor_id the author
+-- (audited); target_scope jsonb {cve_id?, vendor?, product?,
+-- component_id?} is the applicability (an empty field is a wildcard), the
+-- validity window valid_from <= now < valid_until gates applicability with
+-- the injected clock instant (domain.DecisionRule.AppliesAt).
+--
+-- Versioning: version is the monotonic ruleset version counter — the same
+-- composite semantics as alias_rules (GetLatestDecisionRulesVersion is the
+-- "d<m>" half of domain.RulesetVersion). Rows are audited config: the
+-- terminal transition is the explicit revocation (revoked_at), never a
+-- delete (ch. 9.2 "bis sie abgelaufen oder aufgehoben ist"); the
+-- matching engine's applicability reads (validity-window evaluation over
+-- the effective rules) land with WP-3.06.
+
+-- InsertDecisionRule creates one decision rule row and returns its id. A
+-- new rule stands unrevoked (revoked_at NULL — the schema default);
+-- created_at/updated_at come from the injected clock. target_scope is the
+-- mandatory jsonb applicability, action the forced-override jsonb
+-- (NULL for exclude rules — the schema enforces nothing here, the domain
+-- constructor domain.NewDecisionRule does); version is the ruleset
+-- version the caller read and bumped.
+-- name: InsertDecisionRule :one
+INSERT INTO decision_rules (type, target_scope, action, reason, actor_id, valid_from, valid_until, version, created_at, updated_at)
+VALUES (@type, @target_scope, @action, @reason, @actor_id, @valid_from, @valid_until, @version, @created_at, @updated_at)
+RETURNING id;
+
+-- RevokeDecisionRule explicitly revokes one decision rule (ch. 9.2,
+-- domain.DecisionRule.Revoke): revoked_at and updated_at come from the
+-- injected clock. The WHERE guard makes the transition idempotent at the
+-- statement level — an already-revoked rule is left untouched and the
+-- returned row count is 0, so a concurrent double-revocation cannot
+-- double-stamp. A revoked rule stays readable and versioned (audited
+-- config, never deleted) and simply stops applying (AppliesAt).
+-- name: RevokeDecisionRule :execrows
+UPDATE decision_rules
+SET revoked_at = @revoked_at,
+    updated_at = @updated_at
+WHERE id = @id
+  AND revoked_at IS NULL;
+
+-- ListDecisionRules returns the full decision rule history — the
+-- management/audit read (newest ruleset version first, then creation
+-- order). The matching engine does not consume this read directly: it
+-- evaluates the effective, unrevoked rules of the current version against
+-- the concrete (vulnerability, component) pair at match time (WP-3.06).
+-- name: ListDecisionRules :many
+SELECT id, type, target_scope, action, reason, actor_id,
+       valid_from, valid_until, version, revoked_at, created_at, updated_at
+FROM decision_rules
+ORDER BY version DESC, created_at DESC, id;
+
+-- GetLatestDecisionRulesVersion returns the current decision ruleset
+-- version counter — the monotonic max(version) of the table, 0 when no
+-- decision rule exists yet. It is the "d<m>" half of the composite
+-- effective rule version the matching use case derives through
+-- domain.RulesetVersion (ARCH-003 §3) and stamps on every match row; a
+-- change to this table bumps the composite and enqueues a fresh
+-- matching.rebuild.
+-- name: GetLatestDecisionRulesVersion :one
+SELECT COALESCE(max(version), 0)::integer AS version
+FROM decision_rules;
