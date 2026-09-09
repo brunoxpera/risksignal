@@ -81,7 +81,7 @@ SBOM_DIR := $(ARTIFACT_DIR)/sbom
 SCAN_DIR := $(ARTIFACT_DIR)/scan
 
 .PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
-	verify-connectivity ci-lint ci-test ci-build check-gofmt vet lint-golangci \
+	verify-connectivity ci-lint ci-test test-contract ci-build check-gofmt vet lint-golangci \
 	lint-licenses lint-secrets up-db image sbom scan sign
 
 ## build: compile all three binaries into bin/ with build metadata injected
@@ -110,9 +110,23 @@ ci-lint: check-gofmt vet lint-golangci lint-arch lint-licenses lint-secrets
 ## ci-test: WP-1a.12 test stage — race-enabled test suite against a real
 ##          PostgreSQL. The compose db service is started first (up-db) so
 ##          the integration tests actually run instead of skipping; the CI
-##          test job provides the same database as a service container.
+##          test job provides the same database as a service container. The
+##          suite includes the ADR-011 gate-3 contract tests (WP-1b.09 /
+##          DEV-023, cmd/risksignal-server/contract_test.go): they seed a
+##          scratch database through the demo-seed chain and run the
+##          generated OpenAPI client against the real handler; without a
+##          reachable database they skip cleanly like every other
+##          integration test.
 ci-test: up-db
 	$(GO) test -race ./...
+
+## test-contract: run only the WP-1b.09 contract suite (ADR-011 gate 3,
+##          DEV-023) — the OpenAPI 3.1 document validation and the generated
+##          client against the demo-seeded server, race-enabled. Requires the
+##          compose database (up-db) so the server-side tests run instead of
+##          skipping; the same suite is part of ci-test via `go test ./...`.
+test-contract: up-db
+	$(GO) test -race ./cmd/risksignal-server -run 'Contract'
 
 ## ci-build: WP-1a.12 build stage — `make build` is the definition of the
 ##           stage (three binaries with build metadata).
