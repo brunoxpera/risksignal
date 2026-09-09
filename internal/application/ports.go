@@ -255,3 +255,23 @@ type AliasRuleRepo interface {
 	// slice, never an error.
 	Effective(ctx context.Context) ([]domain.AliasRule, error)
 }
+
+// ComponentNormLister is the candidate pre-filter's read over the
+// inventory product index (ADR-012, ARCH-003 §4, IX
+// components_product_idx ON (vendor_norm, product_norm)): the components
+// of one normalised vendor/product pair as the alias-closure semi-join
+// resolves them (WP-3.07/DEV-062). The pre-filter calls it once per
+// closed (vendor, product) pair; the I3 matcher (WP-3.08) and the
+// epss_history loader share the same read — both call
+// CandidateComponentIDs, never this port directly. The adapter is the
+// ListComponentsByVendorProductNorm query of components.sql wired with
+// the I3 matching reads (WP-3.08); the port is declared here so the
+// pre-filter programs against the read, never against the components
+// table.
+type ComponentNormLister interface {
+	// ListByVendorProductNorm returns the components whose normalised
+	// vendor/product keys equal the pair, in natural_key order
+	// (deactivated rows included — the matching engine decides what a
+	// deactivated component may still match).
+	ListByVendorProductNorm(ctx context.Context, vendorNorm, productNorm string) ([]Component, error)
+}
