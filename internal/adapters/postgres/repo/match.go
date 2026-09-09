@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
@@ -27,6 +28,11 @@ var _ application.MatchRepo = (*MatchRepo)(nil)
 func (r *MatchRepo) Insert(ctx context.Context, tx application.Tx, rec application.MatchRecord, createdAt time.Time) (string, error) {
 	const op = "match.insert"
 
+	// matches.score is an int32 column; reject a score the column cannot
+	// hold instead of silently truncating it.
+	if rec.Score < math.MinInt32 || rec.Score > math.MaxInt32 {
+		return "", application.Validationf(op, "score %d outside the int32 range", rec.Score)
+	}
 	vulnID, err := toUUID(rec.VulnerabilityID)
 	if err != nil {
 		return "", application.ValidationError(op, err)

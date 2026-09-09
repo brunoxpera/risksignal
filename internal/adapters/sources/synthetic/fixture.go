@@ -140,12 +140,16 @@ type Expectation struct {
 // Load reads and validates the embedded reference document. The fixture is
 // static, so a load error is a programming error (a broken fixture) that
 // the demo CLI reports as a generic failure and the tests pin.
-func Load() (*Fixture, error) {
+func Load() (out *Fixture, err error) {
 	f, err := fixtureFS.Open("fixtures/reference.json")
 	if err != nil {
 		return nil, fmt.Errorf("synthetic: open embedded fixture: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("synthetic: close embedded fixture: %w", cerr)
+		}
+	}()
 
 	dec := json.NewDecoder(f)
 	dec.DisallowUnknownFields() // a typo in the fixture JSON is a bug, not data
@@ -156,7 +160,8 @@ func Load() (*Fixture, error) {
 	if err := fix.validate(); err != nil {
 		return nil, fmt.Errorf("synthetic: invalid embedded fixture: %w", err)
 	}
-	return &fix, nil
+	out = &fix
+	return out, nil
 }
 
 // validate checks the fixture invariants that the demo and the tests rely

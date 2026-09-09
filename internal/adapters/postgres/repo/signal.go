@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -83,13 +84,18 @@ func (r *SignalRepo) List(ctx context.Context, filter application.SignalFilter, 
 	if offset < 0 {
 		return nil, application.Validationf(op, "negative offset")
 	}
-	if int64(offset)+int64(limit)+1 > int64(^uint32(0)>>1) {
-		return nil, application.Validationf(op, "cursor offset too large")
+	// The window is computed in int64 so the addition itself cannot
+	// overflow, then checked against the int32 max_rows column: an
+	// overflowing window (negative limit or an offset near MaxInt) is a
+	// validation error, never a silent truncation.
+	maxRows := int64(offset) + int64(limit) + 1
+	if maxRows <= 0 || maxRows > math.MaxInt32 {
+		return nil, application.Validationf(op, "page window offset+limit+1 = %d outside [1,%d]", maxRows, math.MaxInt32)
 	}
 	rows, err := r.q.ListSignals(ctx, gen.ListSignalsParams{
 		Priority: toTextOptPtr(filter.Priority),
 		Status:   toTextOptPtr(filter.Status),
-		MaxRows:  int32(offset + limit + 1),
+		MaxRows:  int32(maxRows),
 	})
 	if err != nil {
 		return nil, mapDBError(op, err)

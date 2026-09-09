@@ -13,6 +13,7 @@ package repo
 
 import (
 	"context"
+	"math"
 
 	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
 	"github.com/xpera/risksignal/internal/adapters/worker"
@@ -37,8 +38,11 @@ var _ worker.OutboxStore = (*OutboxRelay)(nil)
 func (r *OutboxRelay) ClaimBatch(ctx context.Context, limit int) ([]worker.ClaimedEvent, error) {
 	const op = "outbox.claim_batch"
 
-	if limit <= 0 {
-		return nil, application.Validationf(op, "batch limit must be positive (got %d)", limit)
+	// ClaimOutboxBatch takes an int32 batch size; the worker claims a fixed
+	// small batch, but the store still rejects a limit the column cannot
+	// hold instead of silently truncating it.
+	if limit <= 0 || limit > math.MaxInt32 {
+		return nil, application.Validationf(op, "batch limit %d outside [1,%d]", limit, math.MaxInt32)
 	}
 	rows, err := r.q.ClaimOutboxBatch(ctx, int32(limit))
 	if err != nil {
