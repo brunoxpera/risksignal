@@ -91,7 +91,7 @@ jobs:
         env:
           GITLEAKS_VERSION: v8.30.1
         run: |
-          go install github.com/gitleaks/gitleaks/v8@${GITLEAKS_VERSION}
+          go install github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}
           "$(go env GOPATH)/bin/gitleaks" detect --source .
       - name: OpenAPI validate — ADR-011 gate 1 (WP-1b.11)
         # The kin-openapi validation of the contract suite, run standalone

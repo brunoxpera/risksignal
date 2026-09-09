@@ -27,7 +27,7 @@ record. Binding decisions (ADR-001..ADR-015) are *not* restated here; they live 
 | oapi-codegen | 2.8.0 | `go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest` | `/usr/local/bin/oapi-codegen` |
 | go-arch-lint | 1.19.0 | `go install github.com/fe3dback/go-arch-lint@latest` (2026-09-08; resolved to v1.19.0) | `~/go/bin/go-arch-lint` (GOPATH/bin; not on PATH — the Makefile resolves it) |
 | golangci-lint | 2.13.2 | `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest` (2026-09-09, DEV-013; resolved to v2.13.2; module path carries `/v2` since v2) | `~/go/bin/golangci-lint` (GOPATH/bin; not on PATH — the Makefile resolves it) |
-| gitleaks | 8.30.1 | pre-existing Homebrew install (verified 2026-09-09, DEV-013; CI installs `go install github.com/gitleaks/gitleaks/v8@v8.30.1`) | `/usr/local/bin/gitleaks` |
+| gitleaks | 8.30.1 | pre-existing Homebrew install (verified 2026-09-09, DEV-013; CI installs `go install github.com/zricethezav/gitleaks/v8@v8.30.1`) | `/usr/local/bin/gitleaks` |
 | go-licenses | 1.6.0 | `go install github.com/google/go-licenses@latest` (2026-09-09, DEV-013; resolved to v1.6.0; no `version` subcommand — pinned via `go install`) | `~/go/bin/go-licenses` (GOPATH/bin; not on PATH — the Makefile resolves it) |
 | cyclonedx-gomod | 1.12.0 | `go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@latest` (2026-09-09, DEV-014; resolved to v1.12.0) | `~/go/bin/cyclonedx-gomod` (GOPATH/bin; not on PATH — the Makefile resolves it) |
 | govulncheck | 1.8.0 | `go install golang.org/x/vuln/cmd/govulncheck@latest` (2026-09-09, DEV-014; resolved to v1.8.0) | `~/go/bin/govulncheck` (GOPATH/bin; not on PATH — the Makefile resolves it) |
