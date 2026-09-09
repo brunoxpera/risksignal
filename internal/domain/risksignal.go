@@ -1,5 +1,7 @@
 package domain
 
+import "fmt"
+
 // PriorityFactors are the contributing factors of a signal's priority
 // (ARCH-001 §1 risk_signals.factors: confidence, method, cvss, kev, epss,
 // criticality, exposure; ch. 9.5 stores them so a later recompute can decide
@@ -40,4 +42,32 @@ type RiskSignal struct {
 	Version     int
 	RuleVersion string
 	Factors     PriorityFactors
+}
+
+// NewRiskSignal validates the factors and assembles a new signal: priority
+// derived from the factors by the ch. 9.3 rules, status new (I1b always uses
+// new), optimistic-lock version 1 and the priority rule version stamped. The
+// caller supplies the signal and match identities; factors must pass
+// Validate (method/confidence consistency, in-range CVSS/EPSS, known
+// criticality/exposure).
+func NewRiskSignal(id, matchID string, f PriorityFactors) (RiskSignal, error) {
+	if id == "" {
+		return RiskSignal{}, fmt.Errorf("domain: risk signal id must not be empty")
+	}
+	if matchID == "" {
+		return RiskSignal{}, fmt.Errorf("domain: risk signal match_id must not be empty")
+	}
+	if err := f.Validate(); err != nil {
+		return RiskSignal{}, err
+	}
+	return RiskSignal{
+		ID:          id,
+		MatchID:     matchID,
+		Priority:    ComputePriority(f),
+		Status:      SignalStatusNew,
+		Owner:       "",
+		Version:     1,
+		RuleVersion: PriorityRuleVersion,
+		Factors:     f,
+	}, nil
 }
