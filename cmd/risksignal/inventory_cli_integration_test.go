@@ -148,7 +148,7 @@ func TestInventoryCLIValidatePreviewImportLifecycle(t *testing.T) {
 	if committed.Assets.Created != 2 || committed.Components.Created != 2 {
 		t.Fatalf("commit tallies = assets %+v components %+v, want 2/2 created", committed.Assets, committed.Components)
 	}
-	if committed.ImportID == "" || committed.RuleVersion != "a0d0" || len(committed.InventorySnapshot) != 64 {
+	if committed.ImportID == "" || committed.RuleVersion != "a0000000000d0000000000" || len(committed.InventorySnapshot) != 64 {
 		t.Fatalf("commit job description = import %q rule %q snapshot %q", committed.ImportID, committed.RuleVersion, committed.InventorySnapshot)
 	}
 	if inventoryCount(t, pool, "assets") != 2 || inventoryCount(t, pool, "components") != 2 {
@@ -174,8 +174,8 @@ func TestInventoryCLIValidatePreviewImportLifecycle(t *testing.T) {
 	if jobType != application.EventTypeMatchingRebuild {
 		t.Fatalf("outbox job type = %q, want matching.rebuild", jobType)
 	}
-	if dedupeKey != "matching.rebuild:a0d0:"+committed.InventorySnapshot {
-		t.Fatalf("outbox dedupe_key = %q, want matching.rebuild:a0d0:%s", dedupeKey, committed.InventorySnapshot)
+	if dedupeKey != "matching.rebuild:a0000000000d0000000000:"+committed.InventorySnapshot {
+		t.Fatalf("outbox dedupe_key = %q, want matching.rebuild:a0000000000d0000000000:%s", dedupeKey, committed.InventorySnapshot)
 	}
 
 	// Re-commit of the identical file: idempotent no-op — exit 0, nothing

@@ -335,8 +335,8 @@ func TestCommitInventoryCreatesWritesAuditAndEnqueuesOneRebuild(t *testing.T) {
 	if res.ImportID == "" || res.CorrelationID == "" {
 		t.Fatalf("import/correlation id: %q / %q", res.ImportID, res.CorrelationID)
 	}
-	if res.RuleVersion != "a0d0" {
-		t.Fatalf("rule_version = %q, want a0d0 (no rules configured)", res.RuleVersion)
+	if res.RuleVersion != "a0000000000d0000000000" {
+		t.Fatalf("rule_version = %q, want a0000000000d0000000000 (no rules configured)", res.RuleVersion)
 	}
 	if len(res.InventorySnapshot) != 64 {
 		t.Fatalf("inventory_snapshot = %q, want a 64-hex sha-256", res.InventorySnapshot)
@@ -397,7 +397,7 @@ func TestCommitInventoryCreatesWritesAuditAndEnqueuesOneRebuild(t *testing.T) {
 	if job.Type != application.EventTypeMatchingRebuild {
 		t.Fatalf("outbox type = %q, want matching.rebuild", job.Type)
 	}
-	wantKey := "matching.rebuild:a0d0:" + res.InventorySnapshot
+	wantKey := "matching.rebuild:a0000000000d0000000000:" + res.InventorySnapshot
 	if job.DedupeKey != wantKey {
 		t.Fatalf("outbox dedupe_key = %q, want %q (rule_version + inventory_snapshot)", job.DedupeKey, wantKey)
 	}
@@ -515,8 +515,8 @@ func TestCommitInventoryUpdateWritesAndEnqueuesFreshRebuild(t *testing.T) {
 	if secondJob.DedupeKey == firstJob.DedupeKey {
 		t.Fatalf("fresh rebuild dedupe key %q equals the first enqueue — the snapshot did not move", secondJob.DedupeKey)
 	}
-	if secondJob.DedupeKey != "matching.rebuild:a0d0:"+res.InventorySnapshot {
-		t.Fatalf("second dedupe key = %q, want matching.rebuild:a0d0:%s", secondJob.DedupeKey, res.InventorySnapshot)
+	if secondJob.DedupeKey != "matching.rebuild:a0000000000d0000000000:"+res.InventorySnapshot {
+		t.Fatalf("second dedupe key = %q, want matching.rebuild:a0000000000d0000000000:%s", secondJob.DedupeKey, res.InventorySnapshot)
 	}
 	if len(h.db.auditEvents) != 2 {
 		t.Fatalf("audit rows = %d, want 2", len(h.db.auditEvents))
