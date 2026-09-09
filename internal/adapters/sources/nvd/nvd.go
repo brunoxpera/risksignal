@@ -38,9 +38,11 @@ const (
 	defaultFirstRunWindowH  = 24.0
 	overlapConfigKey        = "overlap"
 	firstRunWindowConfigKey = "window"
-	apiKeyRefConfigKey      = "api_key_ref"
-	envRefPrefix            = "env:"
-	userAgent               = "risksignal-nvd-adapter/0.1 (xpera riskSignal)"
+	// #nosec G101 — api_key_ref is the config member *name* that holds a
+	// secret reference ("env:VAR", ch. 3.3), never a credential literal.
+	apiKeyRefConfigKey = "api_key_ref"
+	envRefPrefix       = "env:"
+	userAgent          = "risksignal-nvd-adapter/0.1 (xpera riskSignal)"
 )
 
 // normalizerVersion is the compile-time normaliser version of the NVD
@@ -195,7 +197,7 @@ func (a *Adapter) getPage(ctx context.Context, endpoint string, from, to time.Ti
 	if err != nil {
 		return nil, application.FetchMeta{}, fmt.Errorf("nvd: page %d (startIndex %d): %w", startIndex/resultsPerPage, startIndex, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	meta := application.FetchMeta{
 		Status:       resp.StatusCode,

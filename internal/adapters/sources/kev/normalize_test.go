@@ -216,6 +216,9 @@ func TestNormalizeHistorisesRemovals(t *testing.T) {
 		if e.Type != domain.EvidenceTypeKEVRemoved {
 			t.Errorf("evidence %d type = %q, want kev_removed", i, e.Type)
 		}
+		// #nosec G602 — the length check above pins len(f.evids) == 3, so i
+		// ranges 1..2 here and the index i-1 stays inside the two-element
+		// literal slice.
 		wantCVE := []string{"CVE-2026-0002", "CVE-2026-0003"}[i-1]
 		if got := canonicalValue(e); got != `{"cve_id":"`+wantCVE+`"}` {
 			t.Errorf("evidence %d value = %s, want the removed CVE %s", i, got, wantCVE)

@@ -36,6 +36,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -173,6 +174,9 @@ func (e *cmdEnv) cmdQuarantineList(args []string) outcome {
 	if *limit < 1 {
 		return e.fail(exitValidation, classValidation, "--limit must be >= 1")
 	}
+	if *limit > math.MaxInt32 {
+		return e.fail(exitValidation, classValidation, "--limit is too large (max %d)", math.MaxInt32)
+	}
 
 	cfg, out := loadConfig(e)
 	if !out.ok() {
@@ -218,6 +222,13 @@ func (e *cmdEnv) cmdQuarantineList(args []string) outcome {
 // the source type/name of every row (ListSources). A corrupt or
 // unreachable database read is returned as-is for the caller to classify.
 func loadQuarantineRows(ctx context.Context, q *gen.Queries, status *domain.QuarantineStatus, sourceID string, limit int) ([]quarantineView, error) {
+	if limit < 1 || limit > math.MaxInt32 {
+		// The repo page-size parameter is int32: reject a page size the
+		// conversion would wrap instead of truncating it silently (G115).
+		// Callers validate the operator-facing flag already; this guard
+		// keeps the boundary safe for every call path.
+		return nil, fmt.Errorf("invalid quarantine page size %d (want 1..%d)", limit, math.MaxInt32)
+	}
 	sources, err := q.ListSources(ctx)
 	if err != nil {
 		return nil, err

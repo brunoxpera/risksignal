@@ -109,7 +109,9 @@ func TestFetchLoadsDailyFile(t *testing.T) {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Header().Set("ETag", `"epss-2026-09-09"`)
 		w.Header().Set("Last-Modified", "Wed, 09 Sep 2026 04:00:00 GMT")
-		w.Write(file)
+		if _, err := w.Write(file); err != nil {
+			t.Errorf("write fixture: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -160,7 +162,9 @@ func TestFetchDayFromInjectedClockUTC(t *testing.T) {
 	var gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
-		w.Write(file)
+		if _, err := w.Write(file); err != nil {
+			t.Errorf("write fixture: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -187,7 +191,9 @@ func TestFetchDayFromInjectedClockUTC(t *testing.T) {
 func TestFetchUnchangedFileIsNoOp(t *testing.T) {
 	file := gzipBytes(t, epssCSV)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(file)
+		if _, err := w.Write(file); err != nil {
+			t.Errorf("write fixture: %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -216,7 +222,9 @@ func TestFetchUnchangedFileIsNoOp(t *testing.T) {
 	// external id too) against the same stored hash is a full fetch again.
 	changed := gzipBytes(t, strings.ReplaceAll(epssCSV, "2026-09-09", "2026-09-10"))
 	srvChanged := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(changed)
+		if _, err := w.Write(changed); err != nil {
+			t.Errorf("write fixture: %v", err)
+		}
 	}))
 	defer srvChanged.Close()
 	next := doFetch(t, newAdapter(srvChanged, day), fetchInput(srvChanged.URL, map[string]any{"last_content_hash": first.ContentHash}))

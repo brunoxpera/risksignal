@@ -92,7 +92,7 @@ func (*Adapter) Normalize(ctx context.Context, in application.NormalizeInput, si
 		res.Errors++
 		return res, nil
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 
 	sc := bufio.NewScanner(gr)
 	sc.Buffer(make([]byte, 0, 64*1024), maxRowBytes)

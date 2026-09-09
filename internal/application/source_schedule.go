@@ -83,8 +83,6 @@ type EnqueueDueSourceFetchesResult struct {
 // with an unparsable schedule is skipped and reported; the enqueues of the
 // other sources still commit.
 func (s *Service) EnqueueDueSourceFetches(ctx context.Context) (EnqueueDueSourceFetchesResult, error) {
-	const op = "enqueue_due_source_fetches"
-
 	rows, err := s.sources.ListEnabledScheduled(ctx)
 	if err != nil {
 		return EnqueueDueSourceFetchesResult{}, err

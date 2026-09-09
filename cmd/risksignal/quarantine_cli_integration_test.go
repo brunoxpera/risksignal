@@ -180,7 +180,7 @@ func TestQuarantineCLIListAckReprocessEndToEnd(t *testing.T) {
 	if len(open.Quarantine) != 1 || open.Quarantine[0].ID != quarantineID {
 		t.Fatalf("list --status new = %+v, want the seeded row", open.Quarantine)
 	}
-	code, stdout, _ = runCLI(t, env, "quarantine", "list", "--status", "resolved", "--output", "json")
+	_, stdout, _ = runCLI(t, env, "quarantine", "list", "--status", "resolved", "--output", "json")
 	var none quarantineListResult
 	decodeJSONStrict(t, string(decodeEnvelope(t, stdout).Result), &none)
 	if len(none.Quarantine) != 0 {
@@ -369,7 +369,7 @@ func TestQuarantineCLIListAckReprocessEndToEnd(t *testing.T) {
 	}
 
 	// The list now shows the resolved row under --status resolved.
-	code, stdout, _ = runCLI(t, env, "quarantine", "list", "--status", "resolved", "--output", "json")
+	_, stdout, _ = runCLI(t, env, "quarantine", "list", "--status", "resolved", "--output", "json")
 	var settled quarantineListResult
 	decodeJSONStrict(t, string(decodeEnvelope(t, stdout).Result), &settled)
 	if len(settled.Quarantine) != 2 {

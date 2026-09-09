@@ -108,7 +108,7 @@ func (a *Adapter) Fetch(ctx context.Context, in application.FetchInput) (applica
 	if err != nil {
 		return application.FetchOutput{}, fmt.Errorf("kev: fetch catalog %s: %w", u, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	meta := application.FetchMeta{
 		Status:       resp.StatusCode,
