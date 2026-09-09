@@ -440,7 +440,13 @@ func (f *fakeOutboxRepo) Append(ctx context.Context, tx application.Tx, ev appli
 	return nil
 }
 
-type fakeVulnerabilityRepo struct{ db *fakeDB }
+type fakeVulnerabilityRepo struct {
+	db *fakeDB
+	// failEvidence is the ARCH-002 §6 sink fault point: when set,
+	// AddEvidence records the write and then fails mid-pass, so the
+	// normalise transaction rolls back with nothing partially committed.
+	failEvidence error
+}
 
 func (f *fakeVulnerabilityRepo) Upsert(ctx context.Context, tx application.Tx, rec application.VulnerabilityRecord, publishedAt, modifiedAt time.Time) (string, error) {
 	ftx, err := fakeTxOf(tx)
@@ -462,6 +468,9 @@ func (f *fakeVulnerabilityRepo) AddEvidence(ctx context.Context, tx application.
 		return err
 	}
 	ftx.record("evidence")
+	if f.failEvidence != nil {
+		return f.failEvidence
+	}
 	if f.db.evidenceExists(ev.RawRecordID, ev.Type, ev.ValueHash) {
 		return nil // ON CONFLICT DO NOTHING
 	}
@@ -556,7 +565,11 @@ func (f *fakeSourceRepo) GetByID(ctx context.Context, id string) (application.So
 	return desc, nil
 }
 
-type fakeQuarantineRepo struct{ db *fakeDB }
+type fakeQuarantineRepo struct {
+	db *fakeDB
+	// failInsert is a sink fault point on the RecordError isolation write.
+	failInsert error
+}
 
 func (f *fakeQuarantineRepo) Insert(ctx context.Context, tx application.Tx, sourceID, sourceRunID, rawRecordID, position, reason, payloadHash string, now time.Time) (string, error) {
 	ftx, err := fakeTxOf(tx)
@@ -564,6 +577,9 @@ func (f *fakeQuarantineRepo) Insert(ctx context.Context, tx application.Tx, sour
 		return "", err
 	}
 	ftx.record("quarantine.insert")
+	if f.failInsert != nil {
+		return "", f.failInsert
+	}
 	q, err := domain.NewQuarantine(uuid.New(), sourceID, sourceRunID, rawRecordID, position, reason, payloadHash)
 	if err != nil {
 		return "", application.ValidationError("quarantine.insert", err)
@@ -607,24 +623,31 @@ func (f *fakeQuarantineRepo) mutate(ctx context.Context, tx application.Tx, id s
 	if err != nil {
 		return domain.Quarantine{}, err
 	}
-	q, ok := f.db.quarantineByID(id)
+	// Intra-transaction visibility: an earlier mutation of this row in the
+	// same transaction is the base state the next guarded transition sees —
+	// exactly as the real guarded UPDATE sees its own uncommitted writes.
+	base, ok := f.db.quarantineByID(id)
 	if !ok {
 		// Mirrors the guarded UPDATE ... RETURNING of the generated
-		// statements: a row that is not there (or not in the guarded
-		// status) matches zero rows.
-		return domain.Quarantine{}, application.ConflictError("quarantine.transition", fmt.Errorf("no %s row for id %s", want, id))
+		// statements: a row that is not there matches zero rows.
+		return domain.Quarantine{}, application.ConflictError("quarantine.transition", fmt.Errorf("no row for id %s", id))
+	}
+	for _, m := range ftx.staged.qMutations {
+		if m.ID == id {
+			base = m
+		}
 	}
 	allowed := false
 	for _, s := range want {
-		if q.Status == s {
+		if base.Status == s {
 			allowed = true
 			break
 		}
 	}
 	if !allowed {
-		return domain.Quarantine{}, application.ConflictError("quarantine.transition", fmt.Errorf("quarantine %s is %s; transition wants one of %v", id, q.Status, want))
+		return domain.Quarantine{}, application.ConflictError("quarantine.transition", fmt.Errorf("quarantine %s is %s; transition wants one of %v", id, base.Status, want))
 	}
-	next := fn(q)
+	next := fn(base)
 	ftx.staged.qMutations = append(ftx.staged.qMutations, next)
 	return next, nil
 }
