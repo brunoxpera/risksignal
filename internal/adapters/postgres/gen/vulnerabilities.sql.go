@@ -11,37 +11,99 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getVulnerabilityByCveID = `-- name: GetVulnerabilityByCveID :one
+SELECT id, cve_id, summary, description, published_at, modified_at, cvss, "references", cpe_config
+FROM vulnerabilities
+WHERE cve_id = $1
+`
+
+type GetVulnerabilityByCveIDRow struct {
+	ID          pgtype.UUID
+	CveID       string
+	Summary     string
+	Description pgtype.Text
+	PublishedAt pgtype.Timestamptz
+	ModifiedAt  pgtype.Timestamptz
+	Cvss        []byte
+	References  []byte
+	CpeConfig   []byte
+}
+
+// GetVulnerabilityByCveID loads one vulnerability with its NVD fields by
+// natural key — the read an ingester uses to check whether a skeleton row
+// already exists before upserting (e.g. KEV arriving before NVD, ARCH-002
+// §2.2: the skeleton is only created when the CVE is not yet present) and
+// the read the extended-upsert round trip is asserted against.
+func (q *Queries) GetVulnerabilityByCveID(ctx context.Context, cveID string) (GetVulnerabilityByCveIDRow, error) {
+	row := q.db.QueryRow(ctx, getVulnerabilityByCveID, cveID)
+	var i GetVulnerabilityByCveIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.CveID,
+		&i.Summary,
+		&i.Description,
+		&i.PublishedAt,
+		&i.ModifiedAt,
+		&i.Cvss,
+		&i.References,
+		&i.CpeConfig,
+	)
+	return i, err
+}
+
 const upsertVulnerability = `-- name: UpsertVulnerability :one
 
-INSERT INTO vulnerabilities (cve_id, summary, published_at, modified_at)
-VALUES ($1, $2, $3, $4)
+INSERT INTO vulnerabilities (cve_id, summary, description, published_at, modified_at, cvss, "references", cpe_config)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (cve_id) DO UPDATE SET
-    summary     = EXCLUDED.summary,
-    modified_at = EXCLUDED.modified_at
+    summary      = EXCLUDED.summary,
+    description  = EXCLUDED.description,
+    modified_at  = EXCLUDED.modified_at,
+    cvss         = EXCLUDED.cvss,
+    "references" = EXCLUDED."references",
+    cpe_config   = EXCLUDED.cpe_config
 RETURNING id
 `
 
 type UpsertVulnerabilityParams struct {
-	CveID       string
-	Summary     string
-	PublishedAt pgtype.Timestamptz
-	ModifiedAt  pgtype.Timestamptz
+	CveID         string
+	Summary       string
+	Description   pgtype.Text
+	PublishedAt   pgtype.Timestamptz
+	ModifiedAt    pgtype.Timestamptz
+	Cvss          []byte
+	NvdReferences []byte
+	CpeConfig     []byte
 }
 
-// vulnerabilities ingest (ARCH-001 §1, ch. 7.1, WP-1b.02).
+// vulnerabilities ingest (ARCH-001 §1, ch. 7.1, WP-1b.02; full NVD fields
+// ARCH-002 §2.1/§3, WP-2.03b).
 //
-// I1b carries only identity + summary; the full NVD description/CVSS-metrics/
-// references arrive with I2.
+// I1b carries only identity + summary; the full NVD description / CVSS
+// metrics / references / cpe_config arrive with I2. All four columns are
+// nullable so the I1b rows and the I2 KEV skeleton rows stay valid.
+//
+// "references" is a reserved keyword in PostgreSQL and is therefore always
+// quoted as "references" in the statements below — in the INSERT column
+// list, in the ON CONFLICT refresh and in the read's SELECT list.
 // UpsertVulnerability inserts or refreshes a vulnerability by its natural
 // key cve_id and returns its id (ARCH-001 §3 step 3: upsert, idempotent by
 // UQ (cve_id)). On refresh, published_at keeps the original publication
-// date; summary and modified_at follow the latest statement.
+// date; summary, description, modified_at and the NVD fields (cvss,
+// "references", cpe_config) follow the latest statement (ch. 8.2). The
+// caller passes NULL for the fields a statement does not carry (e.g. a KEV
+// skeleton row carries summary only) — upserting such a row never invents
+// NVD fields, and the next NVD statement refreshes them again.
 func (q *Queries) UpsertVulnerability(ctx context.Context, arg UpsertVulnerabilityParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, upsertVulnerability,
 		arg.CveID,
 		arg.Summary,
+		arg.Description,
 		arg.PublishedAt,
 		arg.ModifiedAt,
+		arg.Cvss,
+		arg.NvdReferences,
+		arg.CpeConfig,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
