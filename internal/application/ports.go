@@ -127,6 +127,19 @@ type RawRecordRepo interface {
 	// GetByID returns the stored document with its payload bytes. A
 	// missing record is a not-found Error.
 	GetByID(ctx context.Context, id string) (RawRecord, error)
+
+	// PreviousKEVCVEs returns the CVE ids of the source's previously
+	// stored KEV full set (DEV-041, ARCH-002 §2.2): the kev evidences
+	// attached to the source's latest stored raw record other than
+	// excludeRawRecordID — the raw record the current pass normalises,
+	// whose evidence rows belong to the new catalog, never to the
+	// previous one. The normalise use cases (NormalizeSource/RunSource
+	// wiring) populate NormalizeInput.PreviousKEVCVEs from the result so
+	// the KEV adapter historises removals against the previous catalog
+	// (ch. 8.3); the result is nil for a source without a prior raw
+	// record — the first import, which emits no removals. The other
+	// sources never call it.
+	PreviousKEVCVEs(ctx context.Context, sourceID, excludeRawRecordID string) ([]string, error)
 }
 
 // SourceRunRepo owns the source-run lifecycle (ARCH-001 §1 source_runs,

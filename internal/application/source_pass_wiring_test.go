@@ -10,13 +10,17 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/xpera/risksignal/internal/application"
+	"github.com/xpera/risksignal/internal/domain"
 )
 
 // epssSource seeds an EPSS-style full-set source and returns its adapter
@@ -273,5 +277,131 @@ func TestRunSourceNonEpssPassCarriesNoBulkWriter(t *testing.T) {
 	}
 	if h.db.sourceRuns[0].counters.Records != 1 {
 		t.Fatalf("run counters = %+v, want the raw record counted", h.db.sourceRuns[0].counters)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// KEV previous-set wiring (DEV-041, ARCH-002 §2.2, ch. 8.3)
+
+// kevPreviousFixture seeds one committed prior catalog — a raw record with
+// its kev evidences — and returns the expected CVE set of that catalog.
+func kevPreviousFixture(h *harness, t *testing.T, sourceID, rawID string) []string {
+	t.Helper()
+	h.db.rawRecords = append(h.db.rawRecords, storedRawRecord{
+		id: rawID, sourceID: sourceID, externalID: "kev-2026-09-09",
+		contentHash: "kev-hash-old", contentEncoding: "json",
+		payload: []byte(`{"dateReleased":"2026-09-09"}`), fetchedAt: fixedNow.Add(-24 * time.Hour),
+	})
+	cves := []string{"CVE-2026-2003", "CVE-2026-2001", "CVE-2026-2002"}
+	for _, cve := range cves {
+		value, err := json.Marshal(map[string]any{"cve_id": cve, "known_exploited": true})
+		if err != nil {
+			t.Fatalf("marshal kev evidence value: %v", err)
+		}
+		h.db.evidenceRows = append(h.db.evidenceRows, storedEvidence{
+			vulnID: "vuln-" + cve, rawID: rawID, typ: domain.EvidenceTypeKEV,
+			value: value, hash: "hash-" + cve, observedAt: fixedNow.Add(-24 * time.Hour),
+		})
+	}
+	return []string{"CVE-2026-2001", "CVE-2026-2002", "CVE-2026-2003"}
+}
+
+// kevSource seeds a KEV-style full-set source and returns its adapter fake
+// fetching one catalog revision.
+func kevSource(h *harness, t *testing.T, externalID string) *runSource {
+	t.Helper()
+	h.db.sources = append(h.db.sources, application.SourceDescriptor{
+		ID: "src-kev", Type: application.SourceTypeKEV,
+	})
+	return &runSource{
+		typ:  application.SourceTypeKEV,
+		plan: application.SourcePlan{Schedule: "@daily", Kind: application.SourceKindFullSet, CursorKind: application.CursorKindNone},
+		fetchOut: application.FetchOutput{
+			ExternalID:  externalID,
+			Payload:     []byte(`{"dateReleased":"2026-09-10"}`),
+			ContentHash: "kev-hash-new",
+			Meta:        application.FetchMeta{Status: 200, ContentType: "application/json"},
+		},
+	}
+}
+
+// TestRunSourceKEVPopulatesPreviousKEVCVEs is the required KEV wiring: the
+// pass receives the CVE ids of the source's previously stored catalog (read
+// off the previous raw record's kev evidences, excluding the pass's own
+// record) so removal historisation (kev_removed evidence) can fire.
+func TestRunSourceKEVPopulatesPreviousKEVCVEs(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	want := kevPreviousFixture(h, t, "src-kev", "raw-kev-old")
+	src := kevSource(h, t, "kev-2026-09-10")
+	src.normalize = func(ctx context.Context, in application.NormalizeInput, sink application.NormalizeSink) (application.NormalizeResult, error) {
+		if !reflect.DeepEqual(in.PreviousKEVCVEs, want) {
+			t.Fatalf("PreviousKEVCVEs = %v, want the previous catalog's set %v", in.PreviousKEVCVEs, want)
+		}
+		return application.NormalizeResult{}, nil
+	}
+
+	res, err := h.svc.RunSource(ctx, application.RunSourceInput{SourceID: "src-kev", Adapter: src})
+	if err != nil {
+		t.Fatalf("RunSource: %v", err)
+	}
+	if res.Status != application.SourceRunStatusSucceeded {
+		t.Fatalf("status = %s, want succeeded", res.Status)
+	}
+}
+
+// TestNormalizeSourceKEVPopulatesPreviousKEVCVEs proves the same wiring on
+// the normalise half alone (the worker's source.normalize job): the read
+// excludes the pass's own raw record, so the previous set is the earlier
+// catalog's, never the record's own evidence rows.
+func TestNormalizeSourceKEVPopulatesPreviousKEVCVEs(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	want := kevPreviousFixture(h, t, "src-kev", "raw-kev-old")
+	h.db.sources = append(h.db.sources, application.SourceDescriptor{
+		ID: "src-kev", Type: application.SourceTypeKEV,
+	})
+	h.db.rawRecords = append(h.db.rawRecords, storedRawRecord{
+		id: "raw-kev-new", sourceID: "src-kev", externalID: "kev-2026-09-10",
+		contentHash: "kev-hash-new", contentEncoding: "json",
+		payload: []byte(`{"dateReleased":"2026-09-10"}`), fetchedAt: fixedNow,
+	})
+	src := &runSource{typ: application.SourceTypeKEV}
+	src.normalize = func(ctx context.Context, in application.NormalizeInput, sink application.NormalizeSink) (application.NormalizeResult, error) {
+		if !reflect.DeepEqual(in.PreviousKEVCVEs, want) {
+			t.Fatalf("PreviousKEVCVEs = %v, want the previous catalog's set %v (the pass's own raw record excluded)", in.PreviousKEVCVEs, want)
+		}
+		return application.NormalizeResult{}, nil
+	}
+
+	res, err := h.svc.NormalizeSource(ctx, application.NormalizeSourceInput{RawRecordID: "raw-kev-new", Adapter: src})
+	if err != nil {
+		t.Fatalf("NormalizeSource: %v", err)
+	}
+	if res.Status != application.SourceRunStatusSucceeded {
+		t.Fatalf("status = %s, want succeeded", res.Status)
+	}
+}
+
+// TestRunSourceKEVFirstImportHasNoPreviousSet is the first-import contract:
+// a KEV source without a previously stored catalog receives a nil previous
+// set, so the pass emits no removals.
+func TestRunSourceKEVFirstImportHasNoPreviousSet(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	src := kevSource(h, t, "kev-2026-09-09")
+	src.normalize = func(ctx context.Context, in application.NormalizeInput, sink application.NormalizeSink) (application.NormalizeResult, error) {
+		if in.PreviousKEVCVEs != nil {
+			t.Fatalf("PreviousKEVCVEs = %v, want nil on the first import", in.PreviousKEVCVEs)
+		}
+		return application.NormalizeResult{}, nil
+	}
+
+	res, err := h.svc.RunSource(ctx, application.RunSourceInput{SourceID: "src-kev", Adapter: src})
+	if err != nil {
+		t.Fatalf("RunSource: %v", err)
+	}
+	if res.Status != application.SourceRunStatusSucceeded {
+		t.Fatalf("status = %s, want succeeded", res.Status)
 	}
 }

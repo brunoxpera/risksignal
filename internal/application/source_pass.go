@@ -6,14 +6,18 @@ import (
 )
 
 // sourcePassInput assembles the adapter input of one normalise pass and
-// wires the deferred full-set specialisation of the EPSS path at the
-// use-case boundary (DEV-041, ARCH-002 §1/§2.3): the EPSS pass (adapter
-// type "epss") receives the BulkRowWriter over the pass transaction, and
-// the returned finish runs its TRUNCATE + COPY load after the adapter's
-// Normalize succeeded — so the daily-set swap commits atomically with the
-// run (ADR-013). Every other source type reads no bulk field (nil-safe)
-// and finish is a no-op for them; the KEV previous-set read (removal
-// historisation, ARCH-002 §2.2) wires through the same helper.
+// wires the deferred full-set specialisations at the use-case boundary
+// (DEV-041, ARCH-002 §1/§2.2/§2.3): the two additive, nil-safe
+// NormalizeInput fields the WP-2.06/2.07 adapters read.
+//
+// The EPSS pass (adapter type "epss") receives the BulkRowWriter over the
+// pass transaction, and the returned finish runs its TRUNCATE + COPY load
+// after the adapter's Normalize succeeded — so the daily-set swap commits
+// atomically with the run (ADR-013). The KEV pass (adapter type "kev")
+// receives the CVE ids of the source's previously stored catalog, which
+// activates removal historisation (kev_removed evidence, ch. 8.3).
+// NVD/synthetic passes never read the fields and keep them nil, and finish
+// is a no-op for every non-EPSS type.
 //
 // The pass's identity fields (raw record id, payload, content hash, fetch
 // metadata) are carried as given — the caller resolved the stored record
@@ -45,6 +49,19 @@ func (s *Service) sourcePassInput(
 		// daily file's date, loaded_at the pass's clock instant.
 		bulk = newEpssBulkWriter(tx, epssModelVersionOf(externalID, fetchedAt), now)
 		input.EpssBulk = bulk
+	case SourceTypeKEV:
+		// The previous catalog's CVE set activates removal historisation
+		// (ch. 8.3, ARCH-002 §2.2): the KEV adapter emits a kev_removed
+		// evidence for every CVE of the previously stored catalog that the
+		// new one no longer carries. The read excludes the pass's own raw
+		// record — its evidence rows would be the new catalog's, never
+		// the previous set's. A first import has no previous record and
+		// the set stays nil (no removals).
+		previous, err := s.raws.PreviousKEVCVEs(ctx, sourceID, rawRecordID)
+		if err != nil {
+			return NormalizeInput{}, nil, err
+		}
+		input.PreviousKEVCVEs = previous
 	}
 
 	finish = func(ctx context.Context) error {

@@ -619,6 +619,47 @@ func (f *fakeRawRecordRepo) GetByID(ctx context.Context, id string) (application
 	}, nil
 }
 
+// PreviousKEVCVEs implements application.RawRecordRepo on the fake store,
+// mirroring the generated ListPreviousKEVCVEs statement: the kev evidence
+// cve ids of the source's latest stored raw record other than the pass's
+// own, ordered by fetched_at then id (descending), deduplicated and
+// sorted. A source without a prior raw record yields nil.
+func (f *fakeRawRecordRepo) PreviousKEVCVEs(ctx context.Context, sourceID, excludeRawRecordID string) ([]string, error) {
+	var latest *storedRawRecord
+	for i := range f.db.rawRecords {
+		r := &f.db.rawRecords[i]
+		if r.sourceID != sourceID || r.id == excludeRawRecordID {
+			continue
+		}
+		if latest == nil || r.fetchedAt.After(latest.fetchedAt) ||
+			(r.fetchedAt.Equal(latest.fetchedAt) && r.id > latest.id) {
+			latest = r
+		}
+	}
+	if latest == nil {
+		return nil, nil
+	}
+	seen := make(map[string]bool)
+	var cves []string
+	for _, e := range f.db.evidenceRows {
+		if e.rawID != latest.id || e.typ != domain.EvidenceTypeKEV {
+			continue
+		}
+		var v struct {
+			CveID string `json:"cve_id"`
+		}
+		if err := json.Unmarshal(e.value, &v); err != nil || v.CveID == "" {
+			continue
+		}
+		if !seen[v.CveID] {
+			seen[v.CveID] = true
+			cves = append(cves, v.CveID)
+		}
+	}
+	sort.Strings(cves)
+	return cves, nil
+}
+
 type fakeSourceRepo struct{ db *fakeDB }
 
 func (f *fakeSourceRepo) GetByID(ctx context.Context, id string) (application.SourceDescriptor, error) {

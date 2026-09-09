@@ -52,3 +52,59 @@ func (q *Queries) InsertEvidence(ctx context.Context, arg InsertEvidenceParams) 
 	)
 	return err
 }
+
+const listPreviousKEVCVEs = `-- name: ListPreviousKEVCVEs :many
+SELECT DISTINCT (e.value->>'cve_id')::text AS cve_id
+FROM evidences e
+WHERE e.type = 'kev'
+  AND e.value->>'cve_id' IS NOT NULL
+  AND e.raw_record_id = (
+      SELECT r.id
+      FROM raw_records r
+      WHERE r.source_id = $1
+        AND r.id <> $2
+      ORDER BY r.fetched_at DESC, r.id DESC
+      LIMIT 1
+  )
+ORDER BY cve_id
+`
+
+type ListPreviousKEVCVEsParams struct {
+	SourceID           pgtype.UUID
+	ExcludeRawRecordID pgtype.UUID
+}
+
+// ListPreviousKEVCVEs loads the CVE ids of the source's previously stored
+// KEV full set (DEV-041, ARCH-002 §2.2): the kev evidences attached to the
+// source's latest stored raw record other than the pass's own
+// (exclude_raw_record_id — the raw record currently being normalised, whose
+// evidence rows do not exist yet or belong to this pass, not to the
+// previous catalog). The normalise use cases feed the set to the KEV
+// adapter through NormalizeInput.PreviousKEVCVEs, which historises every
+// CVE absent from the new catalog as a kev_removed evidence (ch. 8.3:
+// removals are historised, never silently dropped).
+//
+// The previous set is scoped to the previous raw record — not the union of
+// all stored ones: a CVE removed by an earlier revision is recorded as
+// kev_removed there (type != 'kev', filtered out), so it stays removed and
+// is not re-historised by every later catalog. A source with no prior raw
+// record (the first import) yields no rows and the pass emits no removals.
+func (q *Queries) ListPreviousKEVCVEs(ctx context.Context, arg ListPreviousKEVCVEsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listPreviousKEVCVEs, arg.SourceID, arg.ExcludeRawRecordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var cve_id string
+		if err := rows.Scan(&cve_id); err != nil {
+			return nil, err
+		}
+		items = append(items, cve_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

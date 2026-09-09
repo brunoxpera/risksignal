@@ -72,3 +72,28 @@ func (r *RawRecordRepo) GetByID(ctx context.Context, id string) (application.Raw
 		FetchedAt:       row.FetchedAt.Time,
 	}, nil
 }
+
+// PreviousKEVCVEs implements application.RawRecordRepo: read the CVE ids
+// of the source's previously stored KEV catalog — the kev evidences of the
+// latest stored raw record other than the pass's own (ListPreviousKEVCVEs,
+// sorted, deduplicated). A source without a prior raw record yields nil.
+func (r *RawRecordRepo) PreviousKEVCVEs(ctx context.Context, sourceID, excludeRawRecordID string) ([]string, error) {
+	const op = "raw_record.previous_kev_cves"
+
+	srcID, err := toUUID(sourceID)
+	if err != nil {
+		return nil, application.ValidationError(op, err)
+	}
+	exID, err := toUUID(excludeRawRecordID)
+	if err != nil {
+		return nil, application.ValidationError(op, err)
+	}
+	cves, err := r.q.ListPreviousKEVCVEs(ctx, gen.ListPreviousKEVCVEsParams{
+		SourceID:           srcID,
+		ExcludeRawRecordID: exID,
+	})
+	if err != nil {
+		return nil, mapDBError(op, err)
+	}
+	return cves, nil
+}
