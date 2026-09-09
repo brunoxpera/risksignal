@@ -174,6 +174,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runDemo(e, commandArgs[1:])
 	case "source":
 		return runSource(e, commandArgs[1:])
+	case "inventory":
+		return runInventory(e, commandArgs[1:])
 	case "quarantine":
 		return runQuarantine(e, commandArgs[1:])
 	default:
@@ -285,6 +287,19 @@ commands:
   source status [<type|id>]         render the detailed monitor view of the
                                     named source (all sources without an
                                     argument) with the current metric values
+  inventory validate <file>          parse one inventory CSV and report every
+                                    positioned failure (read-only, no
+                                    database)
+  inventory preview <file>          diff the file against the current
+                                    inventory (created/updated/unchanged,
+                                    read-only)
+  inventory import <file>           dry run by default (preview, nothing
+                  [--commit|--yes]  written); --commit or --yes commits the
+                                    clean rows in one transaction: the
+                                    additive upserts, the inventory.import
+                                    audit event and one matching.rebuild
+                                    job when inventory changed (re-commit
+                                    of identical content is a no-op)
   quarantine list [--status <s>]    show the quarantine working list (the
                   [--source <t|id>]  isolated records of the ch. 8.6 state
                   [--limit <n>]      machine): position, reason, payload
