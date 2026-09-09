@@ -69,6 +69,35 @@ func (q *Queries) GetSourceByTypeAndName(ctx context.Context, arg GetSourceByTyp
 	return i, err
 }
 
+const setSourceLastContentHash = `-- name: SetSourceLastContentHash :exec
+UPDATE sources
+SET config = COALESCE(config, '{}'::jsonb) || jsonb_build_object('last_content_hash', $1::text)
+WHERE id = $2
+`
+
+type SetSourceLastContentHashParams struct {
+	ContentHash string
+	ID          pgtype.UUID
+}
+
+// SetSourceLastContentHash records the content hash of the source's last
+// committed raw record into sources.config.last_content_hash (DEV-041,
+// ARCH-002 §1/§2.2/§2.3, ch. 8.3). The fetch use cases run the update in
+// the same transaction as the raw-record insert and the run completion, so
+// the stored hash advances only with a committed run (ch. 6.1). The next
+// fetch of a full-set source (KEV, EPSS) compares the fetched document's
+// hash against the stored one and reports FetchMeta.NoChange on a match —
+// the successful no-op of an unchanged catalog/daily file (the fetch use
+// case hands the hash to the adapter through the descriptor it resolves;
+// the adapter never reads the database). The jsonb merge keeps every other
+// config member (window, overlap, api_key_ref — the secret reference,
+// never a literal) intact and is NULL-safe (COALESCE) for sources whose
+// config has never been set.
+func (q *Queries) SetSourceLastContentHash(ctx context.Context, arg SetSourceLastContentHashParams) error {
+	_, err := q.db.Exec(ctx, setSourceLastContentHash, arg.ContentHash, arg.ID)
+	return err
+}
+
 const upsertSource = `-- name: UpsertSource :one
 
 INSERT INTO sources (type, name, endpoint, schedule, enabled, cursor, config)

@@ -51,3 +51,23 @@ func (r *SourceRepo) GetByID(ctx context.Context, id string) (application.Source
 	}
 	return descriptor, nil
 }
+
+// SetLastContentHash implements application.SourceRepo: merge the content
+// hash of the source's last committed raw record into
+// sources.config.last_content_hash on the caller's transaction (the fetch
+// run's terminal commit — the hash advances only with a committed run).
+func (r *SourceRepo) SetLastContentHash(ctx context.Context, tx application.Tx, sourceID, contentHash string) error {
+	const op = "source.set_last_content_hash"
+
+	srcID, err := toUUID(sourceID)
+	if err != nil {
+		return application.ValidationError(op, err)
+	}
+	if err := r.q.WithTx(tx).SetSourceLastContentHash(ctx, gen.SetSourceLastContentHashParams{
+		ID:          srcID,
+		ContentHash: contentHash,
+	}); err != nil {
+		return mapDBError(op, err)
+	}
+	return nil
+}

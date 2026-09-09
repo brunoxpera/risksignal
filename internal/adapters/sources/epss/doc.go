@@ -28,9 +28,9 @@
 // ARCH-002 §2.3: FetchMeta.NoChange, counters all 0, no reload). The
 // adapter is persistence-free and never reads the database: it compares the
 // fetched file's hash against the content hash the fetch use case hands
-// back through sources.config.last_content_hash (maintained after each
-// committed run; source-run wiring follow-up — absent today, every fetch
-// returns a full output and the no-op signal activates with that wiring).
+// back through sources.config.last_content_hash (maintained after every
+// committed fetch, DEV-041). A source without a committed fetch yet (or
+// with an empty stored hash) returns a full output — NoChange stays false.
 // A new day's file has a new external id and a new hash: it is stored and
 // replaces the whole set on the normalise side.
 //

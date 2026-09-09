@@ -120,6 +120,7 @@ func (s *Service) FetchSource(ctx context.Context, in FetchSourceInput) (FetchSo
 		// where it was and the next run re-fetches the same window.
 		return FetchSourceResult{}, s.failRun(ctx, op, runID, SourceRunCounters{}, err, nil)
 	}
+	out = stampFetchedAt(out, now)
 	if out.Meta.RateLimited {
 		// ch. 14.2: recorded as rate-limited, not a source fault; the
 		// caller backs off via Meta.RetryAfter. The cursor does not advance.
@@ -140,9 +141,10 @@ func (s *Service) FetchSource(ctx context.Context, in FetchSourceInput) (FetchSo
 	}
 
 	// 3) terminal commit (one transaction, ARCH-002 §6): store the raw
-	// record, close the run succeeded with the committed cursor and enqueue
-	// the source.normalize job — a failure of any of the three rolls all of
-	// them back and the cursor stays unadvanced.
+	// record, close the run succeeded with the committed cursor, maintain
+	// the source's last_content_hash and enqueue the source.normalize job
+	// — a failure of any of the four rolls all of them back and the cursor
+	// stays unadvanced.
 	var rawID string
 	counters := SourceRunCounters{Records: 1}
 	if err := s.runTx(ctx, func(tx Tx) error {
@@ -152,6 +154,13 @@ func (s *Service) FetchSource(ctx context.Context, in FetchSourceInput) (FetchSo
 		}
 		rawID = id
 		if err := s.runs.Complete(ctx, tx, runID, SourceRunStatusSucceeded, counters, out.Cursor, "", now); err != nil {
+			return err
+		}
+		// The next full-set fetch's NoChange detection reads the committed
+		// raw record's hash from sources.config.last_content_hash (ch.
+		// 8.3); the update commits with the run — the hash advances only
+		// after a successful commit.
+		if err := s.sources.SetLastContentHash(ctx, tx, desc.ID, out.ContentHash); err != nil {
 			return err
 		}
 		return s.appendNormalizeJob(ctx, tx, rawID, desc.ID, out, now)
@@ -176,6 +185,20 @@ func (s *Service) FetchSource(ctx context.Context, in FetchSourceInput) (FetchSo
 // slice to store.
 func errNoStorableSlice(out FetchOutput) error {
 	return fmt.Errorf("fetch returned no storable slice (external id %q, content hash %q)", out.ExternalID, out.ContentHash)
+}
+
+// stampFetchedAt fills the fetch time a full-set fetch leaves zero
+// (DEV-041, DEV-032/033 review finding): the KEV/EPSS adapters receive the
+// zero window of a full-set fetch and therefore return the zero FetchedAt;
+// the use case stamps the run's clock instant — the injected clock's now —
+// so the stored raw record's fetched_at, the normalize job payload and the
+// EPSS load's loaded_at all carry the actual fetch time. Incremental
+// fetches (NVD) already carry the window's To and pass through untouched.
+func stampFetchedAt(out FetchOutput, now time.Time) FetchOutput {
+	if out.FetchedAt.IsZero() {
+		out.FetchedAt = now
+	}
+	return out
 }
 
 // openRun opens one run inside its own transaction and returns its id.

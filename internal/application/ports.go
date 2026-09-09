@@ -111,6 +111,17 @@ type SourceRepo interface {
 	// attribution key of source_runs, raw_records and quarantine rows). A
 	// missing row is a not-found Error.
 	GetByID(ctx context.Context, id string) (SourceDescriptor, error)
+
+	// SetLastContentHash records the content hash of the source's last
+	// committed raw record into sources.config.last_content_hash (DEV-041,
+	// ch. 8.3/ARCH-002 §2.2/§2.3): the fetch use cases (FetchSource,
+	// RunSource) run the update in the same transaction as the raw-record
+	// insert and the run completion, so the hash advances only with a
+	// committed run (ch. 6.1) and the next full-set fetch's NoChange
+	// detection sees it. The update merges the member into the existing
+	// config — every other member (window, overlap, the api_key_ref secret
+	// reference) stays intact.
+	SetLastContentHash(ctx context.Context, tx Tx, sourceID, contentHash string) error
 }
 
 // RawRecordRepo persists the unchanged raw source documents (ARCH-002 §1,

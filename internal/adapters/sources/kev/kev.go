@@ -22,8 +22,9 @@ const (
 	// lastContentHashConfigKey names the sources.config key through which
 	// the fetch use case hands the content hash of the source's last
 	// committed raw record back into Fetch (the adapter never reads the
-	// database). Absent or empty — today, until the wiring lands — every
-	// fetch returns a full output (NoChange false).
+	// database). The fetch use cases maintain the key after every committed
+	// fetch (DEV-041); absent or empty — a source without a committed
+	// fetch yet — every fetch returns a full output (NoChange false).
 	lastContentHashConfigKey = "last_content_hash"
 	userAgent                = "risksignal-kev-adapter/0.1 (xpera riskSignal)"
 )
@@ -78,9 +79,9 @@ func (*Adapter) Plan() application.SourcePlan {
 //
 // FetchedAt stays the input window's To — the injected clock's now of an
 // incremental fetch. A full-set fetch carries no window (the use case
-// passes the zero window), so the adapter leaves the zero time; the fetch
-// wiring stamps FetchedAt with the run's clock instant when it lands
-// (DEV-032 follow-up).
+// passes the zero window), so the adapter leaves the zero time; the run
+// wiring stamps FetchedAt with the run's clock instant (DEV-041), so the
+// zero time only surfaces when the output is inspected outside a run.
 func (a *Adapter) Fetch(ctx context.Context, in application.FetchInput) (application.FetchOutput, error) {
 	u, err := fetchURL(in.Source.Endpoint)
 	if err != nil {
@@ -146,7 +147,7 @@ func (a *Adapter) Fetch(ctx context.Context, in application.FetchInput) (applica
 
 	// Content-hash no-op (ch. 8.3): the fetch use case maintains the last
 	// committed raw record's hash in sources.config.last_content_hash
-	// (wiring follow-up); a match reports the unchanged catalog.
+	// (DEV-041); a match reports the unchanged catalog.
 	if prev, _ := in.Source.Config[lastContentHashConfigKey].(string); prev != "" && prev == contentHash {
 		out.Meta.NoChange = true
 	}

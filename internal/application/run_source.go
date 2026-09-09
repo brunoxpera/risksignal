@@ -76,6 +76,10 @@ func (s *Service) RunSource(ctx context.Context, in RunSourceInput) (RunSourceRe
 	if err != nil {
 		return RunSourceResult{}, s.failRun(ctx, op, runID, SourceRunCounters{}, err, nil)
 	}
+	// A full-set fetch (KEV, EPSS) carries no time window and returns the
+	// zero FetchedAt; stamp the run's clock instant (DEV-041) so the raw
+	// record, the normalize job and the EPSS load carry the fetch time.
+	out = stampFetchedAt(out, now)
 	if out.Meta.RateLimited {
 		// ch. 14.2: recorded rate-limited, not a source fault — the caller
 		// backs off via Meta.RetryAfter. The cursor does not advance.
@@ -128,7 +132,14 @@ func (s *Service) RunSource(ctx context.Context, in RunSourceInput) (RunSourceRe
 			return err
 		}
 		counters = normalizeCounters(counters, res)
-		return s.runs.Complete(ctx, tx, runID, SourceRunStatusSucceeded, counters, out.Cursor, "", s.clock.Now())
+		if err := s.runs.Complete(ctx, tx, runID, SourceRunStatusSucceeded, counters, out.Cursor, "", s.clock.Now()); err != nil {
+			return err
+		}
+		// The next full-set fetch's NoChange detection reads the committed
+		// raw record's hash from sources.config.last_content_hash (ch.
+		// 8.3); the update commits with the run — the hash advances only
+		// after a successful commit.
+		return s.sources.SetLastContentHash(ctx, tx, desc.ID, out.ContentHash)
 	})
 	if passErr != nil {
 		// The pass rolled back — no raw record, no normalised objects, no

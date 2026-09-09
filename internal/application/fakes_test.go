@@ -109,6 +109,13 @@ type storedRunCompletion struct {
 	finishedAt  time.Time
 }
 
+// sourceHashMutation is one staged sources.config.last_content_hash update
+// of a fetch run's terminal commit (DEV-041, ch. 8.3).
+type sourceHashMutation struct {
+	sourceID    string
+	contentHash string
+}
+
 // fakeDB is the committed state of the fake persistence: rows are visible
 // here only after the transaction that staged them committed.
 type fakeDB struct {
@@ -269,6 +276,7 @@ type fakeStaged struct {
 	quarantine  []domain.Quarantine
 	qMutations  []domain.Quarantine
 	epssRows    []storedEpssRow
+	sourceHash  []sourceHashMutation
 }
 
 func (t *fakeTx) record(op string) { t.log = append(t.log, op) }
@@ -283,6 +291,17 @@ func (t *fakeTx) commit() {
 	t.db.rawRecords = append(t.db.rawRecords, t.staged.rawRecords...)
 	t.db.sourceRuns = append(t.db.sourceRuns, t.staged.runs...)
 	t.db.epssRows = append(t.db.epssRows, t.staged.epssRows...)
+	for _, m := range t.staged.sourceHash {
+		for i := range t.db.sources {
+			if t.db.sources[i].ID != m.sourceID {
+				continue
+			}
+			if t.db.sources[i].Config == nil {
+				t.db.sources[i].Config = make(map[string]any)
+			}
+			t.db.sources[i].Config["last_content_hash"] = m.contentHash
+		}
+	}
 	for _, q := range t.staged.quarantine {
 		t.db.applyQuarantine(q)
 	}
@@ -668,6 +687,20 @@ func (f *fakeSourceRepo) GetByID(ctx context.Context, id string) (application.So
 		return application.SourceDescriptor{}, application.NotFoundError("source.get_by_id", fmt.Errorf("source %s not found", id))
 	}
 	return desc, nil
+}
+
+// SetLastContentHash implements application.SourceRepo on the fake store:
+// the update is staged on the transaction and merged into the committed
+// source descriptor's config at commit (mirroring the jsonb merge of the
+// generated statement — other config members stay intact).
+func (f *fakeSourceRepo) SetLastContentHash(ctx context.Context, tx application.Tx, sourceID, contentHash string) error {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return err
+	}
+	ftx.record("source.hash")
+	ftx.staged.sourceHash = append(ftx.staged.sourceHash, sourceHashMutation{sourceID: sourceID, contentHash: contentHash})
+	return nil
 }
 
 type fakeQuarantineRepo struct {
