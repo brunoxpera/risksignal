@@ -8,6 +8,89 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// Inventory assets (ch. 6.1); type/environment/criticality/exposure hold the domain enum values (ARCH-001 §1)
+type Asset struct {
+	ID          pgtype.UUID
+	ExternalID  string
+	Source      string
+	Type        string
+	Name        string
+	Environment string
+	Criticality string
+	Exposure    string
+	Owner       pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+}
+
+// One component row per asset (ch. 6.1); vendor/product/version only in I1b (ARCH-001 §1), CPE/purl/digest arrive with I3
+type Component struct {
+	ID        pgtype.UUID
+	AssetID   pgtype.UUID
+	Vendor    string
+	Product   string
+	Version   string
+	CreatedAt pgtype.Timestamptz
+}
+
+// Immutable source statements per vulnerability (ch. 6.1); typed: synthetic_statement | cvss | kev | epss (ARCH-001 §1)
+type Evidence struct {
+	ID              pgtype.UUID
+	VulnerabilityID pgtype.UUID
+	RawRecordID     pgtype.UUID
+	Type            string
+	Value           []byte
+	// SHA-256 of the canonical value
+	ValueHash  string
+	ObservedAt pgtype.Timestamptz
+}
+
+// Method-led vulnerability-to-component matches (ADR-015); the natural key makes re-runs idempotent (ARCH-001 §1)
+type Match struct {
+	ID              pgtype.UUID
+	VulnerabilityID pgtype.UUID
+	ComponentID     pgtype.UUID
+	// MatchMethod enum value (ADR-015); the authoritative field of the match
+	Method string
+	// Derived sort rank; only candidate computes a real value
+	Score int32
+	// Confidence enum value derived from method, never stored independently
+	Confidence  string
+	RuleVersion string
+	CreatedAt   pgtype.Timestamptz
+}
+
+// Raw source documents, stored unchanged and hashed (ch. 8.1 step 4); the natural key makes ingest idempotent (ARCH-001 §1)
+type RawRecord struct {
+	ID       pgtype.UUID
+	SourceID pgtype.UUID
+	// Stable external document name, e.g. synthetic-reference or per run
+	ExternalID string
+	// SHA-256 hex of the canonical payload
+	ContentHash string
+	Payload     []byte
+	FetchedAt   pgtype.Timestamptz
+}
+
+// One signal per match (ch. 6.1); priority P1-P4, status new in I1b, version is the optimistic-lock token (ARCH-001 §1)
+type RiskSignal struct {
+	ID      pgtype.UUID
+	MatchID pgtype.UUID
+	// Priority enum value P1-P4; derived by the ch. 9.3 rules (rule_version tags which ruleset produced it)
+	Priority string
+	// SignalStatus enum; I1b always creates signals with status new (full state machine is I4)
+	Status string
+	Owner  pgtype.Text
+	// Reserved for I4 SLA clocks; nullable in I1b
+	DueAt    pgtype.Timestamptz
+	ClosedAt pgtype.Timestamptz
+	// Optimistic-lock counter; every update must carry the version the client read (ch. 7.3)
+	Version     int32
+	RuleVersion string
+	// Contributing factors (confidence, method, cvss, kev, epss, criticality, exposure) so a recompute can detect changes (ch. 9.5)
+	Factors   []byte
+	CreatedAt pgtype.Timestamptz
+}
+
 // Checksum log of applied migrations (ADR-010): one row per applied migration, keyed by goose version
 type SchemaMigrationLog struct {
 	Version int64
@@ -16,4 +99,42 @@ type SchemaMigrationLog struct {
 	AppliedAt pgtype.Timestamptz
 	// Duration of the migration run; NULL when the row was recovered after a crash
 	DurationMs pgtype.Int8
+}
+
+// Configured sources feeding the pipeline; the I1b synthetic source is one row here (ARCH-001 §1)
+type Source struct {
+	ID   pgtype.UUID
+	Type string
+	Name string
+	// Unused by the synthetic source; reserved for HTTP sources (I2+)
+	Endpoint pgtype.Text
+	// Reserved (concept ch. 8.1); the I1b source is operator-triggered only
+	Schedule pgtype.Text
+	Enabled  bool
+	// Reserved; the synthetic source is a single deterministic document per run and has no cursor
+	Cursor    []byte
+	Config    []byte
+	CreatedAt pgtype.Timestamptz
+}
+
+// One row per source run; counters (records, matched, signals) advance only on success (ARCH-001 §1)
+type SourceRun struct {
+	ID         pgtype.UUID
+	SourceID   pgtype.UUID
+	StartedAt  pgtype.Timestamptz
+	FinishedAt pgtype.Timestamptz
+	// running | succeeded | failed — exactly one end state per run (concept ch. 6.1)
+	Status string
+	// Run counters {records, matched, signals}; committed with the success status
+	Counters []byte
+	Error    pgtype.Text
+}
+
+// Normalized vulnerabilities; I1b identity + summary only (ARCH-001 §1), full NVD fields arrive with I2
+type Vulnerability struct {
+	ID          pgtype.UUID
+	CveID       string
+	Summary     string
+	PublishedAt pgtype.Timestamptz
+	ModifiedAt  pgtype.Timestamptz
 }
