@@ -2,7 +2,11 @@
 // walking skeleton (WP-1b.04, ARCH-001): CreateSignal (the atomic
 // signal + audit + outbox command of ch. 5.1/§2), ListSignals and GetSignal
 // (the §4 read endpoints' logic) and RunSyntheticSource (the §3 run
-// orchestration).
+// orchestration). WP-2.01 (ARCH-002) adds the shared source adapter
+// contract — SourcePort and its source type/kind/cursor vocabulary,
+// fetch/normalise input-output types and the NormalizeSink/RecordError
+// seam (source_port.go) — the port the I2 NVD/KEV/EPSS adapters implement.
+// No use case consumes the port before WP-2.04 (DEV-030).
 //
 // The layer depends only on the domain and on platform infrastructure
 // (.go-arch-lint.yml): every persistence concern sits behind the repository
