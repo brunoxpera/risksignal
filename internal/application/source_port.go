@@ -147,6 +147,16 @@ type NormalizeInput struct {
 	// record; nil/empty — the first import — emits no removals. The other
 	// sources ignore it.
 	PreviousKEVCVEs []string
+
+	// EpssBulk is the bulk-load writer of the EPSS full-set path (ARCH-002
+	// §1, §2.3, ADR-013): the application implements it on the normalise
+	// transaction and hands it over so the EPSS adapter can stream the
+	// parsed daily file into epss_current (TRUNCATE + COPY in the pass
+	// transaction, committed together — the atomic swap). The normalise
+	// use cases (NormalizeSource/RunSource wiring) must populate the field
+	// for EPSS passes; nil — every other source — is ignored there and an
+	// error in the EPSS adapter (nothing may be loaded silently).
+	EpssBulk BulkRowWriter
 }
 
 // RecordError isolates one failed record of a payload (ARCH-002 §1,
@@ -177,6 +187,43 @@ type NormalizeSink interface {
 	// RecordError receives one isolated record for the quarantine insert
 	// (ch. 8.6 "new": position, reason, payload hash).
 	RecordError(ctx context.Context, e RecordError) error
+}
+
+// EpssRow is one epss_current row of a daily EPSS set as the bulk path
+// streams it (ARCH-002 §2.3, §3, ADR-013): the natural key cve_id plus the
+// score and percentile exactly as read from the daily file — decimal
+// numeric literals, never a zero fabricated for a missing value (ch. 8.4:
+// missing values are absent). The plain string carriers keep the port free
+// of database types: the bulk writer (the persistence half) parses them
+// into the numeric columns of epss_current. The row's model_version (the
+// daily file's date) and loaded_at (the run's fetch instant from the
+// injected clock) are run context, not file content — the writer stamps
+// them at construction.
+//
+// The fixed field order and absence of maps make the stream deterministic
+// (ARCH-002 §1): one payload normalises to one identical emission.
+type EpssRow struct {
+	CveID      string // the natural key of the row
+	Score      string // the EPSS score in [0,1], as read from the daily file
+	Percentile string // the EPSS percentile in [0,1], as read from the daily file
+}
+
+// BulkRowWriter is the persistence half of the EPSS full-set normalise
+// pass (ARCH-002 §1, §2.3, ADR-013): the application implements it on the
+// normalise transaction and hands it to the adapter through
+// NormalizeInput.EpssBulk. The port stays one interface — the full-set
+// path is a documented specialisation, not a second port: NVD/KEV/synthetic
+// passes never see the field. The adapter streams one parsed row per
+// daily-file record; the implementation batches the pass's rows and loads
+// them into epss_current through one pgx COPY (ADR-009) — TRUNCATE +
+// COPY committed together in the pass transaction, the atomic swap of the
+// current set (ADR-013: a reader sees either the complete old set or the
+// complete new one). A failing write is an infrastructure failure and
+// aborts the pass (ch. 8.1 step 5); per-record data failures never reach
+// the writer — the adapter isolates them through sink.RecordError.
+type BulkRowWriter interface {
+	// WriteEpssRow receives one parsed row of the daily set.
+	WriteEpssRow(ctx context.Context, row EpssRow) error
 }
 
 // NormalizeResult reports one Normalize pass (ARCH-002 §1). Records counts

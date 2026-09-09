@@ -74,6 +74,12 @@ func (s *Service) NormalizeSource(ctx context.Context, in NormalizeSourceInput) 
 		// previously stored raw record — the repo read for them does not
 		// exist yet, so removal historisation (kev_removed evidence)
 		// activates with that wiring.
+		// Note (DEV-033 follow-up): the EPSS full-set path must populate
+		// NormalizeInput.EpssBulk — a BulkRowWriter over this transaction,
+		// stamping model_version (the file's date) and loaded_at — before
+		// the daily set can be COPY-loaded. Until the wiring lands the
+		// EPSS adapter rejects the pass (the run fails, the previous day's
+		// set stays intact).
 		res, err := in.Adapter.Normalize(ctx, NormalizeInput{
 			RawRecordID: rawRec.ID,
 			Payload:     rawRec.Payload,

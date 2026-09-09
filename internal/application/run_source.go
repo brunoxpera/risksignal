@@ -109,6 +109,11 @@ func (s *Service) RunSource(ctx context.Context, in RunSourceInput) (RunSourceRe
 		// full-set path must populate NormalizeInput.PreviousKEVCVEs from
 		// the source's previously stored catalog before removal
 		// historisation (kev_removed evidence) can fire.
+		// Note (DEV-033 follow-up): as in NormalizeSource, the EPSS
+		// full-set path must populate NormalizeInput.EpssBulk (the
+		// BulkRowWriter over this transaction) before the daily set can be
+		// COPY-loaded; until the wiring lands the EPSS adapter rejects the
+		// pass.
 		res, err := in.Adapter.Normalize(ctx, NormalizeInput{
 			RawRecordID: rawID,
 			Payload:     out.Payload,
