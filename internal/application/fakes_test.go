@@ -187,6 +187,15 @@ func (d *fakeDB) rawRecordExists(sourceID, externalID, hash string) (string, boo
 	return "", false
 }
 
+func (d *fakeDB) outboxEventExists(dedupeKey string) bool {
+	for _, ev := range d.outboxEvents {
+		if ev.DedupeKey == dedupeKey {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *fakeDB) rawRecordByID(id string) (storedRawRecord, bool) {
 	for _, r := range d.rawRecords {
 		if r.id == id {
@@ -521,11 +530,32 @@ func (f *fakeOutboxRepo) Append(ctx context.Context, tx application.Tx, ev appli
 		return err
 	}
 	ftx.record("outbox")
+	// The UQ (dedupe_key) spans the row's whole lifetime (ADR-012): a row
+	// with the same dedupe key — committed earlier or staged by this very
+	// transaction — makes the append a unique violation, exactly as the
+	// schema raises it. The enqueue use cases of the source jobs rely on
+	// this idempotency backstop (the scheduler re-enqueues every cycle;
+	// the outbox dedupes).
+	if f.db.outboxEventExists(ev.DedupeKey) || f.stagedOutboxEventExists(ftx, ev.DedupeKey) {
+		return application.ConflictError("outbox.append", fmt.Errorf("outbox row with dedupe key %q already exists", ev.DedupeKey))
+	}
 	if f.failpoint != nil {
 		return f.failpoint
 	}
 	ftx.staged.outbox = append(ftx.staged.outbox, ev)
 	return nil
+}
+
+// stagedOutboxEventExists reports whether the transaction already staged an
+// outbox row with the dedupe key (the transaction's own uncommitted writes
+// are visible to itself, mirroring the unique index of the real schema).
+func (f *fakeOutboxRepo) stagedOutboxEventExists(ftx *fakeTx, dedupeKey string) bool {
+	for _, ev := range ftx.staged.outbox {
+		if ev.DedupeKey == dedupeKey {
+			return true
+		}
+	}
+	return false
 }
 
 type fakeVulnerabilityRepo struct {

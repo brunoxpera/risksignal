@@ -227,6 +227,35 @@ func TestRunDiagnoseDispatchValidation(t *testing.T) {
 	}
 }
 
+func TestRunSourceDispatchValidation(t *testing.T) {
+	// Missing subcommand.
+	code, stdout, stderr := runCLI(t, cliValidEnv(), "source")
+	assertValidationFailure(t, code, stdout, stderr, "missing subcommand")
+
+	// Unknown subcommand (text and json) — the monitor subcommands (list,
+	// status) land with DEV-043.
+	code, stdout, stderr = runCLI(t, cliValidEnv(), "source", "bogus")
+	assertValidationFailure(t, code, stdout, stderr, "unknown subcommand")
+
+	code, stdout, _ = runCLI(t, cliValidEnv(), "source", "bogus", "--output", "json")
+	if code != exitValidation {
+		t.Fatalf("exit code = %d, want %d", code, exitValidation)
+	}
+	env := decodeEnvelope(t, stdout)
+	if env.Command != "source bogus" || env.Error == nil || env.Error.Class != classValidation {
+		t.Fatalf("envelope = %+v, want validation error for source bogus", env)
+	}
+
+	// The manual trigger is documented in the usage text.
+	code, stdout, stderr = runCLI(t, nil, "help")
+	if code != exitOK || !strings.Contains(stdout, "source run <type|id>") {
+		t.Fatalf("help: code %d stdout %q, want the source run usage documented", code, stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("help: stderr = %q, want empty", stderr)
+	}
+}
+
 func TestRunArgumentValidation(t *testing.T) {
 	// Validation failures must not depend on the configuration: argument
 	// problems are reported before any config load.
@@ -239,6 +268,9 @@ func TestRunArgumentValidation(t *testing.T) {
 		{"migrate extra arg", []string{"maintenance", "migrate", "extra"}, "unexpected argument"},
 		{"migrate unknown flag", []string{"maintenance", "migrate", "--bogus"}, "flag provided but not defined"},
 		{"diagnose health extra arg", []string{"diagnose", "health", "extra"}, "unexpected argument"},
+		{"source run missing arg", []string{"source", "run"}, "takes exactly one argument"},
+		{"source run extra args", []string{"source", "run", "a", "b"}, "takes exactly one argument"},
+		{"source run unknown flag", []string{"source", "run", "--bogus", "nvd"}, "flag provided but not defined"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -210,7 +210,11 @@ func (j *SourceJobs) adapterFor(ctx context.Context, sourceID string) (applicati
 	}
 	adapter, ok := j.adapters[desc.Type]
 	if !ok {
-		return nil, fmt.Errorf("no source adapter registered for type %q (source %s)", desc.Type, sourceID)
+		// A source whose type has no registered adapter is a permanent
+		// configuration gap (the composition root registers the adapters it
+		// runs): classify it as a validation failure so the job dead-letters
+		// with a clear error instead of retrying to the attempt cap.
+		return nil, application.Validationf("source_jobs", "no source adapter registered for type %q (source %s)", desc.Type, sourceID)
 	}
 	return adapter, nil
 }

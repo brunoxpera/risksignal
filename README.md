@@ -266,6 +266,14 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
   raw records, vulnerabilities, evidences, matches, risk signals, assets,
   components, audit events, outbox). Dev-only: requires the explicit
   `--yes` and never prompts; the next `demo seed` rebuilds the demo state.
+- `source run <type|id> [--request-id <id>]` — the manual trigger of the
+  source.run loop (WP-2.08, ARCH-002 §5): enqueue one `source.fetch` job
+  for the named source (resolved by id, or by type when exactly one source
+  of that type is registered). The job bypasses the schedule and the
+  background worker delivers it on its next drain — nothing runs a fetch
+  in the CLI process. Without `--request-id` every invocation enqueues a
+  new job (fresh request id); a fixed `--request-id` makes the trigger
+  idempotent (dedupe key `source_id + request_id`).
 - `help` — usage text.
 
 Exit codes are part of the automation contract — branch on them, never on
