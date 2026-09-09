@@ -1,0 +1,168 @@
+{
+  "version": 1,
+  "external_id": "synthetic-reference",
+  "inventory": {
+    "assets": [
+      {
+        "external_id": "asset-portal",
+        "type": "server_vm",
+        "name": "Portal",
+        "environment": "production",
+        "criticality": "critical",
+        "exposure": "internet",
+        "owner": "ops",
+        "note": "Demo asset of the C1-C3 asset context (critical + internet, ARCH-001 s3).",
+        "components": [
+          { "vendor": "acme", "product": "portal", "version": "2.4.4" }
+        ]
+      },
+      {
+        "external_id": "asset-api",
+        "type": "server_vm",
+        "name": "API",
+        "environment": "production",
+        "criticality": "normal",
+        "exposure": "internal",
+        "owner": "ops",
+        "note": "Demo asset of the C4/C5 asset context (normal + internal); the deployed acme/api 1.0 line is what the C4 affected statement hits exactly and what the C5 statement (acme/api 0.9) does not cover.",
+        "components": [
+          { "vendor": "acme", "product": "api", "version": "1.0" }
+        ]
+      }
+    ]
+  },
+  "cases": [
+    {
+      "id": "C1",
+      "cve_id": "CVE-2024-0001",
+      "summary": "Remote code execution in acme/portal",
+      "statement": "acme/portal 2.4 before 2.4.5 is affected by CVE-2024-0001",
+      "vendor": "acme",
+      "product": "portal",
+      "version": "2.4",
+      "cvss": 9.8,
+      "kev": true,
+      "epss": 0.99,
+      "criticality": "critical",
+      "exposure": "internet",
+      "expect": {
+        "outcome": "signal",
+        "priority": "P1",
+        "note": "P1: the canonical_product_range match over the seeded acme/portal 2.4.4 is high confidence (ADR-015); high + KEV + critical/internet context -> P1 (ch. 9.3)."
+      }
+    },
+    {
+      "id": "C2",
+      "cve_id": "CVE-2024-0002",
+      "summary": "SQL injection in the acme/portal login",
+      "statement": "acme/portal 2.4 before 2.4.5 is affected by CVE-2024-0002",
+      "vendor": "acme",
+      "product": "portal",
+      "version": "2.4",
+      "cvss": 9.6,
+      "kev": false,
+      "epss": 0.90,
+      "criticality": "critical",
+      "exposure": "internet",
+      "expect": {
+        "outcome": "signal",
+        "priority": "P2",
+        "note": "P2: high confidence without KEV, but CVSS 9.6 >= 9.0 (no P1 context predicate needed; ch. 9.3)."
+      }
+    },
+    {
+      "id": "C3",
+      "cve_id": "CVE-2024-0003",
+      "summary": "Cross-site scripting in the acme/portal admin panel",
+      "statement": "acme/portal 2.4 before 2.4.5 is affected by CVE-2024-0003",
+      "vendor": "acme",
+      "product": "portal",
+      "version": "2.4",
+      "cvss": 8.1,
+      "kev": true,
+      "epss": 0.97,
+      "criticality": "normal",
+      "exposure": "internal",
+      "expect": {
+        "outcome": "signal",
+        "priority": "P2",
+        "note": "P2 - reconciled factor set: ARCH-001 s3 annotates this row 'P2 (medium+kev+context)'. The canonical_product_range match over acme/portal 2.4.4 is high confidence (the I1b matcher emits only exact_identifier/canonical_product_range, ADR-015, both high), so the declared factors are high + KEV with a normal/internal context (no P1 context predicate): high and KEV -> P2 (ch. 9.3, confirmed by the task record). The medium-confidence branch is unreachable through the I1b matcher and is pinned by the domain matrix instead (priority_rules_test.go)."
+      }
+    },
+    {
+      "id": "C4",
+      "cve_id": "CVE-2024-0004",
+      "summary": "Denial of service in acme/api",
+      "statement": "acme/api 1.0 is affected by CVE-2024-0004",
+      "vendor": "acme",
+      "product": "api",
+      "version": "1.0",
+      "cvss": 7.2,
+      "kev": false,
+      "epss": 0.60,
+      "criticality": "normal",
+      "exposure": "internal",
+      "expect": {
+        "outcome": "signal",
+        "priority": "P3",
+        "note": "P3: exact_identifier on the seeded acme/api 1.0, high confidence, and no strong urgency indicator (no KEV, CVSS 7.2 < 9.0, EPSS 0.60 < 0.95) -> P3 (ch. 9.3)."
+      }
+    },
+    {
+      "id": "C5",
+      "cve_id": "CVE-2024-0005",
+      "summary": "Information disclosure in the acme/api legacy line",
+      "statement": "acme/api 0.9 is affected by CVE-2024-0005",
+      "vendor": "acme",
+      "product": "api",
+      "version": "0.9",
+      "cvss": 5.0,
+      "kev": false,
+      "epss": 0.40,
+      "criticality": "low",
+      "exposure": "isolated",
+      "expect": {
+        "outcome": "no_signal",
+        "priority": "P4",
+        "note": "P4 (informational, no signal) - reconciled product row: the affected acme/api 0.9 line is not deployed (the seeded component is 1.0), so the run finds no confirmed assignment and no match. Ch. 9.3 classifies 'no confirmed inventory assignment' as P4 (none confidence; candidate/no_match never claim confirmed impact). ARCH-001 s3 lists this row as 'acme/api 1.0'; that deployed version would match and produce a P3 signal, contradicting the annotated P4 - the affected version was therefore set out of range to keep the case informational, matching the domain matrix row 'P4 none no_match informational (C5)' in priority_rules_test.go."
+      }
+    },
+    {
+      "id": "C6",
+      "cve_id": "CVE-2024-0006",
+      "summary": "Command injection in acme/ghost",
+      "statement": "acme/ghost 1.0 is affected by CVE-2024-0006",
+      "vendor": "acme",
+      "product": "ghost",
+      "version": "1.0",
+      "cvss": 8.0,
+      "kev": true,
+      "epss": 0.98,
+      "criticality": "unknown",
+      "exposure": "unknown",
+      "expect": {
+        "outcome": "no_signal",
+        "priority": "P4",
+        "note": "Unmatched case: acme/ghost has no seeded component, so there is no candidate and no match/signal. The asset context is deliberately 'unknown' (a valid, never-upgrading context - ch. 9.3) because the case exists to prove the unmatched path, not a context rule. Ch. 9.3 class: no confirmed assignment -> P4 informational; the optional informational row is not created in I1b."
+      }
+    },
+    {
+      "id": "E1",
+      "cve_id": "",
+      "summary": "Malformed reference case",
+      "statement": "",
+      "vendor": "acme",
+      "product": "portal",
+      "version": "2.4",
+      "cvss": 0,
+      "kev": false,
+      "epss": 0,
+      "criticality": "critical",
+      "exposure": "internet",
+      "expect": {
+        "outcome": "error",
+        "note": "Malformed case (missing cve_id, ARCH-001 s3 E1): counted as a run error (concept ch. 8.1 step 5) and recorded on the run row; it does not abort the other cases. The run's terminal status is failed when this error is counted."
+      }
+    }
+  ]
+}
