@@ -58,6 +58,7 @@ type storedVuln struct {
 }
 
 type storedEvidence struct {
+	id            string
 	vulnID, rawID string
 	typ           domain.EvidenceType
 	value         []byte
@@ -160,13 +161,13 @@ func (d *fakeDB) vulnByCVE(cveID string) (string, bool) {
 	return "", false
 }
 
-func (d *fakeDB) evidenceExists(rawID string, typ domain.EvidenceType, hash string) bool {
+func (d *fakeDB) evidenceID(rawID string, typ domain.EvidenceType, hash string) (string, bool) {
 	for _, e := range d.evidenceRows {
 		if e.rawID == rawID && e.typ == typ && e.hash == hash {
-			return true
+			return e.id, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func (d *fakeDB) matchExists(vulnID, compID, ruleVersion string) (string, bool) {
@@ -580,23 +581,37 @@ func (f *fakeVulnerabilityRepo) Upsert(ctx context.Context, tx application.Tx, r
 	return id, nil
 }
 
-func (f *fakeVulnerabilityRepo) AddEvidence(ctx context.Context, tx application.Tx, ev application.EvidenceRecord, observedAt time.Time) error {
+// AddEvidence mirrors application.VulnerabilityRepo: stage one immutable
+// evidence row (or resolve the already staged/committed one of the same
+// natural key (raw_record_id, type, value_hash)) and return its id — the
+// new-or-existing evidence id of the real RETURNING statement (ARCH-003
+// §7). The transaction's own uncommitted writes are visible to itself
+// (like stagedOutboxEventExists): two identical statements inside one
+// transaction resolve to the same staged row, mirroring the unique index
+// of the real schema.
+func (f *fakeVulnerabilityRepo) AddEvidence(ctx context.Context, tx application.Tx, ev application.EvidenceRecord, observedAt time.Time) (string, error) {
 	ftx, err := fakeTxOf(tx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	ftx.record("evidence")
 	if f.failEvidence != nil {
-		return f.failEvidence
+		return "", f.failEvidence
 	}
-	if f.db.evidenceExists(ev.RawRecordID, ev.Type, ev.ValueHash) {
-		return nil // ON CONFLICT DO NOTHING
+	for _, staged := range ftx.staged.evidences {
+		if staged.rawID == ev.RawRecordID && staged.typ == ev.Type && staged.hash == ev.ValueHash {
+			return staged.id, nil
+		}
 	}
+	if id, ok := f.db.evidenceID(ev.RawRecordID, ev.Type, ev.ValueHash); ok {
+		return id, nil // ON CONFLICT DO NOTHING
+	}
+	id := uuid.New()
 	ftx.staged.evidences = append(ftx.staged.evidences, storedEvidence{
-		vulnID: ev.VulnerabilityID, rawID: ev.RawRecordID, typ: ev.Type,
+		id: id, vulnID: ev.VulnerabilityID, rawID: ev.RawRecordID, typ: ev.Type,
 		value: ev.Value, hash: ev.ValueHash, observedAt: observedAt,
 	})
-	return nil
+	return id, nil
 }
 
 type fakeMatchRepo struct{ db *fakeDB }

@@ -218,13 +218,21 @@ func TestCoreSchemaMigratesAndSignalRoundTripThroughGeneratedQueries(t *testing.
 	}
 
 	evidenceValue := []byte(`{"statement": "acme/portal 2.4 is affected by CVE-2024-0001"}`)
-	for i := 0; i < 2; i++ { // double insert must stay a single row
-		if err := q.InsertEvidence(ctx, gen.InsertEvidenceParams{
-			VulnerabilityID: vulnID, RawRecordID: rawID, Type: "synthetic_statement",
-			Value: evidenceValue, ValueHash: testHash('e'), ObservedAt: fetched,
-		}); err != nil {
-			t.Fatalf("InsertEvidence: %v", err)
-		}
+	evidenceParams := gen.InsertEvidenceParams{
+		VulnerabilityID: vulnID, RawRecordID: rawID, Type: "synthetic_statement",
+		Value: evidenceValue, ValueHash: testHash('e'), ObservedAt: fetched,
+	}
+	evidenceID, err := q.InsertEvidence(ctx, evidenceParams)
+	if err != nil {
+		t.Fatalf("InsertEvidence: %v", err)
+	}
+	// A repeated statement is a no-op on the natural key and returns the
+	// already existing id (ARCH-003 §7: AddEvidence returns the
+	// new-or-existing evidence id) — the double insert must stay a single
+	// row.
+	againEvidenceID, err := q.InsertEvidence(ctx, evidenceParams)
+	if err != nil || againEvidenceID != evidenceID {
+		t.Fatalf("InsertEvidence rerun = %v, %v; want the same evidence id %v", againEvidenceID, err, evidenceID)
 	}
 	var evidenceCount int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM evidences").Scan(&evidenceCount); err != nil {

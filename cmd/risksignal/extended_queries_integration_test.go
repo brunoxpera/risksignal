@@ -399,28 +399,25 @@ func TestEvidenceInsertAcceptsI2VocabularyTypes(t *testing.T) {
 		{"kev_removed", kevRemoved, 'm'},
 	}
 	for _, ev := range evidences {
-		if err := q.InsertEvidence(ctx, gen.InsertEvidenceParams{
+		params := gen.InsertEvidenceParams{
 			VulnerabilityID: vulnID,
 			RawRecordID:     rawID,
 			Type:            ev.typ,
 			Value:           ev.value,
 			ValueHash:       testHash(ev.hash),
 			ObservedAt:      at,
-		}); err != nil {
+		}
+		evidenceID, err := q.InsertEvidence(ctx, params)
+		if err != nil {
 			t.Fatalf("InsertEvidence(%s): %v", ev.typ, err)
 		}
 		// A repeated statement is a no-op on the natural key — inserting the
-		// same (raw_record_id, type, value_hash) again must not error and
-		// must not duplicate the row.
-		if err := q.InsertEvidence(ctx, gen.InsertEvidenceParams{
-			VulnerabilityID: vulnID,
-			RawRecordID:     rawID,
-			Type:            ev.typ,
-			Value:           ev.value,
-			ValueHash:       testHash(ev.hash),
-			ObservedAt:      at,
-		}); err != nil {
-			t.Fatalf("InsertEvidence(%s) re-insert: %v", ev.typ, err)
+		// same (raw_record_id, type, value_hash) again must not error, must
+		// not duplicate the row and must return the already existing id
+		// (ARCH-003 §7: new-or-existing evidence id).
+		again, err := q.InsertEvidence(ctx, params)
+		if err != nil || again != evidenceID {
+			t.Fatalf("InsertEvidence(%s) re-insert = %v, %v; want the same evidence id %v", ev.typ, again, err, evidenceID)
 		}
 	}
 

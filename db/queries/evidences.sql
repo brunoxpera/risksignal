@@ -12,11 +12,22 @@
 -- InsertEvidence stores one source statement per (vulnerability, raw record,
 -- type). The natural key (raw_record_id, type, value_hash) makes repeated
 -- ingestion a no-op (ARCH-001 §3 step 3); observed_at comes from the
--- injected clock.
--- name: InsertEvidence :exec
-INSERT INTO evidences (vulnerability_id, raw_record_id, type, value, value_hash, observed_at)
-VALUES (@vulnerability_id, @raw_record_id, @type, @value, @value_hash, @observed_at)
-ON CONFLICT (raw_record_id, type, value_hash) DO NOTHING;
+-- injected clock. The statement returns the evidence id — the newly
+-- inserted one, or the already existing one of an identical earlier
+-- statement (the I2 forward-note: the reprocess path links the returned id
+-- into quarantine.resolved_evidence_id, ARCH-003 §7).
+-- name: InsertEvidence :one
+WITH inserted AS (
+    INSERT INTO evidences (vulnerability_id, raw_record_id, type, value, value_hash, observed_at)
+    VALUES (@vulnerability_id, @raw_record_id, @type, @value, @value_hash, @observed_at)
+    ON CONFLICT (raw_record_id, type, value_hash) DO NOTHING
+    RETURNING id
+)
+SELECT id FROM inserted
+UNION ALL
+SELECT id FROM evidences
+WHERE raw_record_id = @raw_record_id AND type = @type AND value_hash = @value_hash
+LIMIT 1;
 
 -- ListPreviousKEVCVEs loads the CVE ids of the source's previously stored
 -- KEV full set (DEV-041, ARCH-002 §2.2): the kev evidences attached to the

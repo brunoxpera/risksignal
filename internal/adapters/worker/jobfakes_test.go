@@ -51,8 +51,10 @@ type jobVuln struct {
 	id, cveID, summary string
 }
 
-// jobEvidence is one immutable evidence row of the fake database.
+// jobEvidence is one immutable evidence row of the fake database; id is
+// the row id the real InsertEvidence returns (new-or-existing, ARCH-003 §7).
 type jobEvidence struct {
+	id            string
 	vulnID, rawID string
 	typ           domain.EvidenceType
 	value         []byte
@@ -120,13 +122,16 @@ func (d *jobDB) vulnByCVE(cveID string) (*jobVuln, bool) {
 	return nil, false
 }
 
-func (d *jobDB) evidenceExists(rawID string, typ domain.EvidenceType, hash string) bool {
+// evidenceID resolves the stored evidence row of one natural key
+// (raw_record_id, type, value_hash) — the id the real InsertEvidence
+// returns for an already existing statement (ARCH-003 §7).
+func (d *jobDB) evidenceID(rawID string, typ domain.EvidenceType, hash string) (string, bool) {
 	for _, e := range d.evidences {
 		if e.rawID == rawID && e.typ == typ && e.hash == hash {
-			return true
+			return e.id, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func (d *jobDB) outboxByDedupe(key string) bool {
@@ -314,14 +319,15 @@ func (f *jobVulnRepo) Upsert(ctx context.Context, tx application.Tx, rec applica
 	return id, nil
 }
 
-func (f *jobVulnRepo) AddEvidence(ctx context.Context, tx application.Tx, ev application.EvidenceRecord, observedAt time.Time) error {
-	if f.db.evidenceExists(ev.RawRecordID, ev.Type, ev.ValueHash) {
-		return nil // ON CONFLICT DO NOTHING
+func (f *jobVulnRepo) AddEvidence(ctx context.Context, tx application.Tx, ev application.EvidenceRecord, observedAt time.Time) (string, error) {
+	if id, ok := f.db.evidenceID(ev.RawRecordID, ev.Type, ev.ValueHash); ok {
+		return id, nil // ON CONFLICT DO NOTHING
 	}
+	id := uuid.New()
 	f.db.evidences = append(f.db.evidences, jobEvidence{
-		vulnID: ev.VulnerabilityID, rawID: ev.RawRecordID, typ: ev.Type, value: ev.Value, hash: ev.ValueHash,
+		id: id, vulnID: ev.VulnerabilityID, rawID: ev.RawRecordID, typ: ev.Type, value: ev.Value, hash: ev.ValueHash,
 	})
-	return nil
+	return id, nil
 }
 
 var _ application.VulnerabilityRepo = (*jobVulnRepo)(nil)

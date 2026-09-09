@@ -11,11 +11,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const insertEvidence = `-- name: InsertEvidence :exec
+const insertEvidence = `-- name: InsertEvidence :one
 
-INSERT INTO evidences (vulnerability_id, raw_record_id, type, value, value_hash, observed_at)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (raw_record_id, type, value_hash) DO NOTHING
+WITH inserted AS (
+    INSERT INTO evidences (vulnerability_id, raw_record_id, type, value, value_hash, observed_at)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    ON CONFLICT (raw_record_id, type, value_hash) DO NOTHING
+    RETURNING id
+)
+SELECT id FROM inserted
+UNION ALL
+SELECT id FROM evidences
+WHERE raw_record_id = $2 AND type = $3 AND value_hash = $5
+LIMIT 1
 `
 
 type InsertEvidenceParams struct {
@@ -40,9 +48,12 @@ type InsertEvidenceParams struct {
 // InsertEvidence stores one source statement per (vulnerability, raw record,
 // type). The natural key (raw_record_id, type, value_hash) makes repeated
 // ingestion a no-op (ARCH-001 §3 step 3); observed_at comes from the
-// injected clock.
-func (q *Queries) InsertEvidence(ctx context.Context, arg InsertEvidenceParams) error {
-	_, err := q.db.Exec(ctx, insertEvidence,
+// injected clock. The statement returns the evidence id — the newly
+// inserted one, or the already existing one of an identical earlier
+// statement (the I2 forward-note: the reprocess path links the returned id
+// into quarantine.resolved_evidence_id, ARCH-003 §7).
+func (q *Queries) InsertEvidence(ctx context.Context, arg InsertEvidenceParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, insertEvidence,
 		arg.VulnerabilityID,
 		arg.RawRecordID,
 		arg.Type,
@@ -50,7 +61,9 @@ func (q *Queries) InsertEvidence(ctx context.Context, arg InsertEvidenceParams) 
 		arg.ValueHash,
 		arg.ObservedAt,
 	)
-	return err
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const listPreviousKEVCVEs = `-- name: ListPreviousKEVCVEs :many

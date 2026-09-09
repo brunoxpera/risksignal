@@ -90,8 +90,12 @@ type VulnerabilityRepo interface {
 	Upsert(ctx context.Context, tx Tx, rec VulnerabilityRecord, publishedAt, modifiedAt time.Time) (string, error)
 
 	// AddEvidence inserts one immutable evidence row; repeated ingestion
-	// of the same statement is a no-op (ON CONFLICT DO NOTHING).
-	AddEvidence(ctx context.Context, tx Tx, ev EvidenceRecord, observedAt time.Time) error
+	// of the same statement is a no-op (ON CONFLICT DO NOTHING). It
+	// returns the evidence id — newly inserted, or the already existing
+	// one of an identical earlier statement — so the reprocess path can
+	// link it into quarantine.resolved_evidence_id (ARCH-003 §7, I2
+	// forward-note; DEV-053 wires the link).
+	AddEvidence(ctx context.Context, tx Tx, ev EvidenceRecord, observedAt time.Time) (string, error)
 }
 
 // MatchRepo persists method-led matches (ARCH-001 §1 matches, §3 step 4).

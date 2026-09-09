@@ -430,7 +430,7 @@ func (s *Service) insertCaseEvidences(ctx context.Context, tx Tx, vulnID, rawID 
 		if err != nil {
 			return InfraError("run_synthetic_source", err)
 		}
-		if err := s.vulns.AddEvidence(ctx, tx, EvidenceRecord{
+		if _, err := s.vulns.AddEvidence(ctx, tx, EvidenceRecord{
 			VulnerabilityID: vulnID,
 			RawRecordID:     rawID,
 			Type:            st.typ,

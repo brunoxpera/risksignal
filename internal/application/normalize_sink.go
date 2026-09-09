@@ -115,13 +115,19 @@ func (s *normalizeSink) Evidence(ctx context.Context, e domain.Evidence) error {
 	if !ok {
 		return InfraError("normalize_sink", fmt.Errorf("evidence for cve_id %q of a vulnerability this pass did not upsert; the adapter must emit the record's Vulnerability first", probe.CveID))
 	}
-	return s.service.vulns.AddEvidence(ctx, s.tx, EvidenceRecord{
+	// The returned evidence id is the I2 forward-note of ARCH-003 §7: the
+	// reprocess path will link it into quarantine.resolved_evidence_id
+	// (DEV-053); the run path has no use for it yet and drops it.
+	if _, err := s.service.vulns.AddEvidence(ctx, s.tx, EvidenceRecord{
 		VulnerabilityID: vulnID,
 		RawRecordID:     s.rawRecordID,
 		Type:            e.Type,
 		Value:           value,
 		ValueHash:       hash,
-	}, s.now)
+	}, s.now); err != nil {
+		return err
+	}
+	return nil
 }
 
 // RecordError implements NormalizeSink: isolate one failed record into
