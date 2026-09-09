@@ -190,6 +190,21 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
   state.
 - `diagnose health` — process and configuration state plus the database
   connectivity probe.
+- `demo seed` — register the synthetic source
+  (`type=synthetic`, `name=synthetic-source`), seed the demo inventory
+  (acme/portal 2.4.4 on a critical/internet asset, acme/api 1.0 on a
+  normal/internal asset) and run the deterministic reference source once
+  (WP-1b.05, ARCH-001 §3). Seeding twice yields no duplicates. The
+  malformed reference case E1 (missing `cve_id`) is counted as a run error
+  without aborting the run: the reported run `status` is `failed` — that is
+  the expected reference behaviour — while the command itself exits 0 and
+  the counted error plus the run counters are part of the result.
+- `demo run` — re-run the synthetic source against the seeded inventory:
+  an idempotent no-op that creates no duplicate rows and no new signals.
+- `demo reset --yes` — truncate the I1b demo tables (sources, source runs,
+  raw records, vulnerabilities, evidences, matches, risk signals, assets,
+  components, audit events, outbox). Dev-only: requires the explicit
+  `--yes` and never prompts; the next `demo seed` rebuilds the demo state.
 - `help` — usage text.
 
 Exit codes are part of the automation contract — branch on them, never on
@@ -226,10 +241,16 @@ remains the default output; help output is always human-oriented. Examples:
     RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
       bin/risksignal diagnose config --output json
     bin/risksignal badcmd; echo $?        # 2 (validation)
+    RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+      bin/risksignal demo seed
+    bin/risksignal demo seed --output json   # run id, status, counters, errors
+    bin/risksignal demo run                  # idempotent re-run, no new signals
+    bin/risksignal demo reset --yes          # dev-only, truncates the demo tables
+
     RISKSIGNAL_DATABASE_URL=postgres://u:p@127.0.0.1:1/rs \
       bin/risksignal diagnose connectivity; echo $?   # 6 (infrastructure)
 
 The CLI is strictly non-interactive: it never prompts and never reads
-hidden defaults from a terminal. Destructive maintenance commands require
-complete parameters (an explicit `--yes` once implemented), never a
+hidden defaults from a terminal. Destructive commands require complete
+parameters — the dev-only `demo reset` takes an explicit `--yes` — never a
 terminal dialogue.

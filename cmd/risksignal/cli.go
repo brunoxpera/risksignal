@@ -275,8 +275,8 @@ commands:
   help                              show this help
 
 The CLI is strictly non-interactive: it never prompts and never reads hidden
-defaults from a terminal. Destructive maintenance commands require complete
-parameters (--yes once implemented), never a terminal dialogue.
+defaults from a terminal. Destructive commands require complete parameters
+(demo reset takes --yes), never a terminal dialogue.
 
 exit codes:
   0  success
