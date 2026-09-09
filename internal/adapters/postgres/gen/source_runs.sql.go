@@ -142,3 +142,115 @@ func (q *Queries) GetSourceRunByID(ctx context.Context, id pgtype.UUID) (SourceR
 	)
 	return i, err
 }
+
+const latestSourceRunBySource = `-- name: LatestSourceRunBySource :many
+SELECT DISTINCT ON (source_id)
+    source_id, id, status, started_at, finished_at, counters, error, cursor_after
+FROM source_runs
+ORDER BY source_id, started_at DESC, id DESC
+`
+
+type LatestSourceRunBySourceRow struct {
+	SourceID    pgtype.UUID
+	ID          pgtype.UUID
+	Status      string
+	StartedAt   pgtype.Timestamptz
+	FinishedAt  pgtype.Timestamptz
+	Counters    []byte
+	Error       pgtype.Text
+	CursorAfter []byte
+}
+
+// LatestSourceRunBySource returns the latest run of every source that has
+// run at all (WP-2.08b/DEV-043, ARCH-002 §5): the monitor read of the
+// per-source last run (status, finished_at, counters, error, cursor). The
+// DISTINCT ON picks the newest row per source_id by started_at (id is the
+// deterministic tiebreak for the same clock instant); the row's own index
+// (source_id, started_at DESC) serves the scan. The latest run may still
+// be 'running' — an in-flight run the monitor reports as such while the
+// data age falls back to the latest successful run (which is read
+// separately, LatestSucceededSourceRunBySource).
+func (q *Queries) LatestSourceRunBySource(ctx context.Context) ([]LatestSourceRunBySourceRow, error) {
+	rows, err := q.db.Query(ctx, latestSourceRunBySource)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LatestSourceRunBySourceRow
+	for rows.Next() {
+		var i LatestSourceRunBySourceRow
+		if err := rows.Scan(
+			&i.SourceID,
+			&i.ID,
+			&i.Status,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Counters,
+			&i.Error,
+			&i.CursorAfter,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const latestSucceededSourceRunBySource = `-- name: LatestSucceededSourceRunBySource :many
+SELECT DISTINCT ON (source_id)
+    source_id, id, status, started_at, finished_at, counters, error, cursor_after
+FROM source_runs
+WHERE status = 'succeeded'
+ORDER BY source_id, started_at DESC, id DESC
+`
+
+type LatestSucceededSourceRunBySourceRow struct {
+	SourceID    pgtype.UUID
+	ID          pgtype.UUID
+	Status      string
+	StartedAt   pgtype.Timestamptz
+	FinishedAt  pgtype.Timestamptz
+	Counters    []byte
+	Error       pgtype.Text
+	CursorAfter []byte
+}
+
+// LatestSucceededSourceRunBySource returns the latest successful run of
+// every source that has one (WP-2.08b/DEV-043, ARCH-002 §5): the monitor's
+// data-age read. Data age is clock.Now() − the last successful run's
+// finished_at (ARCH-002 §5), and for an incremental source the committed
+// cursor_after (the NVD last_modified member) is the data-freshness basis
+// the monitor prefers over finished_at. Sources without a successful run
+// have no row here — the monitor reports them as never-succeeded (no data
+// age, never degraded on the age criterion).
+func (q *Queries) LatestSucceededSourceRunBySource(ctx context.Context) ([]LatestSucceededSourceRunBySourceRow, error) {
+	rows, err := q.db.Query(ctx, latestSucceededSourceRunBySource)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LatestSucceededSourceRunBySourceRow
+	for rows.Next() {
+		var i LatestSucceededSourceRunBySourceRow
+		if err := rows.Scan(
+			&i.SourceID,
+			&i.ID,
+			&i.Status,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.Counters,
+			&i.Error,
+			&i.CursorAfter,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

@@ -53,3 +53,33 @@ RETURNING *;
 SELECT *
 FROM source_runs
 WHERE id = @id;
+
+-- LatestSourceRunBySource returns the latest run of every source that has
+-- run at all (WP-2.08b/DEV-043, ARCH-002 §5): the monitor read of the
+-- per-source last run (status, finished_at, counters, error, cursor). The
+-- DISTINCT ON picks the newest row per source_id by started_at (id is the
+-- deterministic tiebreak for the same clock instant); the row's own index
+-- (source_id, started_at DESC) serves the scan. The latest run may still
+-- be 'running' — an in-flight run the monitor reports as such while the
+-- data age falls back to the latest successful run (which is read
+-- separately, LatestSucceededSourceRunBySource).
+-- name: LatestSourceRunBySource :many
+SELECT DISTINCT ON (source_id)
+    source_id, id, status, started_at, finished_at, counters, error, cursor_after
+FROM source_runs
+ORDER BY source_id, started_at DESC, id DESC;
+
+-- LatestSucceededSourceRunBySource returns the latest successful run of
+-- every source that has one (WP-2.08b/DEV-043, ARCH-002 §5): the monitor's
+-- data-age read. Data age is clock.Now() − the last successful run's
+-- finished_at (ARCH-002 §5), and for an incremental source the committed
+-- cursor_after (the NVD last_modified member) is the data-freshness basis
+-- the monitor prefers over finished_at. Sources without a successful run
+-- have no row here — the monitor reports them as never-succeeded (no data
+-- age, never degraded on the age criterion).
+-- name: LatestSucceededSourceRunBySource :many
+SELECT DISTINCT ON (source_id)
+    source_id, id, status, started_at, finished_at, counters, error, cursor_after
+FROM source_runs
+WHERE status = 'succeeded'
+ORDER BY source_id, started_at DESC, id DESC;

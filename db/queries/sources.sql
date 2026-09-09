@@ -72,3 +72,17 @@ SELECT id, type, name
 FROM sources
 WHERE type = @type
 ORDER BY name, id;
+
+-- ListSources returns every source row the source monitor projects over
+-- (WP-2.08b/DEV-043, ARCH-002 §5): the monitor joins this base read with
+-- the latest source_runs rows and the open quarantine counts. schedule is
+-- carried so the monitor derives the source's planned interval (the stale
+-- threshold of ch. 16.3/16.4 — data age > 2 planned intervals is surfaced
+-- as degraded); endpoint is the public base URL of the source, never a
+-- secret (config, which holds the api_key_ref secret reference, is not
+-- selected). Rows are ordered by type, then name, then id — a stable
+-- operator-facing order.
+-- name: ListSources :many
+SELECT id, type, name, endpoint, schedule, enabled
+FROM sources
+ORDER BY type, name, id;

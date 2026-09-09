@@ -36,10 +36,13 @@ import (
 // Schedule vocabulary of the sources.schedule column (ARCH-002 §1 lists the
 // per-type schedules: NVD "@hourly", KEV/EPSS "@daily"). A schedule slot is
 // the schedule period's boundary: an hourly schedule is due at the top of
-// each hour, a daily schedule at UTC midnight.
+// each hour, a daily schedule at UTC midnight. The constants are the public
+// contract of the column — the worker's due-slot scan and the source
+// monitor's planned-interval derivation (the stale threshold of ch. 16.4)
+// read the same grammar.
 const (
-	scheduleHourly = "@hourly"
-	scheduleDaily  = "@daily"
+	ScheduleHourly = "@hourly"
+	ScheduleDaily  = "@daily"
 )
 
 // dueScheduleSlot returns the most recent schedule slot at or before now —
@@ -53,9 +56,9 @@ const (
 // missed periods self-healing, ARCH-002 §2).
 func dueScheduleSlot(schedule string, now time.Time) (slot time.Time, ok bool) {
 	switch strings.TrimSpace(schedule) {
-	case scheduleHourly:
+	case ScheduleHourly:
 		return now.UTC().Truncate(time.Hour), true
-	case scheduleDaily:
+	case ScheduleDaily:
 		return now.UTC().Truncate(24 * time.Hour), true
 	}
 	return time.Time{}, false

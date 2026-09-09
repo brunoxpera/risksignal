@@ -83,7 +83,7 @@ func (s *Service) RunSource(ctx context.Context, in RunSourceInput) (RunSourceRe
 	if out.Meta.RateLimited {
 		// ch. 14.2: recorded rate-limited, not a source fault — the caller
 		// backs off via Meta.RetryAfter. The cursor does not advance.
-		_ = s.completeRun(ctx, op, runID, SourceRunStatusFailed, SourceRunCounters{}, nil, rateLimitedErrorText)
+		_ = s.completeRun(ctx, op, runID, SourceRunStatusFailed, SourceRunCounters{}, nil, RateLimitedErrorText)
 		return RunSourceResult{RunID: runID, Status: SourceRunStatusFailed, Meta: out.Meta}, nil
 	}
 	if out.Meta.NoChange {

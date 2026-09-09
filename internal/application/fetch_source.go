@@ -14,11 +14,13 @@ import (
 // source_jobs.go; this block keeps the constants the fetch use case itself
 // writes to.
 const (
-	// rateLimitedErrorText is the stable error text of a rate-limited run:
-	// the run closes failed (the cursor does not advance) but the failure is
+	// RateLimitedErrorText is the stable error text of a rate-limited run
+	// (the run closes failed, the cursor does not advance): the failure is
 	// recorded as rate-limited, never as a source technical error (ch. 14.2,
-	// ARCH-002 §2.1) — the caller reads FetchMeta.RateLimited/RetryAfter.
-	rateLimitedErrorText = "fetch.rate_limited"
+	// ARCH-002 §2.1) — the caller reads FetchMeta.RateLimited/RetryAfter,
+	// and the source monitor (ARCH-002 §5) recognises a rate-limited run by
+	// this exact error text.
+	RateLimitedErrorText = "fetch.rate_limited"
 )
 
 // FetchSourceInput drives one fetch half (the worker's source.fetch job,
@@ -103,7 +105,7 @@ func (s *Service) FetchSource(ctx context.Context, in FetchSourceInput) (FetchSo
 	if out.Meta.RateLimited {
 		// ch. 14.2: recorded as rate-limited, not a source fault; the
 		// caller backs off via Meta.RetryAfter. The cursor does not advance.
-		_ = s.completeRun(ctx, op, runID, SourceRunStatusFailed, SourceRunCounters{}, nil, rateLimitedErrorText)
+		_ = s.completeRun(ctx, op, runID, SourceRunStatusFailed, SourceRunCounters{}, nil, RateLimitedErrorText)
 		return FetchSourceResult{RunID: runID, Status: SourceRunStatusFailed, Meta: out.Meta}, nil
 	}
 	if out.Meta.NoChange {

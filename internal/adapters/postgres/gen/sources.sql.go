@@ -109,6 +109,57 @@ func (q *Queries) ListEnabledScheduledSources(ctx context.Context) ([]ListEnable
 	return items, nil
 }
 
+const listSources = `-- name: ListSources :many
+SELECT id, type, name, endpoint, schedule, enabled
+FROM sources
+ORDER BY type, name, id
+`
+
+type ListSourcesRow struct {
+	ID       pgtype.UUID
+	Type     string
+	Name     string
+	Endpoint pgtype.Text
+	Schedule pgtype.Text
+	Enabled  bool
+}
+
+// ListSources returns every source row the source monitor projects over
+// (WP-2.08b/DEV-043, ARCH-002 §5): the monitor joins this base read with
+// the latest source_runs rows and the open quarantine counts. schedule is
+// carried so the monitor derives the source's planned interval (the stale
+// threshold of ch. 16.3/16.4 — data age > 2 planned intervals is surfaced
+// as degraded); endpoint is the public base URL of the source, never a
+// secret (config, which holds the api_key_ref secret reference, is not
+// selected). Rows are ordered by type, then name, then id — a stable
+// operator-facing order.
+func (q *Queries) ListSources(ctx context.Context) ([]ListSourcesRow, error) {
+	rows, err := q.db.Query(ctx, listSources)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSourcesRow
+	for rows.Next() {
+		var i ListSourcesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.Name,
+			&i.Endpoint,
+			&i.Schedule,
+			&i.Enabled,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSourcesByType = `-- name: ListSourcesByType :many
 SELECT id, type, name
 FROM sources

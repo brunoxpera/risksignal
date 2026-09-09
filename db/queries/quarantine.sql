@@ -50,6 +50,18 @@ SELECT *
 FROM quarantine
 WHERE id = @id;
 
+-- CountOpenQuarantineBySource returns the open quarantine count per source
+-- (WP-2.08b/DEV-043, ARCH-002 §5): the open statuses of the ch. 8.6 state
+-- machine — new, acknowledged and ready_for_retry; resolved is terminal and
+-- never counted. Sources with no open row have no entry here — the monitor
+-- reads them as zero. One row per source_id, so the projection joins it
+-- onto the sources read directly.
+-- name: CountOpenQuarantineBySource :many
+SELECT source_id, COUNT(*)::bigint AS open_count
+FROM quarantine
+WHERE status IN ('new', 'acknowledged', 'ready_for_retry')
+GROUP BY source_id;
+
 -- ListQuarantine is the working-list read of the quarantine (ARCH-002 §4,
 -- ch. 11.3 quarantine list): oldest isolation first with id as the stable
 -- tiebreak. status and source_id filter optionally — pass NULL to keep a

@@ -67,6 +67,44 @@ func (q *Queries) AcknowledgeQuarantine(ctx context.Context, arg AcknowledgeQuar
 	return i, err
 }
 
+const countOpenQuarantineBySource = `-- name: CountOpenQuarantineBySource :many
+SELECT source_id, COUNT(*)::bigint AS open_count
+FROM quarantine
+WHERE status IN ('new', 'acknowledged', 'ready_for_retry')
+GROUP BY source_id
+`
+
+type CountOpenQuarantineBySourceRow struct {
+	SourceID  pgtype.UUID
+	OpenCount int64
+}
+
+// CountOpenQuarantineBySource returns the open quarantine count per source
+// (WP-2.08b/DEV-043, ARCH-002 §5): the open statuses of the ch. 8.6 state
+// machine — new, acknowledged and ready_for_retry; resolved is terminal and
+// never counted. Sources with no open row have no entry here — the monitor
+// reads them as zero. One row per source_id, so the projection joins it
+// onto the sources read directly.
+func (q *Queries) CountOpenQuarantineBySource(ctx context.Context) ([]CountOpenQuarantineBySourceRow, error) {
+	rows, err := q.db.Query(ctx, countOpenQuarantineBySource)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountOpenQuarantineBySourceRow
+	for rows.Next() {
+		var i CountOpenQuarantineBySourceRow
+		if err := rows.Scan(&i.SourceID, &i.OpenCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getQuarantineByID = `-- name: GetQuarantineByID :one
 SELECT id, source_id, source_run_id, raw_record_id, position, reason, payload_hash, status, attempts, acknowledged_at, acknowledged_by, acknowledged_note, resolved_at, resolved_vulnerability_id, resolved_evidence_id, resolved_note, created_at, updated_at
 FROM quarantine
