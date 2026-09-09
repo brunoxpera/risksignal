@@ -60,7 +60,10 @@ import (
 )
 
 // Audit and outbox vocabulary of the inventory commit (ch. 13.2
-// "Inventarimport" is auditable; ARCH-003 §1.3/§5).
+// "Inventarimport" is auditable; ARCH-003 §1.3/§5). The matching.rebuild
+// event type, payload and dedupe key builder are the shared matching-job
+// contract of matching_jobs.go (WP-3.08) — the commit only enqueues the
+// job; the relay handler consumes it.
 const (
 	// AuditAggregateInventory is the aggregate type of inventory audit
 	// rows. The aggregate id of one commit is the generated import id
@@ -70,15 +73,6 @@ const (
 
 	// AuditActionInventoryImport records an inventory import commit.
 	AuditActionInventoryImport = "inventory.import"
-
-	// EventTypeMatchingRebuild is the outbox type of the matching.rebuild
-	// job (ARCH-003 §5): exactly one per inventory state change, enqueued
-	// by the commit on the same transaction as the state change.
-	EventTypeMatchingRebuild = "matching.rebuild"
-
-	// matchingRebuildDedupePrefix namespaces the matching.rebuild dedupe
-	// key (the outbox UQ (dedupe_key) is global across job types).
-	matchingRebuildDedupePrefix = "matching.rebuild:"
 
 	// defaultInventoryActorID is the I2 audit actor of the inventory
 	// commands: a system principal (ch. 13.2 — user principals arrive
@@ -333,7 +327,7 @@ func (s *Service) CommitInventory(ctx context.Context, in CommitInventoryInput) 
 		if err != nil {
 			return InfraError(op, err)
 		}
-		payload, err := json.Marshal(matchingRebuildPayload{
+		payload, err := json.Marshal(MatchingRebuildPayload{
 			EventID:           uuid.New(),
 			Type:              EventTypeMatchingRebuild,
 			ImportID:          importID,
@@ -348,7 +342,7 @@ func (s *Service) CommitInventory(ctx context.Context, in CommitInventoryInput) 
 		if err := s.outbox.Append(ctx, tx, OutboxEvent{
 			Type:        EventTypeMatchingRebuild,
 			Payload:     payload,
-			DedupeKey:   matchingRebuildDedupeKey(ruleVersion, snapshotHash),
+			DedupeKey:   MatchingRebuildDedupeKey(ruleVersion, snapshotHash),
 			AvailableAt: now,
 			CreatedAt:   now,
 		}); err != nil {
@@ -379,33 +373,10 @@ type inventoryImportSnapshot struct {
 	ComponentsUpdated int `json:"components_updated"`
 }
 
-// matchingRebuildPayload is the outbox payload of one matching.rebuild
-// job (ARCH-003 §5): the identities of the rebuild — the composite rule
-// version and the deterministic inventory snapshot hash its dedupe key
-// is built from — plus the event envelope fields of the house style
-// (event_id, type, occurred_at, correlation_id). It carries no secret:
-// an inventory snapshot is derived from row counts and lifecycle stamps.
-type matchingRebuildPayload struct {
-	EventID           string    `json:"event_id"`
-	Type              string    `json:"type"`
-	ImportID          string    `json:"import_id"`
-	RuleVersion       string    `json:"rule_version"`
-	InventorySnapshot string    `json:"inventory_snapshot"`
-	OccurredAt        time.Time `json:"occurred_at"`
-	CorrelationID     string    `json:"correlation_id"`
-}
-
-// matchingRebuildDedupeKey is the outbox dedupe key of one
-// matching.rebuild job (ARCH-003 §5): "matching.rebuild:" namespacing the
-// key (the outbox UQ is global across job types) followed by the
-// composite effective rule version and the inventory snapshot hash — the
-// two parts ARCH-003 §5 pins as the dedupe key. The outbox UQ
-// (dedupe_key) makes the append idempotent for the whole job lifetime
-// (ADR-012 point 4): an identical key can never enqueue twice.
-func matchingRebuildDedupeKey(ruleVersion, inventorySnapshot string) string {
-	return matchingRebuildDedupePrefix + ruleVersion + ":" + inventorySnapshot
-}
-
+// The matching.rebuild outbox payload type (MatchingRebuildPayload) and
+// the dedupe key builder (MatchingRebuildDedupeKey) live in
+// matching_jobs.go — the shared matching-job contract of WP-3.08 both
+// the enqueue side and the relay handlers compile against.
 // inventorySnapshotHash derives the deterministic ARCH-003 §5 hash of one
 // inventory snapshot — sha-256 (64 hex) over the canonical
 // pipe-separated rendering of the five aggregates, RFC 3339 nanosecond
