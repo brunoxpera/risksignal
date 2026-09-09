@@ -50,10 +50,22 @@ problem and exits 1 (the CLI classifies it as validation and exits 2, see
 `risksignal-server` keeps running and serves HTTP on `http.addr` through the
 WP-1a.06 middleware chain (ADR-008), shutting down cleanly on
 SIGINT/SIGTERM. `risksignal-worker` keeps running and drives its scheduler
-loop (WP-1a.10): a heartbeat and one scheduler run per `worker.interval`
-(default 30s, overridable via `RISKSIGNAL_WORKER_INTERVAL`; no job types
-yet), recording worker health (heartbeat and last successful run, ch. 16.3)
-and shutting down cleanly on SIGINT/SIGTERM within a grace period. Examples:
+loop (WP-1a.10, WP-1b.06): a heartbeat plus one outbox-relay drain per
+`worker.interval` (default 30s, overridable via
+`RISKSIGNAL_WORKER_INTERVAL`), recording worker health (heartbeat and last
+successful run, ch. 16.3) and shutting down cleanly on SIGINT/SIGTERM
+within a grace period. The drain is the transactional-outbox relay of
+ARCH-001 §2: it claims the bounded batch of due rows (lease-based
+`FOR UPDATE SKIP LOCKED`, so several workers can drain concurrently),
+dispatches each row to the handler registered for its `outbox.type`, acks
+delivered rows (`claimed → done`, guarded so a redelivery cannot double-ack)
+and dead-letters a permanently failed row or one past the attempt cap with
+`last_error` recorded — a temporary failure stays `claimed` and the expired
+lease redelivers it (at-least-once delivery, idempotent on the immutable
+event id). The I1b registry carries one handler, the `signal.created` sink
+(sink.go): a no-op standing in for the I4 notification adapter, so the
+observable effect of a delivery is the terminal `claimed → done` transition
+— the relay mechanics are what the walking skeleton proves. Examples:
 
     RISKSIGNAL_DATABASE_URL=postgres://user:pass@127.0.0.1:5432/risksignal \
     RISKSIGNAL_OIDC_ISSUER=https://auth.local.example/ \
@@ -100,6 +112,43 @@ negative test:
 
     make test-arch
 
+### End-to-end demo (WP-1b.11)
+
+The iteration I1b exit criterion — a synthetic record imported and readable
+as a risk signal over the API — is one command:
+
+    make demo
+
+`make demo` builds the binaries, starts the compose database (`make up-db`)
+and applies the schema migrations, then runs `scripts/demo.sh`: it resets
+the I1b demo tables (`demo reset --yes`) so every run starts from the same
+deterministic state, seeds the synthetic source (`demo seed`, WP-1b.05),
+starts `bin/risksignal-server` on the loopback demo address
+(`127.0.0.1:18080`; override `RISKSIGNAL_HTTP_ADDR`) and asserts that
+`GET /api/v1/signals` serves the four reference signals with the expected
+P1/P2/P2/P3 priorities — the exit-criterion read, via the list and the
+detail endpoint — then stops the demo server. The demo uses synthetic seed
+data and loopback bindings only; the compose db stays up afterwards
+(`make down` stops it). Running `make demo` again always demonstrates the
+same outcome.
+
+The manual equivalent, with the compose defaults exported:
+
+    export RISKSIGNAL_DATABASE_URL='postgres://risksignal:risksignal@127.0.0.1:5432/risksignal?sslmode=disable'
+    export RISKSIGNAL_OIDC_ISSUER='http://127.0.0.1:9000/oidc'
+
+    make up-db && make migrate    # db up and healthy, schema applied
+    bin/risksignal demo seed      # deterministic synthetic run (C1-C4 -> 4 signals)
+    bin/risksignal-server &       # serves /api/v1/signals on 127.0.0.1:8080
+    curl -s 'http://127.0.0.1:8080/api/v1/signals?limit=100'
+
+The reference cases C1–C4 (ARCH-001 §3) are deterministic: the list comes
+back priority-ascending with CVE-2024-0001 first at `"priority":"P1"`
+(then P2/P2/P3), every signal carrying `"status":"new"` and the readable
+join (asset, product, summary, confidence, method). `demo run` re-runs the
+source idempotently; `demo reset --yes` clears the demo tables. The demo
+CLI commands are documented under "CLI commands and exit codes".
+
 ### CI pipeline stages 1–2 (WP-1a.12)
 
 The CI pipeline (`.github/workflows/ci.yml`, GitHub Actions) runs three
@@ -107,9 +156,21 @@ parallel jobs — lint, test, build — and every stage is reproducible locally
 without GitHub:
 
     make ci-lint    # gofmt check, go vet, golangci-lint (incl. gosec), go-arch-lint,
-                    # go-licenses check, gitleaks detect
+                    # go-licenses check, gitleaks detect, then the ADR-011 OpenAPI
+                    # gates (WP-1b.11): validate + generate diff
     make ci-test    # go test -race ./... against the compose PostgreSQL (starts it)
+    make test-contract  # the ADR-011 gate-3 contract suite only: OpenAPI document
+                    # validation + generated client against the demo-seeded server
     make ci-build   # make build
+
+Since WP-1b.11 the lint job also enforces the two ADR-011 contract-machinery
+gates: gate 1 validates `api/openapi/openapi.yaml` against the 3.1
+specification through the kin-openapi validation of the contract suite
+(`make lint-openapi-validate`) — the no-Node CI equivalent of the redocly
+`make validate-openapi` gate, which needs Node via npx and stays the local
+developer validator — and gate 2 regenerates the sqlc/oapi-codegen output
+(`make generate`) and fails on any diff of the committed generated trees
+(`make lint-openapi-diff`).
 
 The tools are pinned to the versions recorded in
 `docs/plan/orchestrator-decisions.md` (D-005): golangci-lint v2.13.2,
