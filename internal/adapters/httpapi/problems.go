@@ -7,6 +7,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -32,28 +33,53 @@ const (
 	titleInternalError  = "Internal server error"
 )
 
-// writeProblem answers status with an RFC 9457 problem detail (ARCH-001 §4
+// newProblem assembles one RFC 9457 problem detail (ARCH-001 §4
 // ProblemDetails schema): the required {type, title, status,
-// correlation_id}, plus detail when given and the request path as the
-// instance reference. The correlation id comes from the request context —
-// the correlation middleware (correlation.go) sets it before any handler
-// runs — and is echoed back in the X-Request-ID response header by the
-// middleware itself.
-func writeProblem(w http.ResponseWriter, r *http.Request, status int, title, detail string) {
+// correlation_id}, plus detail and instance when given. An empty detail or
+// instance is omitted from the object (500 answers carry no detail on
+// purpose; a hand-built test chain may have no instance reference).
+func newProblem(correlationID, instance string, status int, title, detail string) gen.ProblemDetails {
 	p := gen.ProblemDetails{
 		Type:          problemType,
 		Title:         title,
 		Status:        status,
-		CorrelationId: requestID(r),
+		CorrelationId: correlationID,
+	}
+	if instance != "" {
+		p.Instance = &instance
 	}
 	if detail != "" {
 		p.Detail = &detail
 	}
-	if r.URL.Path != "" {
-		instance := r.URL.Path
-		p.Instance = &instance
+	return p
+}
+
+// writeProblem answers status with an RFC 9457 problem detail. The
+// correlation id comes from the request context — the correlation middleware
+// (correlation.go) sets it before any handler runs — and is echoed back in
+// the X-Request-ID response header by the middleware itself; the request
+// path is the instance reference.
+func writeProblem(w http.ResponseWriter, r *http.Request, status int, title, detail string) {
+	writeJSON(w, status, newProblem(requestID(r), r.URL.Path, status, title, detail))
+}
+
+// problemFromContext assembles the RFC 9457 problem detail of one strict
+// handler answer from the request context only — the strict interface of
+// the generated code hands the handlers the context, not the request. The
+// correlation id comes from the correlation middleware, the instance
+// reference from the recordRequestPath strict middleware (signals.go); a
+// context without them (hand-built test chains) falls back to "-" and no
+// instance, like requestID does.
+func problemFromContext(ctx context.Context, status int, title, detail string) gen.ProblemDetails {
+	corrID, ok := RequestIDFromContext(ctx)
+	if !ok || corrID == "" {
+		corrID = "-"
 	}
-	writeJSON(w, status, p)
+	instance := ""
+	if p, ok := pathFromContext(ctx); ok {
+		instance = p
+	}
+	return newProblem(corrID, instance, status, title, detail)
 }
 
 // writeError maps an application error onto the problem detail of its class
@@ -64,6 +90,12 @@ func writeProblem(w http.ResponseWriter, r *http.Request, status int, title, det
 // omitted and the full error goes to the structured log, where the
 // correlation id links it to this request (the redacting logger of
 // internal/platform/logging guards the record's content).
+//
+// Under the strict interface (signals.go) this is the escape hatch of the
+// strict wrapper's response error handler: the handlers render the error
+// classes the contract declares as typed response objects themselves and
+// only let an undeclared class (the conflict, which the read contract does
+// not declare) escape here.
 func (h *signalsHandler) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	kind, _ := application.ErrorKindOf(err)
 	switch kind {
