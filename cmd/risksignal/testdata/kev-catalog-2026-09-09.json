@@ -1,0 +1,41 @@
+{
+  "title": "CISA Catalog of Known Exploited Vulnerabilities",
+  "catalogVersion": "2026.09.09",
+  "dateReleased": "2026-09-09T04:00:00.000Z",
+  "count": 3,
+  "vulnerabilities": [
+    {
+      "cveID": "CVE-2026-0101",
+      "vendorProject": "Acme",
+      "product": "Widget",
+      "vulnerabilityName": "Acme Widget Command Injection",
+      "dateAdded": "2026-08-01",
+      "shortDescription": "Command injection in the Acme Widget allows remote takeover.",
+      "requiredAction": "Apply vendor-supplied mitigations.",
+      "dueDate": "2026-11-01",
+      "knownRansomwareCampaignUse": false
+    },
+    {
+      "cveID": "CVE-2026-0102",
+      "vendorProject": "Acme",
+      "product": "Widget",
+      "vulnerabilityName": "Acme Widget Path Traversal",
+      "dateAdded": "2026-08-15",
+      "shortDescription": "Path traversal in the Acme Widget exposes configuration files.",
+      "requiredAction": "Apply vendor-supplied mitigations.",
+      "dueDate": "2026-12-01",
+      "knownRansomwareCampaignUse": true
+    },
+    {
+      "cveID": "CVE-2026-0103",
+      "vendorProject": "Globex",
+      "product": "Gateway",
+      "vulnerabilityName": "Globex Gateway Authentication Bypass",
+      "dateAdded": "2026-09-01",
+      "shortDescription": "Authentication bypass in the Globex Gateway allows unauthorized access.",
+      "requiredAction": "Apply vendor-supplied mitigations.",
+      "dueDate": "2026-12-15",
+      "knownRansomwareCampaignUse": false
+    }
+  ]
+}
