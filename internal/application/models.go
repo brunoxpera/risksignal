@@ -80,14 +80,42 @@ type OutboxEvent struct {
 	CreatedAt   time.Time
 }
 
-// Component is one seeded inventory component as read by the I1b matcher
-// (ARCH-001 §3 step 4). The full inventory model (CPE, purl, digest) is I3.
+// Component is one inventory component as the read paths of the application
+// layer return it (ARCH-001 §1 components, §3 step 4; extended ARCH-003
+// §1.2, WP-3.08a / DEV-063). It is the row model of the I1b matcher read
+// (ComponentRepo.ListByVendorProduct) and — in its extended I3 shape — of
+// the inventory product index lookup (ComponentNormLister.
+// ListByVendorProductNorm), the row set the candidate pre-filter returns
+// and the matching run evaluates against.
+//
+// The raw originals (Vendor/Product/Version/CPE/PURL/Image/Digest) are
+// preserved verbatim; VendorNorm/ProductNorm/VersionNorm are the write-time
+// normalised comparison keys of the row (NFKC + trim + lowercase, no alias
+// — aliases resolve at match time, ARCH-003 §2); VersionScheme is the
+// inferred ordering scheme of the row and NaturalKey its import
+// idempotency key (UQ (asset_id, natural_key)). Timestamps are absent by
+// design — the application layer reads the injected clock, never the stored
+// ones (ARCH-003 §1.2 note). A row read through the I1b read (which selects
+// no I3 columns) carries the I3 fields empty.
 type Component struct {
 	ID      string // uuid
 	AssetID string
-	Vendor  string
-	Product string
-	Version string
+
+	Vendor  string // original; "" when the identity comes from cpe/purl/digest
+	Product string // original; "" when absent
+	Version string // original; "" when absent
+
+	CPE    string // original CPE 2.3 string; "" when absent
+	PURL   string // original package URL; "" when absent
+	Image  string // original image reference registry/repository[:tag][@digest]; "" when absent
+	Digest string // immutable digest (sha256:…); "" when absent
+
+	VendorNorm    string // normalised comparison key; "" when no vendor
+	ProductNorm   string // normalised comparison key; "" when no product
+	VersionNorm   string // normalised version for the chosen scheme; "" when absent/not normalisable
+	VersionScheme domain.VersionScheme
+
+	NaturalKey string // import idempotency key, SHA-256 of the strongest identifier (ARCH-003 §1.3)
 }
 
 // ScheduledSource is one enabled, schedulable sources row as the scheduler
