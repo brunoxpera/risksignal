@@ -41,12 +41,11 @@ const (
 	apiKeyRefConfigKey      = "api_key_ref"
 	envRefPrefix            = "env:"
 	userAgent               = "risksignal-nvd-adapter/0.1 (xpera riskSignal)"
-	normalizeNotImplemented = "nvd normalize not implemented (DEV-040)"
 )
 
 // Adapter implements application.SourcePort for the NVD source type
 // (ARCH-002 §1): Type() "nvd", incremental last-modified plan, the bounded
-// window fetch of §2.1 and — once DEV-040 lands — the normalise half.
+// window fetch of §2.1 and the normalise half (normalize.go).
 type Adapter struct {
 	// hc is the HTTP client of the walk. The transport is injectable at
 	// construction (ARCH-002 §6: tests point the client at an in-process
@@ -153,12 +152,6 @@ func (a *Adapter) Fetch(ctx context.Context, in application.FetchInput) (applica
 		Cursor:      cursor,
 		Meta:        application.FetchMeta{Status: http.StatusOK, ContentType: "application/json", Size: int64(len(payload))},
 	}, nil
-}
-
-// Normalize is the normalise half of the port; it is implemented by the
-// next work package (DEV-040). Until then every pass fails closed.
-func (*Adapter) Normalize(context.Context, application.NormalizeInput, application.NormalizeSink) (application.NormalizeResult, error) {
-	return application.NormalizeResult{}, errors.New(normalizeNotImplemented)
 }
 
 // page is the decoded envelope of one API 2.0 response page. Only the

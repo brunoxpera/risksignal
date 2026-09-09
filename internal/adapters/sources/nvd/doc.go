@@ -1,10 +1,8 @@
 // Package nvd implements the NVD CVE API 2.0 source adapter
-// (ARCH-002 §2.1, WP-2.05a, DEV-039): the fetch half of the shared
-// SourcePort for the "nvd" source type.
-//
-// The adapter performs the bounded-window fetch only. Normalisation of the
-// fetched document is the separate normalise half (DEV-040); Normalize is a
-// stub here that reports "not implemented".
+// (ARCH-002 §2.1, WP-2.05): both halves of the shared SourcePort for the
+// "nvd" source type — the bounded-window fetch (DEV-039) and the
+// normaliser (DEV-040) that streams the fetched document into
+// domain.Vulnerability records and their evidences.
 //
 // # Fetch semantics
 //
@@ -31,6 +29,21 @@
 // "nvd:<window-from>:<window-to>" and its content hash is the SHA-256 of
 // the joined bytes. A window without modified CVEs still stores its single
 // empty page — the record of "no changes" — so the cursor can advance.
+//
+// # Normalise semantics
+//
+// Normalize streams the stored raw record — the verbatim pages of one
+// fetch, '\n'-joined — apart again with a json.Decoder (JSON documents are
+// self-delimiting) and emits, per vulnerabilities[] element of every page,
+// one domain.Vulnerability (cve_id; summary/description = the English
+// description; cvss {version, base_score, base_severity, vector} from the
+// first V31 metric, falling back to V30 then V2; references; the raw
+// configurations block as cpe_config) plus its nvd_statement evidence (the
+// canonical compacted record excerpt, hashed) and — when metrics exist —
+// its cvss evidence ({cve_id, base_score, severity, vector, version}). A
+// record that fails to parse or carries no id is isolated through
+// sink.RecordError (position + reason + the SHA-256 of the offending
+// element) and never aborts the run (ch. 8.1 step 5).
 //
 // # Rate limits
 //
