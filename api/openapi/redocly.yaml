@@ -1,0 +1,19 @@
+# Redocly configuration for the ADR-011 gate-1 schema validation
+# (WP-1b.07; invoked by `make validate-openapi`, redocly pinned in that
+# target). The gate is structural: it validates api/openapi/openapi.yaml
+# against the OpenAPI 3.1 specification. It extends only "minimal" — no
+# stylistic rules — and turns off exactly three warning-level rules that
+# would otherwise flag *intentional* I1b properties (ARCH-001 §4):
+#   - no-empty-servers:     the contract declares paths only; the concrete
+#                           base URL is deployment configuration.
+#   - no-unused-components: IdempotencyKey and If-Match are declared now and
+#                           become operative on the I4 command endpoints
+#                           (ADR-011: declared in the document, not prose).
+#   - security-defined:     I1b carries no security scheme; OIDC and
+#                           per-use-case authorisation arrive with I5a.
+extends:
+  - minimal
+rules:
+  no-empty-servers: off
+  no-unused-components: off
+  security-defined: off

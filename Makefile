@@ -80,9 +80,9 @@ ARTIFACT_DIR := dist
 SBOM_DIR := $(ARTIFACT_DIR)/sbom
 SCAN_DIR := $(ARTIFACT_DIR)/scan
 
-.PHONY: build test test-arch lint lint-arch generate migrate up down verify-connectivity \
-	ci-lint ci-test ci-build check-gofmt vet lint-golangci lint-licenses lint-secrets up-db \
-	image sbom scan sign
+.PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
+	verify-connectivity ci-lint ci-test ci-build check-gofmt vet lint-golangci \
+	lint-licenses lint-secrets up-db image sbom scan sign
 
 ## build: compile all three binaries into bin/ with build metadata injected
 build:
@@ -312,6 +312,22 @@ generate:
 	$(SQLC_BIN) generate
 	$(OAPI_CODEGEN_BIN) -config api/openapi/oapi-codegen.yml api/openapi/openapi.yaml
 	$(GO) generate ./...
+
+## validate-openapi: ADR-011 gate 1 — validate api/openapi/openapi.yaml against
+##            the OpenAPI 3.1 specification with @redocly/cli (pinned via npx;
+##            the pin lives here until D-005 is amended). The ruleset is
+##            api/openapi/redocly.yaml: it extends minimal and turns off the
+##            three warning rules that would flag intentional I1b properties
+##            (see the config file) — the gate fails on an invalid document,
+##            not on lint taste. The CI wiring of gate 1 and the generate
+##            diff-gate (gate 2) is WP-1b.11; the contract test is gate 3
+##            (WP-1b.09).
+validate-openapi:
+	@command -v npx >/dev/null 2>&1 || { \
+		echo "npx not found on PATH — install Node.js (LTS) to run the schema validator"; \
+		exit 2; \
+	}
+	npx --yes @redocly/cli@2.51.2 lint api/openapi/openapi.yaml --config=api/openapi/redocly.yaml
 
 ## migrate: run the schema migrations (WP-1a.04) against the compose database.
 ##         Requires the environment to be up (make up). The command itself is
