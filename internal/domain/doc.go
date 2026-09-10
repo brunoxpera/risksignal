@@ -44,7 +44,8 @@
 //   - the I5a authorisation vocabulary of ARCH-005 §3/§5 (role.go,
 //     permission.go, scope.go, authz.go, identity.go): the Role, Permission
 //     and Scope enums, the §12.2 permission matrix as pure data
-//     (Role.Permissions(), with the rules.manage extension and the
+//     (Role.Permissions(), with the rules.manage and retention.manage
+//     extensions and the
 //     audit.reveal_identity = {Auditor, Product Owner} rule), the pure
 //     deny-by-default Authorize decision with its object-scope check, and
 //     the Identity/Principal value types.

@@ -22,6 +22,7 @@ func authzMatrix() map[Role]map[Permission]Scope {
 			PermissionAuditRead:           ScopeOwn,
 			PermissionExportsCreate:       ScopeAll,
 			PermissionSettingsApprove:     ScopeNone,
+			PermissionRetentionManage:     ScopeNone,
 			PermissionAuditRevealIdentity: ScopeNone,
 		},
 		RoleSystemResponsible: {
@@ -36,6 +37,7 @@ func authzMatrix() map[Role]map[Permission]Scope {
 			PermissionAuditRead:           ScopeAssigned,
 			PermissionExportsCreate:       ScopeAssigned,
 			PermissionSettingsApprove:     ScopeNone,
+			PermissionRetentionManage:     ScopeNone,
 			PermissionAuditRevealIdentity: ScopeNone,
 		},
 		RoleAdministrator: {
@@ -50,6 +52,7 @@ func authzMatrix() map[Role]map[Permission]Scope {
 			PermissionAuditRead:           ScopeAll,
 			PermissionExportsCreate:       ScopeAll,
 			PermissionSettingsApprove:     ScopeNone,
+			PermissionRetentionManage:     ScopeAll,  // I6 extension, Admin only (ARCH-007 §9)
 			PermissionAuditRevealIdentity: ScopeNone, // never Admin (ADR-014)
 		},
 		RoleAuditor: {
@@ -64,6 +67,7 @@ func authzMatrix() map[Role]map[Permission]Scope {
 			PermissionAuditRead:           ScopeAll,
 			PermissionExportsCreate:       ScopeAll,
 			PermissionSettingsApprove:     ScopeNone,
+			PermissionRetentionManage:     ScopeNone,
 			PermissionAuditRevealIdentity: ScopeAll,
 		},
 		RoleProductOwner: {
@@ -78,6 +82,7 @@ func authzMatrix() map[Role]map[Permission]Scope {
 			PermissionAuditRead:           ScopeAll,
 			PermissionExportsCreate:       ScopeAll,
 			PermissionSettingsApprove:     ScopeAll,
+			PermissionRetentionManage:     ScopeNone,
 			PermissionAuditRevealIdentity: ScopeAll,
 		},
 	}
@@ -139,6 +144,22 @@ func TestRolePermissionMatrixSpecialRules(t *testing.T) {
 			t.Errorf("rules.manage for %s: granted=%v, want %v", role, granted, role == RoleAdministrator)
 		}
 	}
+	// retention.manage is the I6 extension: Administrator-only, ScopeAll. The
+	// four-eyes deletion approval stays with the Product Owner via
+	// settings.approve (ARCH-007 §9).
+	for _, role := range AllRoles() {
+		got := cell(role.Permissions(), PermissionRetentionManage)
+		want := ScopeNone
+		if role == RoleAdministrator {
+			want = ScopeAll
+		}
+		if got != want {
+			t.Errorf("retention.manage for %s = %q, want %q", role, got, want)
+		}
+	}
+	if cell(RoleProductOwner.Permissions(), PermissionSettingsApprove) != ScopeAll {
+		t.Error("product owner must keep settings.approve (retention four-eyes)")
+	}
 }
 
 // TestRolePermissionsReturnsCopy: mutating the returned map must not affect
@@ -196,11 +217,11 @@ func TestScopeValid(t *testing.T) {
 	}
 }
 
-// TestPermissionValid covers the twelve-permission vocabulary.
+// TestPermissionValid covers the thirteen-permission vocabulary.
 func TestPermissionValid(t *testing.T) {
 	all := AllPermissions()
-	if len(all) != 12 {
-		t.Errorf("len(AllPermissions()) = %d, want 12", len(all))
+	if len(all) != 13 {
+		t.Errorf("len(AllPermissions()) = %d, want 13", len(all))
 	}
 	for _, p := range all {
 		if !p.Valid() {

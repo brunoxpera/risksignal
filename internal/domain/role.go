@@ -72,7 +72,9 @@ func (r Role) Permissions() map[Permission]Scope {
 // listed explicitly (even when empty) so AllRoles × the table is total.
 //
 // §12.2 rules encoded here:
-//   - rules.manage is the only extension and is Administrator-only (§3).
+//   - rules.manage is the only §12.2 extension and is Administrator-only (§3).
+//     retention.manage is the I6 extension (ARCH-007 §9), also
+//     Administrator-only.
 //   - Administrators hold no signals.triage / signals.override — admin never
 //     auto-grants fachliche Entscheidungsrechte (§12.2).
 //   - audit.reveal_identity is Auditor + Product Owner only, never Admin
@@ -107,6 +109,10 @@ var rolePermissions = map[Role]map[Permission]Scope{
 		PermissionAuditRead:        ScopeAll,
 		PermissionExportsCreate:    ScopeAll,
 		// No signals.triage / signals.override; no audit.reveal_identity.
+		// retention.manage (I6): Admin runs the retention lifecycle and legal
+		// holds; the four-eyes deletion approval stays with the PO via
+		// settings.approve (ARCH-007 §9).
+		PermissionRetentionManage: ScopeAll,
 	},
 	RoleAuditor: {
 		PermissionSignalsRead:         ScopeAll,

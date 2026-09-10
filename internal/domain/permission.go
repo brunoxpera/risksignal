@@ -1,13 +1,15 @@
 package domain
 
 // Permission is a named authorisation right (ARCH-005 §3; §12.2 verbatim plus
-// the one flagged extension rules.manage). Permissions are the vocabulary the
+// the flagged extensions rules.manage and, from I6, retention.manage).
+// Permissions are the vocabulary the
 // use-case-level authorisation checks against (ARCH-005 §5); a permission is
 // never implied by another — the role→permission→scope matrix (role.go) is
 // the single source of truth.
 type Permission string
 
-// Allowed Permission values (ARCH-005 §3, §12.2 + the rules.manage extension).
+// Allowed Permission values (ARCH-005 §3, §12.2 + the rules.manage and
+// retention.manage extensions, ARCH-007 §9).
 const (
 	// PermissionSignalsRead reads risk signals.
 	PermissionSignalsRead Permission = "signals.read"
@@ -33,8 +35,14 @@ const (
 	PermissionAuditRead Permission = "audit.read"
 	// PermissionExportsCreate creates and downloads exports.
 	PermissionExportsCreate Permission = "exports.create"
-	// PermissionSettingsApprove approves settings (Product Owner only).
+	// PermissionSettingsApprove approves settings (Product Owner only) —
+	// including the four-eyes approval of a retention dry-run that authorises
+	// the deletion job (ARCH-007 §9).
 	PermissionSettingsApprove Permission = "settings.approve"
+	// PermissionRetentionManage runs the retention lifecycle (dry-run,
+	// pseudonymisation, execute) and manages legal holds (ARCH-007 §9).
+	// Administrator only.
+	PermissionRetentionManage Permission = "retention.manage"
 	// PermissionAuditRevealIdentity is the governed identity-reveal act
 	// (ADR-014) — Auditor and Product Owner only, never Administrator.
 	PermissionAuditRevealIdentity Permission = "audit.reveal_identity"
@@ -54,6 +62,7 @@ func (p Permission) Valid() bool {
 		PermissionAuditRead,
 		PermissionExportsCreate,
 		PermissionSettingsApprove,
+		PermissionRetentionManage,
 		PermissionAuditRevealIdentity:
 		return true
 	}
@@ -74,6 +83,7 @@ func AllPermissions() []Permission {
 		PermissionAuditRead,
 		PermissionExportsCreate,
 		PermissionSettingsApprove,
+		PermissionRetentionManage,
 		PermissionAuditRevealIdentity,
 	}
 }
