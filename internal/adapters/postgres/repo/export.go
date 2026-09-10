@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -82,6 +83,12 @@ func (r *ExportRepo) MarkCompleted(ctx context.Context, tx application.Tx, done 
 	uid, err := toUUID(done.ID)
 	if err != nil {
 		return application.Export{}, application.ValidationError(op, err)
+	}
+	// The row count column is int4; a value it cannot hold is a validation
+	// error, never a silent truncation (the same guard the other narrowings
+	// use).
+	if done.RowCount < 0 || done.RowCount > math.MaxInt32 {
+		return application.Export{}, application.Validationf(op, "row count %d outside [0,%d]", done.RowCount, math.MaxInt32)
 	}
 	row, err := r.q.WithTx(tx).MarkExportCompleted(ctx, gen.MarkExportCompletedParams{
 		StoragePath:   toTextOpt(done.StoragePath),
