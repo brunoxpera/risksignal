@@ -40,11 +40,12 @@ func validInput() application.CreateSignalInput {
 	}
 }
 
-// TestCreateSignalThreeWritesInOneTransaction is the happy path of the
-// ch. 5.1 invariant (ARCH-001 §2): one transaction performs exactly three
-// writes — signal, audit event, outbox event — in that order, with the
-// documented outbox payload and dedupe key, and commits them together.
-func TestCreateSignalThreeWritesInOneTransaction(t *testing.T) {
+// TestCreateSignalAtomicWritesInOneTransaction is the happy path of the
+// ch. 5.1 invariant (ARCH-001 §2): one transaction performs the command's
+// writes — signal, audit event, the SLA clocks of ARCH-004 §4.3, outbox
+// event — in that order, with the documented outbox payload and dedupe key,
+// and commits them together.
+func TestCreateSignalAtomicWritesInOneTransaction(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 
@@ -53,8 +54,9 @@ func TestCreateSignalThreeWritesInOneTransaction(t *testing.T) {
 		t.Fatalf("CreateSignal: %v", err)
 	}
 
-	// One transaction was opened, committed, and recorded the three writes
-	// in order.
+	// One transaction was opened, committed, and recorded the writes in
+	// order: the signal, its audit event, the four P1 SLA clocks of
+	// ARCH-004 §4.3 and the outbox event.
 	tx := h.runner.last()
 	if tx == nil {
 		t.Fatal("no transaction was opened")
@@ -62,9 +64,19 @@ func TestCreateSignalThreeWritesInOneTransaction(t *testing.T) {
 	if !tx.committed || tx.rolledBack {
 		t.Fatalf("transaction committed=%v rolledBack=%v, want committed", tx.committed, tx.rolledBack)
 	}
-	if want := []string{"signal", "audit", "outbox"}; !equalStrings(tx.log, want) {
+	if want := []string{"signal", "audit", "sla.upsert", "sla.upsert", "sla.upsert", "sla.upsert", "outbox"}; !equalStrings(tx.log, want) {
 		t.Fatalf("write order = %v, want %v", tx.log, want)
 	}
+
+	// The command creates every clock the P1 profile defines (ARCH-004
+	// §4.3), started at the commit instant with the ch. 9.4 deadlines and
+	// still open.
+	assertOpenClocks(t, h, res.Signal.ID, map[domain.SLATarget]time.Duration{
+		domain.SLATargetNotification:    5 * time.Minute,
+		domain.SLATargetAcknowledgement: 15 * time.Minute,
+		domain.SLATargetAssessment:      60 * time.Minute,
+		domain.SLATargetDecision:        4 * time.Hour,
+	})
 
 	// Exactly one row per table is observable after the commit.
 	if got := len(h.db.signalRows); got != 1 {
@@ -226,12 +238,14 @@ func TestCreateSignalOutboxFaultRollsBackEverything(t *testing.T) {
 	if !tx.rolledBack {
 		t.Fatal("transaction was not rolled back")
 	}
-	// The three writes were attempted in order before the fault hit.
-	if want := []string{"signal", "audit", "outbox"}; !equalStrings(tx.log, want) {
+	// The writes were attempted in order before the fault hit: the signal,
+	// the audit event, the four P1 clocks, then the failing outbox append.
+	if want := []string{"signal", "audit", "sla.upsert", "sla.upsert", "sla.upsert", "sla.upsert", "outbox"}; !equalStrings(tx.log, want) {
 		t.Fatalf("write order = %v, want %v", tx.log, want)
 	}
 
-	// (c) no row is observable: the rollback discarded the staged writes.
+	// (c) no row is observable: the rollback discarded the staged writes,
+	// including the clocks the create had staged.
 	if got := len(h.db.signalRows); got != 0 {
 		t.Fatalf("signal rows after rollback = %d, want 0", got)
 	}
@@ -240,6 +254,9 @@ func TestCreateSignalOutboxFaultRollsBackEverything(t *testing.T) {
 	}
 	if got := len(h.db.outboxEvents); got != 0 {
 		t.Fatalf("outbox rows after rollback = %d, want 0", got)
+	}
+	if got := len(h.db.slaClocks); got != 0 {
+		t.Fatalf("sla clocks after rollback = %d, want 0 (a rolled-back create leaves no clock)", got)
 	}
 }
 
@@ -255,9 +272,9 @@ func TestCreateSignalAuditFaultRollsBackEverything(t *testing.T) {
 	if err == nil {
 		t.Fatal("CreateSignal succeeded, want the injected audit error")
 	}
-	if len(h.db.signalRows) != 0 || len(h.db.auditEvents) != 0 || len(h.db.outboxEvents) != 0 {
-		t.Fatalf("rows observable after rollback: signals=%d audit=%d outbox=%d, want none",
-			len(h.db.signalRows), len(h.db.auditEvents), len(h.db.outboxEvents))
+	if len(h.db.signalRows) != 0 || len(h.db.auditEvents) != 0 || len(h.db.outboxEvents) != 0 || len(h.db.slaClocks) != 0 {
+		t.Fatalf("rows observable after rollback: signals=%d audit=%d outbox=%d clocks=%d, want none",
+			len(h.db.signalRows), len(h.db.auditEvents), len(h.db.outboxEvents), len(h.db.slaClocks))
 	}
 }
 
@@ -303,6 +320,14 @@ func TestCreateSignalValidationRejectsBadInput(t *testing.T) {
 			}
 		})
 	}
+}
+
+// assertOpenClocks asserts the signal carries exactly the expected open
+// clocks — one per target, started at the fixed clock instant and with the
+// target's deadline — and no other target's clock.
+func assertOpenClocks(t *testing.T, h *harness, signalID string, want map[domain.SLATarget]time.Duration) {
+	t.Helper()
+	assertClocksAt(t, h, signalID, fixedNow, want)
 }
 
 func equalStrings(a, b []string) bool {

@@ -448,6 +448,23 @@ type SlaClockRepo interface {
 	// returned.
 	Upsert(ctx context.Context, tx Tx, clock domain.SlaClock) (domain.SlaClock, error)
 
+	// Get returns one clock by its natural key (signal_id, target) and
+	// whether it exists. A missing clock is (zero, false, nil) — not an
+	// error: the priority-upgrade treatment branches on existence (create
+	// the missing clock, tighten the present one). It runs on the caller's
+	// transaction so the read sees the snapshot the following write acts
+	// on.
+	Get(ctx context.Context, tx Tx, signalID string, target domain.SLATarget) (domain.SlaClock, bool, error)
+
+	// Tighten shortens one open clock's deadline to deadlineAt (the
+	// priority-upgrade write, ARCH-004 §4.3), reporting whether it changed
+	// the clock. It never lengthens: only a clock whose stored deadline is
+	// later than deadlineAt — and that is not fulfilled — is updated, so an
+	// upgrade never loosens a window and a re-run is idempotent. A missing,
+	// fulfilled or already-earlier clock reports changed = false (with a
+	// zero clock) rather than an error.
+	Tighten(ctx context.Context, tx Tx, signalID string, target domain.SLATarget, deadlineAt time.Time) (domain.SlaClock, bool, error)
+
 	// Fulfil marks the target met at the instant, returning the stored
 	// clock and whether the fulfil changed it. Idempotent: an
 	// already-fulfilled clock reports changed = false (a fulfilled clock is

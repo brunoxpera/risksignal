@@ -313,7 +313,10 @@ func newAppService(pool *pgxpool.Pool, clk clock.Clock) *application.Service {
 		Quarantine:      repo.NewQuarantineRepo(q),
 		Components:      repo.NewComponentRepo(q),
 		Inventory:       repo.NewInventoryRepo(q),
-		Clock:           clk,
+		// CreateSignal creates the SLA clocks of the signal's priority
+		// (ARCH-004 §4.3), so the demo chain wires the clock repository.
+		SlaClocks: repo.NewSlaClockRepo(q),
+		Clock:     clk,
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)
 		},

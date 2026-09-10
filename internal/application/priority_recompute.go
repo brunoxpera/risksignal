@@ -279,7 +279,24 @@ func (s *Service) RecomputePriority(ctx context.Context, in RecomputePriorityInp
 		if err != nil {
 			return InfraError(op, err)
 		}
-		return s.appendSignalAudit(ctx, tx, EventTypeSignalPriorityRecomputed, current.ID, actor, correlationID, now, before, after)
+		if err := s.appendSignalAudit(ctx, tx, EventTypeSignalPriorityRecomputed, current.ID, actor, correlationID, now, before, after); err != nil {
+			return err
+		}
+		// The ARCH-004 §4.3 priority-upgrade clock treatment: a recompute that
+		// moves the *effective* priority (a purely-computed signal) syncs the
+		// clocks the new priority defines — it creates the missing ones and
+		// tightens the existing ones whose new deadline is earlier, auditing
+		// every mutation. An overridden signal keeps its effective priority
+		// (only auto_priority moves, §3), so its clocks are left alone; an
+		// identical recompute never reaches this transaction at all
+		// (changed-only persist above), and a downgrade the new priority is not
+		// a superset of simply has no missing target to create.
+		if row.Priority != current.Priority {
+			if err := s.applyUpgradeClocks(ctx, tx, row.ID, row.Priority, actor, correlationID, now); err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		return RecomputePriorityResult{}, err
 	}

@@ -441,7 +441,9 @@ func TestRevertWithoutOverrideIsValidation(t *testing.T) {
 	}
 }
 
-// seedClock places one committed SLA clock on the fake store.
+// seedClock places one committed SLA clock on the fake store. It upserts by
+// natural key, so a target the CreateSignal path already created is replaced
+// rather than duplicated — the same natural-key semantics as the repository.
 func seedClock(h *harness, signalID string, target domain.SLATarget, deadline time.Time) domain.SlaClock {
 	c := domain.SlaClock{
 		ID:         "clock-" + string(target),
@@ -450,7 +452,7 @@ func seedClock(h *harness, signalID string, target domain.SLATarget, deadline ti
 		StartedAt:  fixedNow,
 		DeadlineAt: deadline,
 	}
-	h.db.slaClocks = append(h.db.slaClocks, c)
+	h.db.applySlaClock(c)
 	return c
 }
 
@@ -682,26 +684,42 @@ func TestAcknowledgeFulfilsAcknowledgementClock(t *testing.T) {
 	if !clock.Fulfilled() || !clock.FulfilledAt.Equal(fixedNow) {
 		t.Fatalf("acknowledgement clock = %+v, want fulfilled at %v", clock, fixedNow)
 	}
-	// Only the seeded clock exists: the fulfil never creates one.
-	if len(h.db.slaClocks) != 1 {
-		t.Fatalf("sla clocks = %d, want exactly the 1 seeded clock", len(h.db.slaClocks))
+	// The create path defines the four P1 clocks; the command fulfils only
+	// the acknowledgement one and fabricates none.
+	if got := len(h.db.slaClocks); got != 4 {
+		t.Fatalf("sla clocks = %d, want the 4 P1 clocks the create defined", got)
+	}
+	for _, target := range []domain.SLATarget{
+		domain.SLATargetNotification, domain.SLATargetAssessment, domain.SLATargetDecision,
+	} {
+		if c, _ := h.db.slaClockByKey(sig.ID, target); c.Fulfilled() {
+			t.Fatalf("%s clock = %+v, want unfulfilled (only acknowledgement is met)", target, c)
+		}
 	}
 }
 
 // TestAcknowledgeWithoutClockIsNoOp proves a missing acknowledgement clock is
-// a no-op: the command succeeds and creates no clock (e.g. a priority that
-// defines no acknowledgement target).
+// a no-op: the command succeeds and creates no clock. A P4 signal defines no
+// acknowledgement target (ch. 9.4), so its only clock is the assessment one.
 func TestAcknowledgeWithoutClockIsNoOp(t *testing.T) {
 	h := newHarness(t)
-	sig := seedSignal(t, h)
+	sig := seedSignalWithFactors(t, h, p4Factors())
+	if sig.Priority != domain.PriorityP4 {
+		t.Fatalf("seeded priority = %s, want P4", sig.Priority)
+	}
 
 	if _, err := h.svc.AcknowledgeSignal(context.Background(), application.AcknowledgeSignalInput{
 		SignalID: sig.ID, ExpectedVersion: sig.Version, Actor: systemActor("analyst"),
 	}); err != nil {
 		t.Fatalf("AcknowledgeSignal: %v", err)
 	}
-	if len(h.db.slaClocks) != 0 {
-		t.Fatalf("sla clocks = %d, want none created by the fulfil", len(h.db.slaClocks))
+	// Only the P4 assessment clock exists; the fulfil created and fulfilled
+	// nothing.
+	if got := len(h.db.slaClocks); got != 1 {
+		t.Fatalf("sla clocks = %d, want only the P4 assessment clock", got)
+	}
+	if c, ok := h.db.slaClockByKey(sig.ID, domain.SLATargetAssessment); !ok || c.Fulfilled() {
+		t.Fatalf("assessment clock = %+v (ok=%v), want present and unfulfilled", c, ok)
 	}
 }
 

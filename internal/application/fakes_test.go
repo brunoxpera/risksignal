@@ -1267,8 +1267,42 @@ func (f *fakeSlaClockRepo) Upsert(ctx context.Context, tx application.Tx, clock 
 	if clock.ID == "" {
 		clock.ID = uuid.New()
 	}
-	f.db.applySlaClock(clock)
+	// The write stages on the transaction and publishes on commit, like every
+	// other fake write: a rolled-back create discards the clock with it.
+	ftx.staged.slaClocks = append(ftx.staged.slaClocks, clock)
 	return clock, nil
+}
+
+// Get resolves one clock by its natural key (staged first, then committed),
+// mirroring the adapter's natural-key read. A missing clock is (zero, false,
+// nil).
+func (f *fakeSlaClockRepo) Get(ctx context.Context, tx application.Tx, signalID string, target domain.SLATarget) (domain.SlaClock, bool, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.SlaClock{}, false, err
+	}
+	ftx.record("sla.get")
+	clock, ok := f.resolve(ftx, signalID, target)
+	return clock, ok, nil
+}
+
+// Tighten mirrors the adapter's guarded statement: only an open clock whose
+// stored deadline is later than deadlineAt is updated (never lengthened); a
+// missing, fulfilled or already-earlier clock reports changed = false.
+func (f *fakeSlaClockRepo) Tighten(ctx context.Context, tx application.Tx, signalID string, target domain.SLATarget, deadlineAt time.Time) (domain.SlaClock, bool, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.SlaClock{}, false, err
+	}
+	ftx.record("sla.tighten")
+	base, ok := f.resolve(ftx, signalID, target)
+	if !ok || base.Fulfilled() || !deadlineAt.Before(base.DeadlineAt) {
+		return domain.SlaClock{}, false, nil
+	}
+	next := base
+	next.DeadlineAt = deadlineAt
+	ftx.staged.slaClocks = append(ftx.staged.slaClocks, next)
+	return next, true, nil
 }
 
 func (f *fakeSlaClockRepo) Fulfil(ctx context.Context, tx application.Tx, signalID string, target domain.SLATarget, at time.Time) (domain.SlaClock, bool, error) {

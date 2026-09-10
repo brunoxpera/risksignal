@@ -224,6 +224,10 @@ func TestRecomputePriorityNoOpOnIdenticalInputs(t *testing.T) {
 		Status: domain.SignalStatusNew, Version: 3, RuleVersion: "p0000000001", Factors: factors,
 	}
 	seedStoredSignal(h, sig)
+	// Seed the signal's clocks so the no-op recompute can be seen to leave
+	// them untouched (an unchanged priority drives no clock treatment).
+	seedClock(h, sig.ID, domain.SLATargetAcknowledgement, fixedNow.Add(15*time.Minute))
+	seedClock(h, sig.ID, domain.SLATargetAssessment, fixedNow.Add(60*time.Minute))
 	h.factorSource.rebuilds[sig.ID] = application.PriorityFactorRebuild{CVEID: testCveID, Factors: factors}
 
 	res, err := h.svc.RecomputePriority(ctx, application.RecomputePriorityInput{SignalID: sig.ID, Actor: systemActor("recompute-worker")})
@@ -241,6 +245,10 @@ func TestRecomputePriorityNoOpOnIdenticalInputs(t *testing.T) {
 	}
 	if len(h.db.auditEvents) != 0 || len(h.db.outboxEvents) != 0 {
 		t.Fatalf("no-op recompute wrote audit=%d outbox=%d, want 0/0", len(h.db.auditEvents), len(h.db.outboxEvents))
+	}
+	// The unchanged priority leaves the clocks exactly as they were.
+	if got := len(h.db.slaClocks); got != 2 {
+		t.Fatalf("no-op recompute changed the clocks to %d, want the 2 seeded", got)
 	}
 	row, ok := h.db.signalRowByID(sig.ID)
 	if !ok || row.sig.Version != 3 {
@@ -262,6 +270,12 @@ func TestRecomputePriorityPersistsOnChange(t *testing.T) {
 		Status: domain.SignalStatusNew, Version: 1, RuleVersion: "p0000000001", Factors: p1Factors(),
 	}
 	seedStoredSignal(h, sig)
+	// The P1 signal carries its four clocks; the downgrade to P3 has no
+	// missing P3 target and, never lengthening, tightens none of them.
+	seedClock(h, sig.ID, domain.SLATargetNotification, fixedNow.Add(5*time.Minute))
+	seedClock(h, sig.ID, domain.SLATargetAcknowledgement, fixedNow.Add(15*time.Minute))
+	seedClock(h, sig.ID, domain.SLATargetAssessment, fixedNow.Add(60*time.Minute))
+	seedClock(h, sig.ID, domain.SLATargetDecision, fixedNow.Add(4*time.Hour))
 	h.factorSource.rebuilds[sig.ID] = application.PriorityFactorRebuild{CVEID: testCveID, Factors: p3Factors()}
 
 	res, err := h.svc.RecomputePriority(ctx, application.RecomputePriorityInput{SignalID: sig.ID, Actor: systemActor("recompute-worker")})
@@ -271,9 +285,15 @@ func TestRecomputePriorityPersistsOnChange(t *testing.T) {
 	if !res.Changed || res.Priority != domain.PriorityP3 {
 		t.Fatalf("recompute result = %+v, want Changed P3", res)
 	}
+	// The recompute write + its audit, then the clock sync reads and (no-op)
+	// tightens the two P3 targets the signal already holds.
 	tx := h.runner.last()
-	if want := []string{"signal.recompute", "audit"}; !equalStrings(tx.log, want) {
+	if want := []string{"signal.recompute", "audit", "sla.get", "sla.tighten", "sla.get", "sla.tighten"}; !equalStrings(tx.log, want) {
 		t.Fatalf("write order = %v, want %v", tx.log, want)
+	}
+	// The downgrade never lengthens a clock: all four keep their deadlines.
+	if got := len(h.db.slaClocks); got != 4 {
+		t.Fatalf("sla clocks = %d, want the 4 unchanged", got)
 	}
 	row, _ := h.db.signalRowByID(sig.ID)
 	if row.sig.Priority != domain.PriorityP3 || row.sig.Version != 2 {
@@ -314,6 +334,55 @@ func TestRecomputePriorityPersistsOnChange(t *testing.T) {
 	if orow.sig.AutoPriority == nil || *orow.sig.AutoPriority != domain.PriorityP3 {
 		t.Fatalf("auto_priority = %v, want the recomputed P3", orow.sig.AutoPriority)
 	}
+}
+
+// TestRecomputePriorityUpgradeSyncsClocks proves a recompute that upgrades
+// the *effective* priority applies the ARCH-004 §4.3 clock treatment on the
+// recompute's transaction: it creates the clocks the new priority defines and
+// the signal lacks, and tightens the pre-existing ones to the earlier
+// deadlines — keeping started_at, with every mutation audited.
+func TestRecomputePriorityUpgradeSyncsClocks(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	seedRulesetV1(h)
+
+	sig := domain.RiskSignal{
+		ID: "sig-upgrade", MatchID: testMatchID, Priority: domain.PriorityP3,
+		Status: domain.SignalStatusNew, Version: 1, RuleVersion: "p0000000001", Factors: p3Factors(),
+	}
+	seedStoredSignal(h, sig)
+	// The P3 signal carries its two clocks (ch. 9.4); the recompute will
+	// upgrade it to P1 on the rebuilt factors.
+	seedClock(h, sig.ID, domain.SLATargetAcknowledgement, fixedNow.Add(24*time.Hour))
+	seedClock(h, sig.ID, domain.SLATargetAssessment, fixedNow.Add(72*time.Hour))
+	h.factorSource.rebuilds[sig.ID] = application.PriorityFactorRebuild{CVEID: testCveID, Factors: p1Factors()}
+
+	res, err := h.svc.RecomputePriority(ctx, application.RecomputePriorityInput{SignalID: sig.ID, Actor: systemActor("recompute-worker")})
+	if err != nil {
+		t.Fatalf("RecomputePriority: %v", err)
+	}
+	if !res.Changed || res.Priority != domain.PriorityP1 {
+		t.Fatalf("recompute result = %+v, want Changed P1", res)
+	}
+
+	p1 := p1Durations()
+	// The missing P1 clocks are created at the recompute instant …
+	for _, created := range []domain.SLATarget{domain.SLATargetNotification, domain.SLATargetDecision} {
+		c, ok := h.db.slaClockByKey(sig.ID, created)
+		if !ok || !c.StartedAt.Equal(fixedNow) || !c.DeadlineAt.Equal(fixedNow.Add(p1[created])) {
+			t.Fatalf("%s clock = %+v (ok=%v), want created at %v due %v", created, c, ok, fixedNow, fixedNow.Add(p1[created]))
+		}
+	}
+	// … the pre-existing P1 targets are tightened, keeping started_at.
+	for _, tightened := range []domain.SLATarget{domain.SLATargetAcknowledgement, domain.SLATargetAssessment} {
+		c, ok := h.db.slaClockByKey(sig.ID, tightened)
+		if !ok || !c.StartedAt.Equal(fixedNow) || !c.DeadlineAt.Equal(fixedNow.Add(p1[tightened])) {
+			t.Fatalf("%s clock = %+v (ok=%v), want started %v tightened due %v", tightened, c, ok, fixedNow, fixedNow.Add(p1[tightened]))
+		}
+	}
+	// Two creations (notification, decision) and two tightenings (ack,
+	// assessment), each audited on the recompute's transaction.
+	assertClockAudits(t, h, 2, 2)
 }
 
 // TestRecomputePriorityClosedSignalProposesReopenOnce proves a closed signal

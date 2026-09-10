@@ -46,6 +46,13 @@ const (
 	EventTypeSignalSLAPaused = "signal.sla_paused"
 	// EventTypeSignalSLAResumed records an SLA clock resume.
 	EventTypeSignalSLAResumed = "signal.sla_resumed"
+	// EventTypeSignalSLAClockCreated records a clock the priority-upgrade
+	// treatment created (a missing stricter clock, ARCH-004 §4.3).
+	EventTypeSignalSLAClockCreated = "signal.sla_clock_created"
+	// EventTypeSignalSLAClockTightened records a clock the priority-upgrade
+	// treatment tightened — the audit carries the old→new deadline so the
+	// already-elapsed processing time stays visible (ch. 9.4, ARCH-004 §4.3).
+	EventTypeSignalSLAClockTightened = "signal.sla_clock_tightened"
 )
 
 // TransitionSignalInput is the TransitionSignal command (ARCH-004 §2): move a
@@ -477,6 +484,15 @@ func (s *Service) OverridePriority(ctx context.Context, in OverridePriorityInput
 		if err := s.appendSignalAudit(ctx, tx, EventTypeSignalPriorityOverridden, row.ID, actor, correlationID, now, before, after); err != nil {
 			return err
 		}
+		// The ARCH-004 §4.3 priority-upgrade clock treatment: create the
+		// clocks the new priority defines but the signal lacks, and tighten
+		// the existing ones whose new deadline is earlier — audited per
+		// mutation. It runs on this transaction, so a rolled-back override
+		// rolls its clock treatment back with it. A downgrade (P1→P3) only
+		// ever creates-or-tightens too, so it never lengthens a deadline.
+		if err := s.applyUpgradeClocks(ctx, tx, row.ID, row.Priority, actor, correlationID, now); err != nil {
+			return err
+		}
 		return s.appendSignalOutbox(ctx, tx, EventTypeSignalPriorityOverridden, row.ID, correlationID, now, signalCommandPayload{
 			Version:      row.Version,
 			Priority:     string(row.Priority),
@@ -847,6 +863,118 @@ func (s *Service) resetClocks(ctx context.Context, tx Tx, signal domain.RiskSign
 		}
 	}
 	return nil
+}
+
+// createClocks creates every SLA clock the injected profile defines at the
+// signal's priority (ARCH-004 §4.3 Create): started_at = now, deadline_at =
+// now + duration. It is the clock treatment of the CreateSignal commit — run
+// on the very transaction as the signal, its audit event and its outbox
+// event, so a rolled-back create leaves no clock behind — and it is the other
+// half of the lifecycle DEV-076's fulfil/reset act on. Only targets with a
+// defined duration are created (P3/P4 get no notification clock, P3/P4 no
+// decision clock); the natural-key upsert keeps a re-run idempotent. The
+// signal.created audit event documents the creation, so no per-clock audit
+// row is written on this path — the create command's own audit event is its
+// evidence, matching the DEV-076 fulfil/reset treatment that rides its
+// transition's audit event.
+func (s *Service) createClocks(ctx context.Context, tx Tx, signalID string, priority domain.Priority, now time.Time) error {
+	const op = "sla_clocks.create"
+	for _, target := range s.slaProfile.Targets(priority) {
+		clock, err := domain.NewSlaClock(uuid.New(), signalID, target, priority, s.slaProfile, now)
+		if err != nil {
+			return InfraError(op, err)
+		}
+		if _, err := s.slaClocks.Upsert(ctx, tx, clock); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyUpgradeClocks applies the ARCH-004 §4.3 clock treatment of a priority
+// change to `priority`: the manual OverridePriority path drives it today and
+// RecomputePriority reuses it when a recompute-driven change must tighten
+// clocks. For every target the injected profile defines at the new priority:
+//
+//   - a target without a clock is created fresh from the upgrade instant
+//     (Upsert at now);
+//   - a target whose existing clock would shorten to an earlier deadline
+//     (now + duration(new_P, target) < the stored deadline_at) is tightened
+//     to the new value, keeping started_at — the already-elapsed processing
+//     time stays visible (ch. 9.4).
+//
+// A target the new priority does not define is left untouched, and a deadline
+// that is not earlier is left untouched: an upgrade never lengthens a window.
+// Every mutation writes one audit row on the caller's transaction — the
+// create its new deadline, the tighten its old→new deadline — so a rolled-back
+// command rolls its clock treatment back with it. The treatment is idempotent:
+// a re-run finds the created clock (whose deadline is now later than the
+// upgrade instant's target) or the already-tightened deadline, and writes
+// nothing more.
+func (s *Service) applyUpgradeClocks(ctx context.Context, tx Tx, signalID string, priority domain.Priority, actor Actor, correlationID string, now time.Time) error {
+	const op = "sla_clocks.upgrade"
+	for _, target := range s.slaProfile.Targets(priority) {
+		existing, ok, err := s.slaClocks.Get(ctx, tx, signalID, target)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			created, err := domain.NewSlaClock(uuid.New(), signalID, target, priority, s.slaProfile, now)
+			if err != nil {
+				return InfraError(op, err)
+			}
+			stored, err := s.slaClocks.Upsert(ctx, tx, created)
+			if err != nil {
+				return err
+			}
+			after, err := slaClockMutationSnapshot(stored, time.Time{})
+			if err != nil {
+				return InfraError(op, err)
+			}
+			if err := s.appendSignalAudit(ctx, tx, EventTypeSignalSLAClockCreated, signalID, actor, correlationID, now, nil, after); err != nil {
+				return err
+			}
+			continue
+		}
+		newDeadline := now.Add(s.slaProfile.Duration(priority, target))
+		tightened, changed, err := s.slaClocks.Tighten(ctx, tx, signalID, target, newDeadline)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			continue // fulfilled, or the stored deadline is already at least as early
+		}
+		after, err := slaClockMutationSnapshot(tightened, existing.DeadlineAt)
+		if err != nil {
+			return InfraError(op, err)
+		}
+		if err := s.appendSignalAudit(ctx, tx, EventTypeSignalSLAClockTightened, signalID, actor, correlationID, now, nil, after); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// slaClockMutationSnapshot is the minimised audit snapshot of one SLA clock
+// mutation of the priority-upgrade treatment (ch. 13.5): the target, the
+// resulting started_at/deadline_at and — on a tighten — the replaced (old)
+// deadline. Identities and timestamps only, never free text.
+func slaClockMutationSnapshot(c domain.SlaClock, oldDeadline time.Time) (json.RawMessage, error) {
+	snap := struct {
+		Target      string     `json:"target"`
+		StartedAt   time.Time  `json:"started_at"`
+		DeadlineAt  time.Time  `json:"deadline_at"`
+		OldDeadline *time.Time `json:"old_deadline_at,omitempty"`
+	}{
+		Target:     string(c.Target),
+		StartedAt:  c.StartedAt,
+		DeadlineAt: c.DeadlineAt,
+	}
+	if !oldDeadline.IsZero() {
+		od := oldDeadline
+		snap.OldDeadline = &od
+	}
+	return json.Marshal(snap)
 }
 
 // signalActor resolves the audit principal of a triage/SLA command: an empty

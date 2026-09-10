@@ -187,7 +187,17 @@ func (s *Service) CreateSignal(ctx context.Context, in CreateSignalInput) (Creat
 			return err
 		}
 
-		// 3) outbox event (same transaction; the §5 fault seam)
+		// 3) SLA clock creation (ARCH-004 §4.3 Create): every clock the
+		// injected profile defines at the signal's priority, started at this
+		// commit instant. It runs on the same transaction as the signal, the
+		// audit event and the outbox event, so a rolled-back create leaves no
+		// clock behind. Only defined targets are created (P3/P4 get no
+		// notification clock, P3/P4 no decision clock).
+		if err := s.createClocks(ctx, tx, created.ID, created.Priority, now); err != nil {
+			return err
+		}
+
+		// 4) outbox event (same transaction; the §5 fault seam)
 		payload, err := json.Marshal(signalCreatedPayload{
 			EventID:       uuid.New(),
 			Type:          EventTypeSignalCreated,
