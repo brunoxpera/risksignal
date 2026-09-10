@@ -181,12 +181,25 @@ func (s *Service) EnqueueManualSourceFetch(ctx context.Context, in EnqueueManual
 }
 
 // appendSourceFetchJob appends one source.fetch job on the caller's
-// transaction and reports whether the append inserted a row. A job that is
-// already in the outbox for the dedupe key (queued, claimed or terminal —
-// the UQ spans the row's whole lifetime) is a conflict and a no-op here,
-// never an error: the outbox is the idempotency backstop of the scheduler
-// and the manual trigger alike.
+// transaction and reports whether the append inserted a row. The scheduler
+// scan appends every due job of one cycle on ONE transaction, so a job that
+// is already in the outbox for the dedupe key (queued, claimed or terminal —
+// the UQ spans the row's whole lifetime) must never reach the INSERT: the
+// unique violation would abort the whole transaction and lose the jobs of
+// the same scan, not just the colliding one (DEV-068). The existence
+// pre-check therefore runs on the same transaction — it sees the scan's own
+// uncommitted appends too — and an already-queued job is a no-op here, never
+// an error: the outbox is the idempotency backstop of the scheduler and the
+// manual trigger alike. The conflict branch stays as a defensive backstop for
+// a concurrent enqueue that won the race between the check and the append.
 func (s *Service) appendSourceFetchJob(ctx context.Context, tx Tx, payload SourceFetchJobPayload, dedupeKey string, availableAt, createdAt time.Time) (bool, error) {
+	exists, err := s.outbox.ExistsDedupeKey(ctx, tx, dedupeKey)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		return false, nil // the job is already in the outbox for this key
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return false, InfraError("enqueue_source_fetch", err)
@@ -199,7 +212,7 @@ func (s *Service) appendSourceFetchJob(ctx context.Context, tx Tx, payload Sourc
 		CreatedAt:   createdAt,
 	}); err != nil {
 		if kind, ok := ErrorKindOf(err); ok && kind == KindConflict {
-			return false, nil // the job is already in the outbox for this key
+			return false, nil // a concurrent enqueue won the race for this key
 		}
 		return false, err
 	}
