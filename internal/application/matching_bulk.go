@@ -167,6 +167,15 @@ type MatchingCore interface {
 // provides the core. The runner is safe for use from one goroutine (the
 // relay dispatches sequentially); the data ports it reads are
 // pool-scoped.
+// PriorityRecomputeFanIn is the ARCH-004 §5 fan-in seam of a
+// matching.recompute run: given the vulnerability row ids of the batch the run
+// processed, it enqueues a per-signal priority.recompute job for every
+// affected signal (the application Service's
+// EnqueuePriorityRecomputeForVulnerabilities). It is injected after
+// construction (SetPriorityRecomputeFanIn) so the existing run wiring is
+// untouched; a nil fan-in enqueues nothing.
+type PriorityRecomputeFanIn func(ctx context.Context, vulnerabilityIDs []string) (int, error)
+
 type MatchingRunner struct {
 	core       MatchingCore
 	rules      MatchingRuleRepo
@@ -174,6 +183,9 @@ type MatchingRunner struct {
 	vulns      MatchingVulnerabilityRepo
 	clk        Clock
 	logger     *slog.Logger
+	// fanIn is the optional priority.recompute fan-in of RecomputeMatching
+	// (ARCH-004 §5); nil disables it (the run then only commits matches).
+	fanIn PriorityRecomputeFanIn
 }
 
 // NewMatchingRunner assembles the bulk matching runner. core, rules,
@@ -207,6 +219,13 @@ func NewMatchingRunner(core MatchingCore, rules MatchingRuleRepo, components Mat
 		clk:        clk,
 		logger:     logger,
 	}, nil
+}
+
+// SetPriorityRecomputeFanIn installs the priority.recompute fan-in of
+// RecomputeMatching (ARCH-004 §5). It is called once at the composition root
+// after NewMatchingRunner; a nil fn leaves the run without a fan-in.
+func (r *MatchingRunner) SetPriorityRecomputeFanIn(fn PriorityRecomputeFanIn) {
+	r.fanIn = fn
 }
 
 // RebuildMatchingInput is the matching.rebuild job payload as the runner

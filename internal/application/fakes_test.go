@@ -1216,6 +1216,70 @@ func (f *fakeSignalTriageRepo) RecomputePriority(ctx context.Context, tx applica
 	return next, nil
 }
 
+// MarkEscalated mirrors the DEV-073 adapter's set-once write (ARCH-004 §4.4):
+// the first call on a non-escalated signal stamps EscalatedAt and reports
+// true; a later call (already escalated, or a missing row) reports false and
+// stages nothing.
+func (f *fakeSignalTriageRepo) MarkEscalated(ctx context.Context, tx application.Tx, id string, at time.Time) (bool, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return false, err
+	}
+	ftx.record("signal.escalate")
+	base, ok := f.resolve(ftx, id)
+	if !ok || !base.EscalatedAt.IsZero() {
+		return false, nil
+	}
+	next := base
+	next.EscalatedAt = at
+	next.Version = base.Version + 1
+	var closedAt *time.Time
+	if row, ok := f.db.signalRowByID(id); ok {
+		closedAt = row.closedAt
+	}
+	ftx.staged.signalMutations = append(ftx.staged.signalMutations, storedSignal{sig: next, closedAt: closedAt})
+	return true, nil
+}
+
+// OpenRecomputeTargets returns the committed open (non-closed) signals' ids
+// and stored factor-sets, ascending by id — the ruleset-publish fan-in read.
+func (f *fakeSignalTriageRepo) OpenRecomputeTargets(ctx context.Context) ([]application.PriorityRecomputeTarget, error) {
+	var out []application.PriorityRecomputeTarget
+	for _, row := range f.db.signalRows {
+		if row.sig.Status.IsClosed() {
+			continue
+		}
+		out = append(out, application.PriorityRecomputeTarget{SignalID: row.sig.ID, Factors: row.sig.Factors})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].SignalID < out[j].SignalID })
+	return out, nil
+}
+
+// RecomputeTargetsByVulnerabilityIDs returns the ids and stored factor-sets of
+// the committed signals whose match references one of the given vulnerability
+// row ids, ascending by id — the matching.recompute fan-in read.
+func (f *fakeSignalTriageRepo) RecomputeTargetsByVulnerabilityIDs(ctx context.Context, vulnerabilityIDs []string) ([]application.PriorityRecomputeTarget, error) {
+	vulnSet := make(map[string]struct{}, len(vulnerabilityIDs))
+	for _, id := range vulnerabilityIDs {
+		vulnSet[id] = struct{}{}
+	}
+	matchSet := make(map[string]struct{})
+	for _, m := range f.db.matchRows {
+		if _, ok := vulnSet[m.rec.VulnerabilityID]; ok {
+			matchSet[m.id] = struct{}{}
+		}
+	}
+	var out []application.PriorityRecomputeTarget
+	for _, row := range f.db.signalRows {
+		if _, ok := matchSet[row.sig.MatchID]; !ok {
+			continue
+		}
+		out = append(out, application.PriorityRecomputeTarget{SignalID: row.sig.ID, Factors: row.sig.Factors})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].SignalID < out[j].SignalID })
+	return out, nil
+}
+
 // fakeCommentRepo is the in-memory application.CommentRepo: append-only, the
 // committed timeline read back in insertion order.
 type fakeCommentRepo struct{ db *fakeDB }
@@ -1247,7 +1311,10 @@ func (f *fakeCommentRepo) ListBySignal(ctx context.Context, signalID string) ([]
 // fakeSlaClockRepo is the in-memory application.SlaClockRepo. Its guarded
 // writes apply the domain preconditions (domain.SlaClock.Pause/Resume/…)
 // exactly as the DEV-073 SQL guards do and stage the updated clock.
-type fakeSlaClockRepo struct{ db *fakeDB }
+type fakeSlaClockRepo struct {
+	db  *fakeDB
+	clk clock.Clock // the injected clock the Due breach scan reads (nil → fixedNow)
+}
 
 func (f *fakeSlaClockRepo) resolve(ftx *fakeTx, signalID string, target domain.SLATarget) (domain.SlaClock, bool) {
 	for i := len(ftx.staged.slaClocks) - 1; i >= 0; i-- {
@@ -1359,9 +1426,13 @@ func (f *fakeSlaClockRepo) guardedClock(tx application.Tx, op, signalID string, 
 }
 
 func (f *fakeSlaClockRepo) Due(ctx context.Context) ([]domain.SlaClock, error) {
+	now := fixedNow
+	if f.clk != nil {
+		now = f.clk.Now()
+	}
 	var out []domain.SlaClock
 	for _, c := range f.db.slaClocks {
-		if c.Overdue(fixedNow) {
+		if c.Overdue(now) {
 			out = append(out, c)
 		}
 	}
@@ -1399,7 +1470,11 @@ type harness struct {
 	svc *application.Service
 }
 
-func newHarness(t *testing.T) *harness {
+// harnessOption customises the service dependencies a harness wires (e.g. a
+// scaled SLA reminder cadence for the accelerated SLA test).
+type harnessOption func(*application.ServiceDeps)
+
+func newHarness(t *testing.T, opts ...harnessOption) *harness {
 	t.Helper()
 	h := &harness{
 		db:    &fakeDB{},
@@ -1419,10 +1494,10 @@ func newHarness(t *testing.T) *harness {
 	h.inventory = &fakeInventoryWriter{db: h.db}
 	h.signalTriage = &fakeSignalTriageRepo{db: h.db}
 	h.comments = &fakeCommentRepo{db: h.db}
-	h.slaClocks = &fakeSlaClockRepo{db: h.db}
+	h.slaClocks = &fakeSlaClockRepo{db: h.db, clk: h.clock}
 	h.priorityRules = &fakePriorityRuleRepo{db: h.db}
 	h.factorSource = &fakePriorityFactorRepo{rebuilds: map[string]application.PriorityFactorRebuild{}}
-	h.svc = application.NewService(application.ServiceDeps{
+	deps := application.ServiceDeps{
 		Signals:         h.signals,
 		Audit:           h.audit,
 		Outbox:          h.outbox,
@@ -1441,7 +1516,11 @@ func newHarness(t *testing.T) *harness {
 		FactorSource:    h.factorSource,
 		Clock:           h.clock,
 		RunTx:           h.runner.Run,
-	})
+	}
+	for _, opt := range opts {
+		opt(&deps)
+	}
+	h.svc = application.NewService(deps)
 	return h
 }
 

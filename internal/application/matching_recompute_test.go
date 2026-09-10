@@ -157,6 +157,61 @@ func TestRecomputeDedupeKeyContract(t *testing.T) {
 	}
 }
 
+// TestRecomputeEnqueuesPriorityRecomputeForAffectedSignals proves the ARCH-004
+// §5 fan-in: after the batch's matches are committed the run hands the
+// batch's vulnerability row ids to the injected priority.recompute fan-in, so
+// the affected signals are enqueued for a targeted recompute.
+func TestRecomputeEnqueuesPriorityRecomputeForAffectedSignals(t *testing.T) {
+	env := newRecomputeEnv(t, &fakeRuleRepo{}, []application.Component{
+		rebuildReadComponent("comp-1", "acme", "widget", "1.5.0", domain.VersionSchemeSemver),
+	}, []application.VulnerabilityMatch{
+		{ID: "v-1", CVEID: "CVE-2026-0001", Statements: []matching.AffectedProduct{rebuildWindowStatement("acme", "widget")}},
+		{ID: "v-2", CVEID: "CVE-2026-0002", Statements: []matching.AffectedProduct{rebuildWindowStatement("acme", "nope")}},
+	})
+
+	var got []string
+	calls := 0
+	env.run.SetPriorityRecomputeFanIn(func(_ context.Context, ids []string) (int, error) {
+		calls++
+		got = append([]string(nil), ids...)
+		return len(ids), nil
+	})
+
+	_, err := env.run.RecomputeMatching(context.Background(), application.RecomputeMatchingInput{
+		VulnerabilityIDs: []string{"v-1", "v-2"},
+		RuleVersion:      "a0000000000d0000000000",
+	})
+	if err != nil {
+		t.Fatalf("RecomputeMatching: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("fan-in calls = %d, want 1", calls)
+	}
+	if len(got) != 2 || got[0] != "v-1" || got[1] != "v-2" {
+		t.Fatalf("fan-in ids = %v, want the batch's [v-1 v-2] (sorted, deduped)", got)
+	}
+}
+
+// TestRecomputeFanInNoOpWithoutWiring proves the fan-in is optional: a run
+// without an injected fan-in still commits its matches and reports success.
+func TestRecomputeFanInNoOpWithoutWiring(t *testing.T) {
+	env := newRecomputeEnv(t, &fakeRuleRepo{}, []application.Component{
+		rebuildReadComponent("comp-1", "acme", "widget", "1.5.0", domain.VersionSchemeSemver),
+	}, []application.VulnerabilityMatch{
+		{ID: "v-1", CVEID: "CVE-2026-0001", Statements: []matching.AffectedProduct{rebuildWindowStatement("acme", "widget")}},
+	})
+	res, err := env.run.RecomputeMatching(context.Background(), application.RecomputeMatchingInput{
+		VulnerabilityIDs: []string{"v-1"},
+		RuleVersion:      "a0000000000d0000000000",
+	})
+	if err != nil {
+		t.Fatalf("RecomputeMatching: %v", err)
+	}
+	if res.Candidates != 1 {
+		t.Fatalf("candidates = %d, want 1", res.Candidates)
+	}
+}
+
 // TestRecomputeRejectsOversizedAndEmptyBatches: a recompute job whose
 // batch exceeds the ARCH-003 §5 guide of 500 ids, an empty batch or a
 // payload without a rule version is a permanent validation failure — the

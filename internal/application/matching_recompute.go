@@ -77,22 +77,45 @@ func (r *MatchingRunner) RecomputeMatching(ctx context.Context, in RecomputeMatc
 		return RecomputeMatchingResult{}, nil // no rows, no work
 	}
 
+	res := RecomputeMatchingResult{Vulnerabilities: len(rows)}
 	candidates, err := r.recomputeCandidates(ctx, rows, st, now)
 	if err != nil {
 		return RecomputeMatchingResult{}, err
 	}
-	if len(candidates) == 0 {
-		return RecomputeMatchingResult{Vulnerabilities: len(rows)}, nil
+	if len(candidates) > 0 {
+		run, err := r.core.RunMatching(ctx, candidates)
+		if err != nil {
+			return RecomputeMatchingResult{}, err
+		}
+		res.Candidates = run.Candidates
+		res.Transactions = run.Transactions
 	}
-	run, err := r.core.RunMatching(ctx, candidates)
-	if err != nil {
+	// The ARCH-004 §5 fan-in: after the batch's matches are committed, enqueue
+	// a per-signal priority.recompute for the affected signals. It runs even
+	// when the batch resolved no new candidate — the evidence change may still
+	// move an existing signal's factors (KEV/CVSS/EPSS). A no-op without a
+	// wired fan-in.
+	if err := r.runPriorityRecomputeFanIn(ctx, rows); err != nil {
 		return RecomputeMatchingResult{}, err
 	}
-	return RecomputeMatchingResult{
-		Vulnerabilities: len(rows),
-		Candidates:      run.Candidates,
-		Transactions:    run.Transactions,
-	}, nil
+	return res, nil
+}
+
+// runPriorityRecomputeFanIn hands the batch's vulnerability row ids to the
+// injected priority.recompute fan-in (ARCH-004 §5). A nil fan-in (no enqueue
+// side wired) is a no-op; an enqueue failure is surfaced so the job is
+// retried (the run's committed matches make the redelivery idempotent and the
+// dedupe-checked enqueue appends nothing twice).
+func (r *MatchingRunner) runPriorityRecomputeFanIn(ctx context.Context, rows []VulnerabilityMatch) error {
+	if r.fanIn == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(rows))
+	for i := range rows {
+		ids = append(ids, rows[i].ID)
+	}
+	_, err := r.fanIn(ctx, ids)
+	return err
 }
 
 // recomputeCandidates assembles the candidate batch of the recompute

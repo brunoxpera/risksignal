@@ -39,7 +39,63 @@ const (
 	// AuditAggregatePriorityRules is the aggregate type of the priority_rules
 	// snapshot audit rows (the published ruleset).
 	AuditAggregatePriorityRules = "priority_rules"
+
+	// EventTypePriorityRecompute is the outbox type of the priority.recompute
+	// job (ARCH-004 §5, ch. 14.1): a targeted per-signal recompute the worker
+	// relay handler consumes. It is enqueued by a ruleset publish (batched
+	// over the open signals) and by the matching.recompute fan-in (per
+	// affected signal).
+	EventTypePriorityRecompute = "priority.recompute"
+	// ActorPriorityRecompute is the system principal of the priority.recompute
+	// handler's audit rows.
+	ActorPriorityRecompute = "priority-recompute"
 )
+
+// PriorityRecomputePayload is the outbox payload of one priority.recompute
+// job (ARCH-004 §5): the signal the recompute targets, the rule version the
+// enqueue read (the effective snapshot at enqueue time) and the canonical
+// input_hash the dedupe key carries (the hash of the signal's stored
+// factor-set + rule version at enqueue). It mirrors the house envelope and
+// carries identities/hashes only — never a secret (ch. 3.3, TR-013). The
+// handler drives RecomputePriority, which rebuilds the factors fresh and
+// recomputes its own input hash; the payload hash is the job identity.
+type PriorityRecomputePayload struct {
+	EventID       string    `json:"event_id"`
+	Type          string    `json:"type"`
+	SignalID      string    `json:"signal_id"`
+	RuleVersion   string    `json:"rule_version"`
+	InputHash     string    `json:"input_hash"`
+	OccurredAt    time.Time `json:"occurred_at"`
+	CorrelationID string    `json:"correlation_id"`
+}
+
+// PriorityRecomputeDedupeKey is the outbox dedupe key of one
+// priority.recompute job (ARCH-004 §5): "priority.recompute:" namespacing the
+// key (the outbox UQ is global across job types), then the signal id, the
+// rule version and the canonical input_hash. A re-enqueue with identical
+// inputs derives the same key and is a no-op at the schema level; a changed
+// factor-set or rule version derives a new key and enqueues a fresh job.
+func PriorityRecomputeDedupeKey(signalID, ruleVersion, inputHash string) string {
+	return EventTypePriorityRecompute + ":" + signalID + ":" + ruleVersion + ":" + inputHash
+}
+
+// PriorityInputHash is the canonical SHA-256 of one recompute input: the
+// effective rule version plus the canonical factor-set (the stable struct
+// field order of domain.PriorityFactors). It is the input_hash of the
+// priority.recompute dedupe key (ARCH-004 §5): a re-run with identical inputs
+// produces the same hash, so the job layer can treat it as a no-op. Deep-
+// equal factor-sets therefore always derive the same key.
+func PriorityInputHash(ruleVersion string, f domain.PriorityFactors) (string, error) {
+	b, err := json.Marshal(f)
+	if err != nil {
+		return "", fmt.Errorf("marshal priority factors: %w", err)
+	}
+	h := sha256.New()
+	h.Write([]byte(ruleVersion))
+	h.Write([]byte{0x1f}) // unit separator: version and factors cannot collide
+	h.Write(b)
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
 
 // PublishPriorityRulesInput is the PublishPriorityRules command (ARCH-004 §1):
 // publish a new ruleset snapshot at version = MAX(version)+1 from the domain
@@ -145,13 +201,22 @@ func (s *Service) PublishPriorityRules(ctx context.Context, in PublishPriorityRu
 		if err != nil {
 			return InfraError(op, err)
 		}
-		return s.outbox.Append(ctx, tx, OutboxEvent{
+		if err := s.outbox.Append(ctx, tx, OutboxEvent{
 			Type:        EventTypePriorityRulesPublished,
 			Payload:     payload,
 			DedupeKey:   EventTypePriorityRulesPublished + ":" + ruleVersion,
 			AvailableAt: now,
 			CreatedAt:   now,
-		})
+		}); err != nil {
+			return err
+		}
+		// The §5 fan-in: a rule-version publish enqueues a batched recompute
+		// over all open signals, on the very transaction that published the
+		// snapshot — a rolled-back publish enqueues nothing. The jobs carry
+		// the new rule version; the handler rebuilds each signal's factors
+		// fresh (changed-only persist keeps an identical recompute a no-op).
+		_, err = s.enqueueOpenPriorityRecomputes(ctx, tx, ruleVersion, correlationID, now)
+		return err
 	})
 	if err != nil {
 		return PublishPriorityRulesResult{}, err
@@ -224,7 +289,7 @@ func (s *Service) RecomputePriority(ctx context.Context, in RecomputePriorityInp
 	if err != nil {
 		return RecomputePriorityResult{}, InfraError(op, err)
 	}
-	inputHash, err := priorityInputHash(ruleVersion, factors)
+	inputHash, err := PriorityInputHash(ruleVersion, factors)
 	if err != nil {
 		return RecomputePriorityResult{}, InfraError(op, err)
 	}
@@ -438,19 +503,119 @@ func (s *Service) appendRulesAudit(ctx context.Context, tx Tx, action string, ac
 	})
 }
 
-// priorityInputHash is the canonical SHA-256 of one recompute input: the
-// effective rule version plus the canonical factor-set (the stable struct
-// field order of domain.PriorityFactors). It is the input_hash of the
-// priority.recompute dedupe key (ARCH-004 §5): a re-run with identical inputs
-// produces the same hash, so the job layer can treat it as a no-op.
-func priorityInputHash(ruleVersion string, f domain.PriorityFactors) (string, error) {
-	b, err := json.Marshal(f)
+// enqueuePriorityRecompute appends one priority.recompute job on tx for the
+// target signal under ruleVersion, dedupe-checked by the canonical input
+// hash: an identical (signal, rule version, factor-set) job — queued, claimed
+// or terminal — is a no-op (checked with ExistsDedupeKey on the same
+// transaction, the exactly-once enqueuer pattern of ADR-012 point 4). It
+// returns whether a row was appended.
+func (s *Service) enqueuePriorityRecompute(ctx context.Context, tx Tx, target PriorityRecomputeTarget, ruleVersion, correlationID string, now time.Time) (bool, error) {
+	const op = "priority_recompute.enqueue"
+
+	inputHash, err := PriorityInputHash(ruleVersion, target.Factors)
 	if err != nil {
-		return "", fmt.Errorf("marshal priority factors: %w", err)
+		return false, InfraError(op, err)
 	}
-	h := sha256.New()
-	h.Write([]byte(ruleVersion))
-	h.Write([]byte{0x1f}) // unit separator: version and factors cannot collide
-	h.Write(b)
-	return hex.EncodeToString(h.Sum(nil)), nil
+	dedupeKey := PriorityRecomputeDedupeKey(target.SignalID, ruleVersion, inputHash)
+	exists, err := s.outbox.ExistsDedupeKey(ctx, tx, dedupeKey)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		return false, nil // already enqueued under this input — exactly once
+	}
+	payload, err := json.Marshal(PriorityRecomputePayload{
+		EventID:       uuid.New(),
+		Type:          EventTypePriorityRecompute,
+		SignalID:      target.SignalID,
+		RuleVersion:   ruleVersion,
+		InputHash:     inputHash,
+		OccurredAt:    now,
+		CorrelationID: correlationID,
+	})
+	if err != nil {
+		return false, InfraError(op, err)
+	}
+	if err := s.outbox.Append(ctx, tx, OutboxEvent{
+		Type:        EventTypePriorityRecompute,
+		Payload:     payload,
+		DedupeKey:   dedupeKey,
+		AvailableAt: now,
+		CreatedAt:   now,
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// enqueueOpenPriorityRecomputes is the batched fan-in of a ruleset publish
+// (ARCH-004 §5): one priority.recompute job per open signal under the newly
+// published ruleVersion, on the caller's transaction. It returns the number
+// of rows appended (a re-publish with an already-queued input appends none).
+func (s *Service) enqueueOpenPriorityRecomputes(ctx context.Context, tx Tx, ruleVersion, correlationID string, now time.Time) (int, error) {
+	targets, err := s.signalTriage.OpenRecomputeTargets(ctx)
+	if err != nil {
+		return 0, err
+	}
+	enqueued := 0
+	for _, target := range targets {
+		appended, err := s.enqueuePriorityRecompute(ctx, tx, target, ruleVersion, correlationID, now)
+		if err != nil {
+			return 0, err
+		}
+		if appended {
+			enqueued++
+		}
+	}
+	return enqueued, nil
+}
+
+// EnqueuePriorityRecomputeForVulnerabilities is the matching.recompute fan-in
+// (ARCH-004 §5): one priority.recompute job per signal whose match references
+// one of the batch's vulnerability row ids, enqueued under the current
+// effective priority rule version. It is the seam the matching runner drives
+// after a recompute run commits its matches; the enqueues run in one
+// transaction and are dedupe-checked (a signal already queued under the same
+// rule version and factor-set appends nothing). It returns the number of rows
+// appended. An empty batch or an unpublished ruleset is a no-op.
+func (s *Service) EnqueuePriorityRecomputeForVulnerabilities(ctx context.Context, vulnerabilityIDs []string) (int, error) {
+	const op = "priority_recompute.fan_in"
+
+	if len(vulnerabilityIDs) == 0 {
+		return 0, nil
+	}
+	version, err := s.priorityRules.EffectiveVersion(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if version < 1 {
+		return 0, nil // no ruleset published — nothing to evaluate
+	}
+	ruleVersion, err := domain.PriorityRuleVersion(version)
+	if err != nil {
+		return 0, InfraError(op, err)
+	}
+	targets, err := s.signalTriage.RecomputeTargetsByVulnerabilityIDs(ctx, vulnerabilityIDs)
+	if err != nil {
+		return 0, err
+	}
+	correlationID := correlationOrNew("")
+	now := s.clock.Now()
+	enqueued := 0
+	err = s.runTx(ctx, func(tx Tx) error {
+		for _, target := range targets {
+			appended, err := s.enqueuePriorityRecompute(ctx, tx, target, ruleVersion, correlationID, now)
+			if err != nil {
+				return err
+			}
+			if appended {
+				enqueued++
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return enqueued, nil
 }

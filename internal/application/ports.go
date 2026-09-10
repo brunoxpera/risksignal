@@ -366,6 +366,41 @@ type SignalTriageRepo interface {
 	// guarded write bumps version afterwards, never silently). The updated
 	// row is returned.
 	RecomputePriority(ctx context.Context, tx Tx, id string, priority domain.Priority, ruleVersion string, factors domain.PriorityFactors) (domain.RiskSignal, error)
+
+	// MarkEscalated records the first P1 escalation instant of a signal
+	// under the set-once guard of ARCH-004 §4.4 (escalated_at IS NULL): the
+	// first call stamps the instant and returns true; a later call matches
+	// zero rows and returns false (already escalated — not an error). A
+	// missing signal is indistinguishable from an already-escalated one
+	// here (both report false); the escalation caller reads the signal
+	// first. The write runs on the caller's transaction.
+	MarkEscalated(ctx context.Context, tx Tx, id string, at time.Time) (bool, error)
+
+	// OpenRecomputeTargets returns the id and stored factor-set of every
+	// open (non-closed) signal — the fan-in read of a ruleset publish
+	// (ARCH-004 §5: "a rule-version publish enqueues a batched recompute
+	// over all open signals"). Closed signals (resolved/accepted/
+	// not_affected) are excluded (their recompute proposes a reopen
+	// instead). Ordered by id; no open signal yields an empty slice.
+	OpenRecomputeTargets(ctx context.Context) ([]PriorityRecomputeTarget, error)
+
+	// RecomputeTargetsByVulnerabilityIDs returns the id and stored
+	// factor-set of every signal whose match references one of the given
+	// vulnerability row ids — the fan-in read of a matching.recompute run
+	// (ARCH-004 §5: the run enqueues a per-signal priority.recompute for
+	// the affected signals). Ordered by id, one row per signal. An empty id
+	// list yields an empty slice without a query.
+	RecomputeTargetsByVulnerabilityIDs(ctx context.Context, vulnerabilityIDs []string) ([]PriorityRecomputeTarget, error)
+}
+
+// PriorityRecomputeTarget is one signal of a priority.recompute fan-in read
+// (ARCH-004 §5): the signal id and its stored factor-set — the two inputs the
+// enqueue side hashes into the job's canonical input_hash. It carries no
+// priority or rule version: those are resolved by the enqueue transaction
+// (the effective ruleset version) or read by the handler's recompute.
+type PriorityRecomputeTarget struct {
+	SignalID string
+	Factors  domain.PriorityFactors
 }
 
 // PriorityRuleRepo is the versioned priority_rules snapshot port (ARCH-004

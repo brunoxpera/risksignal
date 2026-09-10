@@ -1,6 +1,17 @@
 package application
 
-import "github.com/brunoxpera/risksignal/internal/domain"
+import (
+	"time"
+
+	"github.com/brunoxpera/risksignal/internal/domain"
+)
+
+// DefaultSLAReminderCadence is the ch. 9.4-shaped default reminder cadence of
+// the sla.evaluate scheduler (ARCH-004 §4.4): after the first P1 escalation a
+// reminder is emitted once per cadence window. It is an injected configuration
+// value (ServiceDeps.SLAReminderCadence, sourced from worker config), never
+// table state.
+const DefaultSLAReminderCadence = time.Hour
 
 // Service is the application service: it owns the use cases (CreateSignal,
 // ListSignals, GetSignal, RunSyntheticSource, the I2 source use cases
@@ -48,8 +59,13 @@ type Service struct {
 	// which SLA clocks a transition fulfils or resets; it defaults to the
 	// ch. 9.4 durations when ServiceDeps.SlaTimeProfile is nil.
 	slaProfile domain.SLATimeProfile
-	clock      Clock
-	runTx      TxRunner
+	// slaReminderCadence is the injected reminder cadence of the sla.evaluate
+	// scheduler (ARCH-004 §4.4): the interval between the escalation reminders
+	// of an already-escalated P1. It defaults to DefaultSLAReminderCadence when
+	// ServiceDeps.SLAReminderCadence is zero/negative.
+	slaReminderCadence time.Duration
+	clock              Clock
+	runTx              TxRunner
 }
 
 // ServiceDeps are the port implementations the service runs on. RunTx is
@@ -98,8 +114,14 @@ type ServiceDeps struct {
 	// defaults (domain.DefaultSLATimeProfile). The accelerated demo/test
 	// runs inject a scaled profile without touching any status/audit logic.
 	SlaTimeProfile *domain.SLATimeProfile
-	Clock          Clock
-	RunTx          TxRunner
+	// SLAReminderCadence is the reminder cadence of the sla.evaluate
+	// scheduler (ARCH-004 §4.4, config not table state): the interval
+	// between the escalation reminders of an already-escalated P1. It is
+	// optional: zero/negative takes DefaultSLAReminderCadence. The
+	// accelerated test injects a scaled cadence.
+	SLAReminderCadence time.Duration
+	Clock              Clock
+	RunTx              TxRunner
 }
 
 // NewService assembles the service from its port implementations. A nil
@@ -152,26 +174,34 @@ func NewService(deps ServiceDeps) *Service {
 	if deps.SlaTimeProfile != nil {
 		slaProfile = *deps.SlaTimeProfile
 	}
+	// The sla.evaluate reminder cadence is optional: absent means the built-in
+	// default, so a Service keeps a defined escalation cadence even without a
+	// configured value (ARCH-004 §4.4).
+	slaReminderCadence := deps.SLAReminderCadence
+	if slaReminderCadence <= 0 {
+		slaReminderCadence = DefaultSLAReminderCadence
+	}
 	return &Service{
-		signals:       deps.Signals,
-		audit:         deps.Audit,
-		outbox:        deps.Outbox,
-		vulns:         deps.Vulnerabilities,
-		matches:       deps.Matches,
-		runs:          deps.SourceRuns,
-		raws:          deps.RawRecords,
-		sources:       deps.Sources,
-		quarantine:    deps.Quarantine,
-		comps:         deps.Components,
-		inventory:     deps.Inventory,
-		epssHist:      deps.EpssHistory,
-		signalTriage:  deps.SignalTriage,
-		comments:      deps.Comments,
-		slaClocks:     deps.SlaClocks,
-		priorityRules: deps.PriorityRules,
-		factorSource:  deps.FactorSource,
-		slaProfile:    slaProfile,
-		clock:         deps.Clock,
-		runTx:         deps.RunTx,
+		signals:            deps.Signals,
+		audit:              deps.Audit,
+		outbox:             deps.Outbox,
+		vulns:              deps.Vulnerabilities,
+		matches:            deps.Matches,
+		runs:               deps.SourceRuns,
+		raws:               deps.RawRecords,
+		sources:            deps.Sources,
+		quarantine:         deps.Quarantine,
+		comps:              deps.Components,
+		inventory:          deps.Inventory,
+		epssHist:           deps.EpssHistory,
+		signalTriage:       deps.SignalTriage,
+		comments:           deps.Comments,
+		slaClocks:          deps.SlaClocks,
+		priorityRules:      deps.PriorityRules,
+		factorSource:       deps.FactorSource,
+		slaProfile:         slaProfile,
+		slaReminderCadence: slaReminderCadence,
+		clock:              deps.Clock,
+		runTx:              deps.RunTx,
 	}
 }

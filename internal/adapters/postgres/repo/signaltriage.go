@@ -236,6 +236,63 @@ func (r *SignalRepo) MarkEscalated(ctx context.Context, tx application.Tx, id st
 	return true, nil
 }
 
+// OpenRecomputeTargets implements application.SignalTriageRepo: the id and
+// stored factor-set of every open (non-closed) signal — the fan-in read of a
+// ruleset publish (ARCH-004 §5). Ordered by id; no open signal yields an empty
+// slice, never an error.
+func (r *SignalRepo) OpenRecomputeTargets(ctx context.Context) ([]application.PriorityRecomputeTarget, error) {
+	const op = "signals.open_recompute_targets"
+
+	rows, err := r.q.ListOpenRecomputeTargets(ctx)
+	if err != nil {
+		return nil, mapDBError(op, err)
+	}
+	return recomputeTargets(op, rows, func(row gen.ListOpenRecomputeTargetsRow) (pgtype.UUID, []byte) {
+		return row.ID, row.Factors
+	})
+}
+
+// RecomputeTargetsByVulnerabilityIDs implements application.SignalTriageRepo:
+// the id and stored factor-set of every signal whose match references one of
+// the given vulnerability row ids — the fan-in read of a matching.recompute
+// run (ARCH-004 §5). Ordered by id; one row per signal. An empty id list
+// yields an empty slice without a query.
+func (r *SignalRepo) RecomputeTargetsByVulnerabilityIDs(ctx context.Context, vulnerabilityIDs []string) ([]application.PriorityRecomputeTarget, error) {
+	const op = "signals.recompute_targets_by_vulnerability_ids"
+
+	if len(vulnerabilityIDs) == 0 {
+		return nil, nil
+	}
+	b, err := json.Marshal(vulnerabilityIDs)
+	if err != nil {
+		return nil, application.InfraError(op, err)
+	}
+	rows, err := r.q.ListRecomputeTargetsByVulnerabilityIDs(ctx, b)
+	if err != nil {
+		return nil, mapDBError(op, err)
+	}
+	return recomputeTargets(op, rows, func(row gen.ListRecomputeTargetsByVulnerabilityIDsRow) (pgtype.UUID, []byte) {
+		return row.ID, row.Factors
+	})
+}
+
+// recomputeTargets maps a fan-in read row set onto the application target
+// slice: the id (canonical uuid text) plus the stored factor-set unmarshalled
+// from its jsonb column. A malformed factors payload is an infrastructure
+// error, never a silent skip.
+func recomputeTargets[R any](op string, rows []R, fields func(R) (pgtype.UUID, []byte)) ([]application.PriorityRecomputeTarget, error) {
+	out := make([]application.PriorityRecomputeTarget, 0, len(rows))
+	for _, row := range rows {
+		id, raw := fields(row)
+		var factors domain.PriorityFactors
+		if err := json.Unmarshal(raw, &factors); err != nil {
+			return nil, application.InfraError(op, err)
+		}
+		out = append(out, application.PriorityRecomputeTarget{SignalID: uuidString(id), Factors: factors})
+	}
+	return out, nil
+}
+
 // guardedSignalError maps a zero-row guarded write (pgx.ErrNoRows, a stale
 // optimistic-lock version) onto a conflict Error and defers every other
 // driver error to mapDBError. It is the shared classification of the I4
