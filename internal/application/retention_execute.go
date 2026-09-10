@@ -9,6 +9,43 @@ import (
 	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
+// RetentionExecute job vocabulary (ARCH-007 §2.2/§14.1, WP-6.06 / DEV-118).
+const (
+	// EventTypeRetentionExecute is the outbox type discriminator of the
+	// retention.execute job (ARCH-007 §2.2 step 3/§14.1): the worker handler
+	// loads the approved run and executes it in bounded, idempotent batches.
+	EventTypeRetentionExecute = "retention.execute"
+)
+
+// retentionExecuteDedupePrefix namespaces the outbox dedupe key of a
+// retention.execute job (ARCH-007 §14.1: idempotency key policy_id + cutoff +
+// batch). The batch is the run's partition (a run processes one partition in
+// the MVP), so the key is policy_id + cutoff + partition_key.
+const retentionExecuteDedupePrefix = "retention.execute:"
+
+// RetentionExecutePayload is the outbox payload of a retention.execute job
+// (ARCH-007 §2.2): the house envelope plus the run identity and its
+// partition context. It carries identities and the frozen cutoff only — no
+// candidate id, no business content.
+type RetentionExecutePayload struct {
+	EventID       string    `json:"event_id"`
+	Type          string    `json:"type"`
+	RunID         string    `json:"run_id"`
+	PolicyID      string    `json:"policy_id"`
+	Cutoff        string    `json:"cutoff,omitempty"`
+	PartitionKey  string    `json:"partition_key,omitempty"`
+	OccurredAt    time.Time `json:"occurred_at"`
+	CorrelationID string    `json:"correlation_id"`
+}
+
+// retentionExecuteDedupeKey is the outbox dedupe key of one retention.execute
+// job (ARCH-007 §14.1: policy_id + cutoff + batch). It is unique for the
+// run's whole lifetime, so a retried approve (or a re-enqueue) of the same
+// approved plan is a no-op at the schema level (ADR-012).
+func retentionExecuteDedupeKey(policyID string, cutoff time.Time, partitionKey string) string {
+	return retentionExecuteDedupePrefix + policyID + ":" + cutoff.UTC().Format(time.RFC3339) + ":" + partitionKey
+}
+
 // This file owns the ExecuteRetention use case (ARCH-007 §2.2 step 3/§2.3,
 // WP-6.05 / DEV-116): the deletion and pseudonymisation core the
 // `retention.execute` worker job (WP-6.06) drives. It claims an approved run,

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/brunoxpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/platform/uuid"
 )
 
 // This file owns the ApproveRetentionRun command (ARCH-007 §2.2 step 2,
@@ -108,7 +109,38 @@ func (s *Service) ApproveRetentionRun(ctx context.Context, in ApproveRetentionRu
 		if err != nil {
 			return InfraError(op, err)
 		}
-		return s.appendRetentionAudit(ctx, tx, action, AuditAggregateRetention, row.ID, actor, correlationID, now, after)
+		if err := s.appendRetentionAudit(ctx, tx, action, AuditAggregateRetention, row.ID, actor, correlationID, now, after); err != nil {
+			return err
+		}
+		// An approval triggers exactly one retention.execute job, on the same
+		// transaction as the approval flip (the ARCH-007 §2.2 trigger: a
+		// released maintenance plan executes the approved run). A rejected run
+		// runs nothing. The dedupe key (policy_id + cutoff + batch, §14.1)
+		// makes a retried approval a no-op — the run and its job commit or roll
+		// back together (ARCH-001 §5).
+		if in.Reject {
+			return nil
+		}
+		payload, err := json.Marshal(RetentionExecutePayload{
+			EventID:       uuid.New(),
+			Type:          EventTypeRetentionExecute,
+			RunID:         row.ID,
+			PolicyID:      row.PolicyID,
+			Cutoff:        row.Cutoff.UTC().Format(time.RFC3339),
+			PartitionKey:  row.PartitionKey,
+			OccurredAt:    now,
+			CorrelationID: correlationID,
+		})
+		if err != nil {
+			return InfraError(op, err)
+		}
+		return s.outbox.Append(ctx, tx, OutboxEvent{
+			Type:        EventTypeRetentionExecute,
+			Payload:     payload,
+			DedupeKey:   retentionExecuteDedupeKey(row.PolicyID, row.Cutoff, row.PartitionKey),
+			AvailableAt: now,
+			CreatedAt:   now,
+		})
 	})
 	if err != nil {
 		return ApproveRetentionRunResult{}, err

@@ -164,13 +164,40 @@ type ExportRecord struct {
 	CreatedAt time.Time
 }
 
-// ExportRepo persists and reads export jobs (ARCH-007 §1.2). Insert runs on
-// the caller's transaction — the export row and its export.generate outbox
-// job commit or roll back together (one command, one transaction, ch. 5.1) —
-// while GetByID is a pool-scoped read of the status/download paths and the
-// load step of the export.generate job. The concrete DEV-116 adapter maps the
-// generated exports row onto Export and unmarshals the stored filter jsonb,
-// so the application layer never imports the generated package.
+// ExportCompletion is the generation outcome the export.generate job stamps
+// onto an export row when it completes (ARCH-007 §1.2): the spool reference,
+// the materialised counts/size, the artifact SHA-256, the schema/rule
+// versions stamped at generation time and the expiry (created_at +
+// export.ttl). It carries no business content — identities, counts and hashes
+// only.
+type ExportCompletion struct {
+	// ID is the export row the completion belongs to.
+	ID string
+	// StoragePath is the spool-relative artifact reference.
+	StoragePath string
+	// RowCount is the number of materialised signal rows.
+	RowCount int
+	// SizeBytes is the artifact byte size.
+	SizeBytes int64
+	// Checksum is the lowercase hex SHA-256 of the artifact bytes.
+	Checksum string
+	// SchemaVersion is the export document schema version (export.SchemaVersion).
+	SchemaVersion string
+	// RuleVersion is MAX(priority_rules.version) at generation time.
+	RuleVersion string
+	// ExpiresAt is the artifact expiry (created_at + export.ttl).
+	ExpiresAt time.Time
+}
+
+// ExportRepo persists and reads export jobs (ARCH-007 §1.2). Insert and the
+// generation stamps (MarkCompleted/MarkFailed/MarkExpired) run on the
+// caller's transaction — the export row and its export.generate outbox job
+// commit or roll back together (one command, one transaction, ch. 5.1) —
+// while GetByID and ListExpired are pool-scoped reads of the
+// status/download/sweep paths and the load step of the export.generate job.
+// The concrete adapter maps the generated exports row onto Export and
+// unmarshals the stored filter jsonb, so the application layer never imports
+// the generated package.
 type ExportRepo interface {
 	// Insert stores one 'pending' export row on the caller's transaction and
 	// returns the stored row with its database-assigned id.
@@ -178,6 +205,35 @@ type ExportRepo interface {
 
 	// GetByID reads one export by its id. A missing id is a not-found Error.
 	GetByID(ctx context.Context, id string) (Export, error)
+
+	// MarkCompleted stamps the generation outcome and flips the export to
+	// 'completed' on the caller's transaction (ARCH-007 §1.2). The
+	// `status IN ('pending','failed')` guard keeps a retried generation
+	// idempotent (a crash/failure is regenerated and re-stamps the row) while
+	// an already-completed/expired row matches no row — a conflict Error. The
+	// cleared last_error makes the row indistinguishable from a first-run
+	// completion.
+	MarkCompleted(ctx context.Context, tx Tx, done ExportCompletion) (Export, error)
+
+	// MarkFailed records a failed generation (status 'failed' + last_error)
+	// on the caller's transaction, visible like any dead-letter/source-runs
+	// error (ARCH-007 §1.2). The guard lets a retried failing generation
+	// re-stamp the error but never overwrites a completed/expired row — a
+	// conflict Error.
+	MarkFailed(ctx context.Context, tx Tx, id, lastError string) (Export, error)
+
+	// ListExpired returns the completed exports whose TTL elapsed
+	// (expires_at <= now), ordered by expiry then id — the input of the daily
+	// export sweep (ARCH-007 §1.2). No expired export yields an empty slice,
+	// never an error.
+	ListExpired(ctx context.Context, now time.Time) ([]Export, error)
+
+	// MarkExpired flips a completed export to 'expired' on the caller's
+	// transaction after the sweep deleted its artifact. The `status =
+	// 'completed'` guard makes the mark idempotent (a second sweep of the same
+	// row matches no row — a conflict Error) and never re-expires a
+	// pending/failed row.
+	MarkExpired(ctx context.Context, tx Tx, id string) (Export, error)
 }
 
 // ExportArtifactStore reads and writes the server-local export spool
@@ -193,6 +249,13 @@ type ExportArtifactStore interface {
 	// Open returns a reader over the stored artifact at the spool-relative
 	// path (the exports.storage_path reference).
 	Open(ctx context.Context, path string) (io.ReadCloser, error)
+
+	// Remove deletes the stored artifact at the spool-relative path — the
+	// daily sweep's artifact deletion of an expired export (ARCH-007 §1.2).
+	// A missing artifact is not an error (the sweep still marks the row
+	// expired): the caller cannot distinguish an already-swept export from a
+	// never-materialised one, and both cases end in the same terminal state.
+	Remove(ctx context.Context, path string) error
 }
 
 // SignalExportSource is the streaming read behind an export (ARCH-007 §1.2):

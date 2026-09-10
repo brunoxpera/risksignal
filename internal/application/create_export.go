@@ -56,12 +56,12 @@ type CreateExportResult struct {
 	CorrelationID string
 }
 
-// exportGeneratePayload is the outbox payload of an export.generate job
+// ExportGeneratePayload is the outbox payload of an export.generate job
 // (ARCH-007 §1.2): the house envelope plus the export id the job loads. It
 // carries identities and the frozen instant only — the filter lives in the
 // exports row, never duplicated into the job payload (the row is the single
 // source of the frozen filter).
-type exportGeneratePayload struct {
+type ExportGeneratePayload struct {
 	EventID       string    `json:"event_id"`
 	Type          string    `json:"type"`
 	ExportID      string    `json:"export_id"`
@@ -136,7 +136,7 @@ func (s *Service) CreateExport(ctx context.Context, in CreateExportInput) (Creat
 		}
 		stored = row
 
-		payload, err := json.Marshal(exportGeneratePayload{
+		payload, err := json.Marshal(ExportGeneratePayload{
 			EventID:       uuid.New(),
 			Type:          EventTypeExportGenerate,
 			ExportID:      row.ID,

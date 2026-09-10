@@ -66,6 +66,95 @@ func (f *fakeExportRepo) GetByID(_ context.Context, id string) (application.Expo
 	return application.Export{}, application.NotFoundError("export.get_by_id", fmt.Errorf("export %s not found", id))
 }
 
+func (f *fakeExportRepo) MarkCompleted(_ context.Context, tx application.Tx, done application.ExportCompletion) (application.Export, error) {
+	if _, err := fakeTxOf(tx); err != nil {
+		return application.Export{}, err
+	}
+	row, ok := f.db.exportByID(done.ID)
+	if !ok {
+		return application.Export{}, application.NotFoundError("export.mark_completed", fmt.Errorf("export %s not found", done.ID))
+	}
+	if row.Status != application.ExportStatusPending && row.Status != application.ExportStatusFailed {
+		return application.Export{}, application.ConflictError("export.mark_completed", fmt.Errorf("export %s is %s, not pending/failed", done.ID, row.Status))
+	}
+	row.Status = application.ExportStatusCompleted
+	row.StoragePath = done.StoragePath
+	row.RowCount = done.RowCount
+	row.SizeBytes = done.SizeBytes
+	row.Checksum = done.Checksum
+	row.SchemaVersion = done.SchemaVersion
+	row.RuleVersion = done.RuleVersion
+	row.ExpiresAt = done.ExpiresAt
+	row.LastError = ""
+	f.db.replaceExport(row)
+	return row, nil
+}
+
+func (f *fakeExportRepo) MarkFailed(_ context.Context, tx application.Tx, id, lastError string) (application.Export, error) {
+	if _, err := fakeTxOf(tx); err != nil {
+		return application.Export{}, err
+	}
+	row, ok := f.db.exportByID(id)
+	if !ok {
+		return application.Export{}, application.NotFoundError("export.mark_failed", fmt.Errorf("export %s not found", id))
+	}
+	if row.Status != application.ExportStatusPending && row.Status != application.ExportStatusFailed {
+		return application.Export{}, application.ConflictError("export.mark_failed", fmt.Errorf("export %s is %s, not pending/failed", id, row.Status))
+	}
+	row.Status = application.ExportStatusFailed
+	row.LastError = lastError
+	f.db.replaceExport(row)
+	return row, nil
+}
+
+func (f *fakeExportRepo) ListExpired(_ context.Context, now time.Time) ([]application.Export, error) {
+	var out []application.Export
+	for _, e := range f.db.exports {
+		if e.Status == application.ExportStatusCompleted && !e.ExpiresAt.IsZero() && !e.ExpiresAt.After(now) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeExportRepo) MarkExpired(_ context.Context, tx application.Tx, id string) (application.Export, error) {
+	if _, err := fakeTxOf(tx); err != nil {
+		return application.Export{}, err
+	}
+	row, ok := f.db.exportByID(id)
+	if !ok {
+		return application.Export{}, application.NotFoundError("export.mark_expired", fmt.Errorf("export %s not found", id))
+	}
+	if row.Status != application.ExportStatusCompleted {
+		return application.Export{}, application.ConflictError("export.mark_expired", fmt.Errorf("export %s is %s, not completed", id, row.Status))
+	}
+	row.Status = application.ExportStatusExpired
+	f.db.replaceExport(row)
+	return row, nil
+}
+
+// exportByID returns the committed export row of id (the fake's read-modify-write
+// helper for the generation stamps).
+func (d *fakeDB) exportByID(id string) (application.Export, bool) {
+	for _, e := range d.exports {
+		if e.ID == id {
+			return e, true
+		}
+	}
+	return application.Export{}, false
+}
+
+// replaceExport stores the mutated export row back in the committed state.
+func (d *fakeDB) replaceExport(row application.Export) {
+	for i := range d.exports {
+		if d.exports[i].ID == row.ID {
+			d.exports[i] = row
+			return
+		}
+	}
+	d.exports = append(d.exports, row)
+}
+
 // seedExport stores one committed export row (the read/download fixtures).
 func seedExport(h *harness, e application.Export) application.Export {
 	if e.Status == "" {
@@ -115,6 +204,11 @@ func (f *fakeExportStore) Open(_ context.Context, path string) (io.ReadCloser, e
 	return io.NopCloser(bytes.NewReader(data)), nil
 }
 
+func (f *fakeExportStore) Remove(_ context.Context, path string) error {
+	delete(f.artifacts, path)
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // fakeSignalExportSource (application.SignalExportSource)
 
@@ -128,6 +222,9 @@ func (f *fakeExportStore) Open(_ context.Context, path string) (io.ReadCloser, e
 // is covered by the postgres I6 integration test.
 type fakeSignalExportSource struct {
 	rows []export.Row
+	// fail, when set, makes Scan fail — the generation-failure path of the
+	// export.generate job (the row is marked failed + last_error).
+	fail error
 }
 
 var _ application.SignalExportSource = (*fakeSignalExportSource)(nil)
@@ -147,6 +244,9 @@ func priorityRankExport(p string) int {
 }
 
 func (f *fakeSignalExportSource) Scan(_ context.Context, filter application.ExportFilter, _ time.Time) ([]export.Row, error) {
+	if f.fail != nil {
+		return nil, f.fail
+	}
 	var out []export.Row
 	for _, r := range f.rows {
 		if filter.Priority != nil && r.Priority != string(*filter.Priority) {

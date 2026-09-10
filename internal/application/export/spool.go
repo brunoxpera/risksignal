@@ -124,6 +124,26 @@ func (s *Spool) Open(_ context.Context, path string) (io.ReadCloser, error) {
 	return f, nil
 }
 
+// Remove deletes the stored artifact at the spool-relative path (the
+// exports.storage_path reference) — the daily sweep's deletion of an expired
+// export artifact (ARCH-007 §1.2). A missing artifact is not an error: the
+// sweep only wants the file gone, and an already-deleted (or never written)
+// artifact already satisfies that. A path that is absolute or escapes the
+// spool root is rejected before any file is touched.
+func (s *Spool) Remove(_ context.Context, path string) error {
+	abs, err := s.resolve(path)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(abs); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("export: remove spool artifact: %w", err)
+	}
+	return nil
+}
+
 // clean validates a spool-relative key/path and returns it in canonical form.
 func (s *Spool) clean(rel string) (string, error) {
 	if strings.TrimSpace(s.dir) == "" {

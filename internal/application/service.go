@@ -89,6 +89,15 @@ type Service struct {
 	// infrastructure error rather than panicking.
 	exports     ExportRepo
 	exportStore ExportArtifactStore
+	// signalExport is the streaming read behind an export (ARCH-007 §1.2,
+	// WP-6.06 / DEV-118): the full-scan variant of ListSignals the
+	// export.generate job streams. exportTTL is the artifact lifetime
+	// (export.ttl, default 7 days) and exportMaxRows the strict bound on a
+	// single export (export.max_rows) — both come from ServiceDeps and keep
+	// the materialisation clock-driven and bounded.
+	signalExport  SignalExportSource
+	exportTTL     time.Duration
+	exportMaxRows int
 	// retention is the I6 retention port (ARCH-007 §2/§3, WP-6.05 / DEV-116):
 	// the candidate scan, the run lifecycle, the legal holds and the in-place
 	// pseudonymisation/deletion primitives the retention use cases program
@@ -185,6 +194,18 @@ type ServiceDeps struct {
 	// postgres *repo.ExportRepo and the export.Spool).
 	Exports     ExportRepo
 	ExportStore ExportArtifactStore
+	// SignalExport is the I6 streaming export read (ARCH-007 §1.2, WP-6.06 /
+	// DEV-118): the full-scan SignalExportSource the export.generate job
+	// streams. Optional at construction like the other I6 ports — a
+	// composition root that never drives the export.generate job (the unit
+	// tests, the server-only roots) leaves it nil; the worker/I6 root wires
+	// the postgres *repo.SignalExportSource.
+	SignalExport SignalExportSource
+	// ExportTTL is the artifact lifetime (export.ttl); zero/negative takes
+	// DefaultExportTTL. ExportMaxRows bounds a single export (export.max_rows);
+	// zero/negative takes DefaultExportMaxRows.
+	ExportTTL     time.Duration
+	ExportMaxRows int
 	// Retention is the I6 retention port (ARCH-007 §2/§3, WP-6.05 / DEV-116):
 	// the candidate scan, the run lifecycle, the legal holds and the in-place
 	// pseudonymisation/deletion primitives. It is optional at construction like
@@ -283,6 +304,17 @@ func NewService(deps ServiceDeps) *Service {
 	if retentionBatchSize <= 0 {
 		retentionBatchSize = DefaultRetentionBatchSize
 	}
+	// The export TTL and max-rows bound are optional: absent means the
+	// built-in defaults (ARCH-007 §1.2), so a Service keeps a defined export
+	// vocabulary even without a configured value.
+	exportTTL := deps.ExportTTL
+	if exportTTL <= 0 {
+		exportTTL = DefaultExportTTL
+	}
+	exportMaxRows := deps.ExportMaxRows
+	if exportMaxRows <= 0 {
+		exportMaxRows = DefaultExportMaxRows
+	}
 	return &Service{
 		signals:            deps.Signals,
 		audit:              deps.Audit,
@@ -309,6 +341,9 @@ func NewService(deps ServiceDeps) *Service {
 		sourceMonitor:      deps.SourceMonitor,
 		exports:            deps.Exports,
 		exportStore:        deps.ExportStore,
+		signalExport:       deps.SignalExport,
+		exportTTL:          exportTTL,
+		exportMaxRows:      exportMaxRows,
 		retention:          deps.Retention,
 		retentionYears:     retentionYears,
 		retentionBatchSize: retentionBatchSize,

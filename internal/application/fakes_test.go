@@ -1657,8 +1657,9 @@ type harness struct {
 	imports         *fakeInventoryImportRepo
 	sourceMonitor   *fakeSourceMonitorRepo
 
-	exports     *fakeExportRepo
-	exportStore *fakeExportStore
+	exports      *fakeExportRepo
+	exportStore  *fakeExportStore
+	signalExport *fakeSignalExportSource
 
 	retention *fakeRetentionRepo
 
@@ -1699,6 +1700,7 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 	h.sourceMonitor = &fakeSourceMonitorRepo{db: h.db}
 	h.exports = &fakeExportRepo{db: h.db}
 	h.exportStore = &fakeExportStore{artifacts: map[string][]byte{}}
+	h.signalExport = &fakeSignalExportSource{}
 	h.retention = &fakeRetentionRepo{db: h.db}
 	deps := application.ServiceDeps{
 		Signals:          h.signals,
@@ -1725,6 +1727,7 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 		SourceMonitor:    h.sourceMonitor,
 		Exports:          h.exports,
 		ExportStore:      h.exportStore,
+		SignalExport:     h.signalExport,
 		Retention:        h.retention,
 		Clock:            h.clock,
 		RunTx:            h.runner.Run,
