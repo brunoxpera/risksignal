@@ -228,6 +228,43 @@ type ProblemDetails struct {
 	Type string `json:"type"`
 }
 
+// RevealActorRequest The body of the governed reveal command (ADR-014): the mandatory
+// non-blank justification of the identity resolution.
+type RevealActorRequest struct {
+	// Reason Mandatory, non-blank justification of the resolution; recorded
+	// in the self-audit (concept ch. 13.2).
+	Reason string `json:"reason"`
+}
+
+// RevealedActor The outcome of a reveal. For a user actor the resolved identity
+// (user_id/subject_id/display_name) is set and is_user is true; for a
+// system/service actor is_user is false, label carries the actor's own
+// label and the identity fields are null.
+type RevealedActor struct {
+	// ActorType The target event's actor type (user, system or service).
+	ActorType string `json:"actor_type"`
+
+	// DisplayName The resolved display name (null when pseudonymised or for a non-user actor).
+	DisplayName *string `json:"display_name,omitempty"`
+
+	// EventId The revealed audit event's id (uuid).
+	EventId string `json:"event_id"`
+
+	// IsUser Whether the target actor was a user and an identity was resolved.
+	IsUser bool `json:"is_user"`
+
+	// Label Display label: the resolved display name (or the "User
+	// #<short-id>" fallback of a pseudonymised row) for a user actor,
+	// or the system/service actor's own label otherwise.
+	Label string `json:"label"`
+
+	// SubjectId The resolved issuer-qualified external subject (null for a non-user actor).
+	SubjectId *string `json:"subject_id,omitempty"`
+
+	// UserId The resolved internal users.id (null for a non-user actor).
+	UserId *string `json:"user_id,omitempty"`
+}
+
 // Signal One readable risk signal, joined with its asset and product.
 type Signal struct {
 	// Asset The joined inventory asset of a signal (ARCH-001 §4 asset).
@@ -318,6 +355,9 @@ type ListSignalsParams struct {
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// RevealAuditEventActorJSONRequestBody defines body for RevealAuditEventActor for application/json ContentType.
+type RevealAuditEventActorJSONRequestBody = RevealActorRequest
+
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
 
@@ -392,6 +432,40 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
+	// RevealAuditEventActorWithBody Reveal the actor identity of an audit event
+	//
+	// The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
+	// an audit event's user actor against the internal users table and
+	// return the identity. It is a fachlicher Akt, never a list-view side
+	// effect — the caller must hold `audit.reveal_identity` (Auditor /
+	// Product Owner only, never Administrator), a mandatory non-blank
+	// reason is required, and the resolution writes its own
+	// `audit.identity_revealed` audit event atomically. A non-user actor
+	// (system/service) has no identity to resolve and returns its own
+	// label. A denied or invalid request writes nothing.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
+	RevealAuditEventActorWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RevealAuditEventActor Reveal the actor identity of an audit event
+	//
+	// The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
+	// an audit event's user actor against the internal users table and
+	// return the identity. It is a fachlicher Akt, never a list-view side
+	// effect — the caller must hold `audit.reveal_identity` (Auditor /
+	// Product Owner only, never Administrator), a mandatory non-blank
+	// reason is required, and the resolution writes its own
+	// `audit.identity_revealed` audit event atomically. A non-user actor
+	// (system/service) has no identity to resolve and returns its own
+	// label. A denied or invalid request writes nothing.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
+	RevealAuditEventActor(ctx context.Context, id string, body RevealAuditEventActorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListSignals List signals
 	//
 	// Cursor-paginated, filterable working-list read (concept ch. 10.2,
@@ -411,6 +485,60 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/signals/{signal_id} (the `GetSignal` operationId).
 	GetSignal(ctx context.Context, signalId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// RevealAuditEventActorWithBody Reveal the actor identity of an audit event
+//
+// The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
+// an audit event's user actor against the internal users table and
+// return the identity. It is a fachlicher Akt, never a list-view side
+// effect — the caller must hold `audit.reveal_identity` (Auditor /
+// Product Owner only, never Administrator), a mandatory non-blank
+// reason is required, and the resolution writes its own
+// `audit.identity_revealed` audit event atomically. A non-user actor
+// (system/service) has no identity to resolve and returns its own
+// label. A denied or invalid request writes nothing.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
+func (c *Client) RevealAuditEventActorWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRevealAuditEventActorRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RevealAuditEventActor Reveal the actor identity of an audit event
+//
+// The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
+// an audit event's user actor against the internal users table and
+// return the identity. It is a fachlicher Akt, never a list-view side
+// effect — the caller must hold `audit.reveal_identity` (Auditor /
+// Product Owner only, never Administrator), a mandatory non-blank
+// reason is required, and the resolution writes its own
+// `audit.identity_revealed` audit event atomically. A non-user actor
+// (system/service) has no identity to resolve and returns its own
+// label. A denied or invalid request writes nothing.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
+func (c *Client) RevealAuditEventActor(ctx context.Context, id string, body RevealAuditEventActorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRevealAuditEventActorRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 // ListSignals List signals
@@ -451,6 +579,53 @@ func (c *Client) GetSignal(ctx context.Context, signalId string, reqEditors ...R
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewRevealAuditEventActorRequest calls the generic RevealAuditEventActor builder with application/json body
+func NewRevealAuditEventActorRequest(server string, id string, body RevealAuditEventActorJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRevealAuditEventActorRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewRevealAuditEventActorRequestWithBody constructs an http.Request for the RevealAuditEventActor method, with any body, and a specified content type
+func NewRevealAuditEventActorRequestWithBody(server string, id string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/audit-events/%s/reveal-actor", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
 }
 
 // NewListSignalsRequest constructs an http.Request for the ListSignals method
@@ -621,6 +796,40 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// RevealAuditEventActorWithBodyWithResponse Reveal the actor identity of an audit event
+	//
+	// The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
+	// an audit event's user actor against the internal users table and
+	// return the identity. It is a fachlicher Akt, never a list-view side
+	// effect — the caller must hold `audit.reveal_identity` (Auditor /
+	// Product Owner only, never Administrator), a mandatory non-blank
+	// reason is required, and the resolution writes its own
+	// `audit.identity_revealed` audit event atomically. A non-user actor
+	// (system/service) has no identity to resolve and returns its own
+	// label. A denied or invalid request writes nothing.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
+	RevealAuditEventActorWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RevealAuditEventActorResponse, error)
+
+	// RevealAuditEventActorWithResponse Reveal the actor identity of an audit event
+	//
+	// The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
+	// an audit event's user actor against the internal users table and
+	// return the identity. It is a fachlicher Akt, never a list-view side
+	// effect — the caller must hold `audit.reveal_identity` (Auditor /
+	// Product Owner only, never Administrator), a mandatory non-blank
+	// reason is required, and the resolution writes its own
+	// `audit.identity_revealed` audit event atomically. A non-user actor
+	// (system/service) has no identity to resolve and returns its own
+	// label. A denied or invalid request writes nothing.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
+	RevealAuditEventActorWithResponse(ctx context.Context, id string, body RevealAuditEventActorJSONRequestBody, reqEditors ...RequestEditorFn) (*RevealAuditEventActorResponse, error)
+
 	// ListSignalsWithResponse List signals
 	//
 	// Cursor-paginated, filterable working-list read (concept ch. 10.2,
@@ -644,6 +853,75 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /api/v1/signals/{signal_id} (the `GetSignal` operationId).
 	GetSignalWithResponse(ctx context.Context, signalId string, reqEditors ...RequestEditorFn) (*GetSignalResponse, error)
+}
+
+type RevealAuditEventActorResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RevealedActor
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RevealAuditEventActorResponse) GetJSON200() *RevealedActor {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r RevealAuditEventActorResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r RevealAuditEventActorResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r RevealAuditEventActorResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r RevealAuditEventActorResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r RevealAuditEventActorResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RevealAuditEventActorResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RevealAuditEventActorResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RevealAuditEventActorResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type ListSignalsResponse struct {
@@ -763,6 +1041,52 @@ func (r GetSignalResponse) ContentType() string {
 	return ""
 }
 
+// RevealAuditEventActorWithBodyWithResponse Reveal the actor identity of an audit event
+//
+// The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
+// an audit event's user actor against the internal users table and
+// return the identity. It is a fachlicher Akt, never a list-view side
+// effect — the caller must hold `audit.reveal_identity` (Auditor /
+// Product Owner only, never Administrator), a mandatory non-blank
+// reason is required, and the resolution writes its own
+// `audit.identity_revealed` audit event atomically. A non-user actor
+// (system/service) has no identity to resolve and returns its own
+// label. A denied or invalid request writes nothing.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
+func (c *ClientWithResponses) RevealAuditEventActorWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RevealAuditEventActorResponse, error) {
+	rsp, err := c.RevealAuditEventActorWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRevealAuditEventActorResponse(rsp)
+}
+
+// RevealAuditEventActorWithResponse Reveal the actor identity of an audit event
+//
+// The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
+// an audit event's user actor against the internal users table and
+// return the identity. It is a fachlicher Akt, never a list-view side
+// effect — the caller must hold `audit.reveal_identity` (Auditor /
+// Product Owner only, never Administrator), a mandatory non-blank
+// reason is required, and the resolution writes its own
+// `audit.identity_revealed` audit event atomically. A non-user actor
+// (system/service) has no identity to resolve and returns its own
+// label. A denied or invalid request writes nothing.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
+func (c *ClientWithResponses) RevealAuditEventActorWithResponse(ctx context.Context, id string, body RevealAuditEventActorJSONRequestBody, reqEditors ...RequestEditorFn) (*RevealAuditEventActorResponse, error) {
+	rsp, err := c.RevealAuditEventActor(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRevealAuditEventActorResponse(rsp)
+}
+
 // ListSignalsWithResponse List signals
 //
 // Cursor-paginated, filterable working-list read (concept ch. 10.2,
@@ -797,6 +1121,60 @@ func (c *ClientWithResponses) GetSignalWithResponse(ctx context.Context, signalI
 		return nil, err
 	}
 	return ParseGetSignalResponse(rsp)
+}
+
+// ParseRevealAuditEventActorResponse parses an HTTP response from a RevealAuditEventActorWithResponse call
+func ParseRevealAuditEventActorResponse(rsp *http.Response) (*RevealAuditEventActorResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RevealAuditEventActorResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RevealedActor
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
 }
 
 // ParseListSignalsResponse parses an HTTP response from a ListSignalsWithResponse call
@@ -888,6 +1266,9 @@ func ParseGetSignalResponse(rsp *http.Response) (*GetSignalResponse, error) {
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// RevealAuditEventActor Reveal the actor identity of an audit event
+	// (POST /api/v1/audit-events/{id}/reveal-actor)
+	RevealAuditEventActor(w http.ResponseWriter, r *http.Request, id string)
 	// ListSignals List signals
 	// (GET /api/v1/signals)
 	ListSignals(w http.ResponseWriter, r *http.Request, params ListSignalsParams)
@@ -904,6 +1285,32 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// RevealAuditEventActor operation middleware
+func (siw *ServerInterfaceWrapper) RevealAuditEventActor(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevealAuditEventActor(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListSignals operation middleware
 func (siw *ServerInterfaceWrapper) ListSignals(w http.ResponseWriter, r *http.Request) {
@@ -1125,8 +1532,88 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/signals", wrapper.ListSignals)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/signals/{signal_id}", wrapper.GetSignal)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/audit-events/{id}/reveal-actor", wrapper.RevealAuditEventActor)
 
 	return m
+}
+
+type RevealAuditEventActorRequestObject struct {
+	Id   string `json:"id"`
+	Body *RevealAuditEventActorJSONRequestBody
+}
+
+type RevealAuditEventActorResponseObject interface {
+	VisitRevealAuditEventActorResponse(w http.ResponseWriter) error
+}
+
+type RevealAuditEventActor200JSONResponse RevealedActor
+
+func (response RevealAuditEventActor200JSONResponse) VisitRevealAuditEventActorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevealAuditEventActor400JSONResponse ProblemDetails
+
+func (response RevealAuditEventActor400JSONResponse) VisitRevealAuditEventActorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevealAuditEventActor403JSONResponse ProblemDetails
+
+func (response RevealAuditEventActor403JSONResponse) VisitRevealAuditEventActorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevealAuditEventActor404JSONResponse ProblemDetails
+
+func (response RevealAuditEventActor404JSONResponse) VisitRevealAuditEventActorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevealAuditEventActor500JSONResponse ProblemDetails
+
+func (response RevealAuditEventActor500JSONResponse) VisitRevealAuditEventActorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type ListSignalsRequestObject struct {
@@ -1245,6 +1732,9 @@ func (response GetSignal500JSONResponse) VisitGetSignalResponse(w http.ResponseW
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// RevealAuditEventActor Reveal the actor identity of an audit event
+	// (POST /api/v1/audit-events/{id}/reveal-actor)
+	RevealAuditEventActor(ctx context.Context, request RevealAuditEventActorRequestObject) (RevealAuditEventActorResponseObject, error)
 	// ListSignals List signals
 	// (GET /api/v1/signals)
 	ListSignals(ctx context.Context, request ListSignalsRequestObject) (ListSignalsResponseObject, error)
@@ -1290,6 +1780,39 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// RevealAuditEventActor operation middleware
+func (sh *strictHandler) RevealAuditEventActor(w http.ResponseWriter, r *http.Request, id string) {
+	var request RevealAuditEventActorRequestObject
+
+	request.Id = id
+
+	var body RevealAuditEventActorJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevealAuditEventActor(ctx, request.(RevealAuditEventActorRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevealAuditEventActor")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevealAuditEventActorResponseObject); ok {
+		if err := validResponse.VisitRevealAuditEventActorResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // ListSignals operation middleware
@@ -1349,48 +1872,65 @@ func (sh *strictHandler) GetSignal(w http.ResponseWriter, r *http.Request, signa
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"FXB9g7btDZ3ez/8bAA==",
+	"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",
+	"py1Ee+3xvwLXbxW4/oa25cndvXf/OwA=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

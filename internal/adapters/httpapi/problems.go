@@ -27,12 +27,13 @@ const problemType = "about:blank"
 // problem type). They are stable per status so clients can match on them;
 // the per-occurrence detail field carries the specifics.
 const (
-	titleInvalidRequest = "Invalid request"
-	titleSignalNotFound = "Signal not found"
-	titleConflict       = "Conflict"
-	titleUnauthorized   = "Unauthorized"
-	titleForbidden      = "Forbidden"
-	titleInternalError  = "Internal server error"
+	titleInvalidRequest     = "Invalid request"
+	titleSignalNotFound     = "Signal not found"
+	titleAuditEventNotFound = "Audit event not found"
+	titleConflict           = "Conflict"
+	titleUnauthorized       = "Unauthorized"
+	titleForbidden          = "Forbidden"
+	titleInternalError      = "Internal server error"
 )
 
 // newProblem assembles one RFC 9457 problem detail (ARCH-001 §4

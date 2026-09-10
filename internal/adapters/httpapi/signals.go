@@ -43,19 +43,14 @@ type SignalsQuery interface {
 	GetSignal(ctx context.Context, in application.GetSignalInput) (application.Signal, error)
 }
 
-// signalsHandler implements gen.StrictServerInterface for the two I1b signal
-// reads. query is the application use-case surface; logger receives
-// unexpected internal errors (the client only ever sees the generic 500
-// problem detail, concept ch. 5.2).
+// signalsHandler implements the two I1b signal reads of the generated strict
+// interface. The full gen.StrictServerInterface is composed from the
+// per-domain handlers in api.go, so the assertion lives there; this handler
+// carries only the signal-read operations.
 type signalsHandler struct {
 	query  SignalsQuery
 	logger *slog.Logger
 }
-
-// Compile-time proof that the handler implements the generated strict
-// interface: a missing operation, a drifted signature or a declared
-// response without a typed object fails the build (ADR-011).
-var _ gen.StrictServerInterface = (*signalsHandler)(nil)
 
 // requestPathContextKey is the context key under which recordRequestPath
 // stores the request path for the strict handlers.
@@ -75,35 +70,6 @@ func recordRequestPath(next gen.StrictHandlerFunc, _ string) gen.StrictHandlerFu
 func pathFromContext(ctx context.Context) (string, bool) {
 	p, ok := ctx.Value(requestPathContextKey{}).(string)
 	return p, ok
-}
-
-// NewSignalsHandler returns the HTTP handler of the I1b signal reads as the
-// generated gen.ServerInterface the route registration (signals_routes.go)
-// mounts: the strict server wrapper around the StrictServerInterface
-// implementation above. The wrapper's own error handlers keep every answer
-// an RFC 9457 problem detail: a request the generated binding cannot parse
-// answers 400, and an error the handlers choose not to render themselves
-// (the conflict class, which the read contract does not declare) is mapped
-// by writeError exactly like before the strict migration. Nil dependencies
-// are programming errors and panic here, at construction time, like
-// application.NewService does.
-func NewSignalsHandler(query SignalsQuery, logger *slog.Logger) gen.ServerInterface {
-	if query == nil {
-		panic("httpapi: NewSignalsHandler: query must not be nil")
-	}
-	if logger == nil {
-		panic("httpapi: NewSignalsHandler: logger must not be nil")
-	}
-	h := &signalsHandler{query: query, logger: logger}
-	return gen.NewStrictHandlerWithOptions(h, []gen.StrictMiddlewareFunc{recordRequestPath},
-		gen.StrictHTTPServerOptions{
-			RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
-				writeProblem(w, r, http.StatusBadRequest, titleInvalidRequest, err.Error())
-			},
-			ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
-				h.writeError(w, r, err)
-			},
-		})
 }
 
 // ListSignals implements gen.StrictServerInterface (GET /api/v1/signals,

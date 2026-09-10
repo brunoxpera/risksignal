@@ -83,7 +83,7 @@ func (f *fakeSignals) GetSignal(ctx context.Context, in application.GetSignalInp
 }
 
 // newSignalAPI builds the I1b signal route table exactly like the
-// composition root (cmd/risksignal-server): RegisterSignalRoutes on a fresh
+// composition root (cmd/risksignal-server): RegisterAPIRoutes on a fresh
 // ServeMux, wrapped in the WP-1a.06 middleware chain of NewHandler. The
 // tests therefore exercise the real mount path, and the correlation
 // middleware populates the request context whose id the ProblemDetails
@@ -92,7 +92,7 @@ func newSignalAPI(t *testing.T, query SignalsQuery) http.Handler {
 	t.Helper()
 	logger, _ := testLogger(t)
 	mux := http.NewServeMux()
-	RegisterSignalRoutes(mux, NewSignalsHandler(query, logger))
+	RegisterAPIRoutes(mux, NewAPIHandler(query, nil, logger))
 	return NewHandler(mux, logger)
 }
 
@@ -394,7 +394,7 @@ func TestListSignalsRejectsInvalidLimit(t *testing.T) {
 // TestListSignalsMalformedLimitParamRenders400 asserts a query value the
 // generated parameter binding cannot parse (?limit=abc) is a client mistake
 // answered as a problem detail — the binding-error handler of
-// RegisterSignalRoutes replaces the generated plain-text default.
+// RegisterAPIRoutes replaces the generated plain-text default.
 func TestListSignalsMalformedLimitParamRenders400(t *testing.T) {
 	fake := &fakeSignals{}
 	h := newSignalAPI(t, fake)
@@ -456,7 +456,7 @@ func TestGetSignalInfraErrorIsGeneric500(t *testing.T) {
 	logger, logBuf := testLogger(t)
 	fake := &fakeSignals{getErr: errors.New("database connection refused")}
 	mux := http.NewServeMux()
-	RegisterSignalRoutes(mux, NewSignalsHandler(fake, logger))
+	RegisterAPIRoutes(mux, NewAPIHandler(fake, nil, logger))
 	h := NewHandler(mux, logger)
 
 	rec := getWithRequestID(t, h, "/api/v1/signals/00000000-0000-0000-0000-0000000000a1", "infra-7")

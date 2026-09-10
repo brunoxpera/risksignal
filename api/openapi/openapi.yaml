@@ -142,6 +142,77 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/audit-events/{id}/reveal-actor:
+    post:
+      operationId: revealAuditEventActor
+      summary: Reveal the actor identity of an audit event
+      description: |
+        The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
+        an audit event's user actor against the internal users table and
+        return the identity. It is a fachlicher Akt, never a list-view side
+        effect — the caller must hold `audit.reveal_identity` (Auditor /
+        Product Owner only, never Administrator), a mandatory non-blank
+        reason is required, and the resolution writes its own
+        `audit.identity_revealed` audit event atomically. A non-user actor
+        (system/service) has no identity to resolve and returns its own
+        label. A denied or invalid request writes nothing.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Audit event identifier (uuid).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevealActorRequest'
+      responses:
+        '200':
+          description: |
+            The resolved identity of a user actor, or the system/service
+            label of a non-user actor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevealedActor'
+        '400':
+          description: |
+            The request is not acceptable as given: a malformed event id, a
+            missing/blank reason or an unparsable body. Rendered as an RFC
+            9457 problem detail whose detail names the offending value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: |
+            The authenticated principal may not exercise
+            `audit.reveal_identity` (deny-by-default: Auditor and Product
+            Owner only). The denied request wrote nothing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No audit event exists for this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error (for example an unreachable database
+            or a failed self-audit write, which rolls the whole reveal
+            back). The cause never leaves the server: the problem detail is
+            the generic internal-error shape without a detail field
+            (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
 components:
   schemas:
     # --- Core signal read (ARCH-001 §4) -----------------------------------
@@ -271,6 +342,57 @@ components:
       type: string
       description: Exposure of the asset to the internet (concept ch. 6.2).
       enum: [internet, internal, isolated, unknown]
+    # --- Identity reveal (ADR-014, ARCH-005 section 7) --------------------
+    RevealActorRequest:
+      type: object
+      description: |
+        The body of the governed reveal command (ADR-014): the mandatory
+        non-blank justification of the identity resolution.
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          description: |
+            Mandatory, non-blank justification of the resolution; recorded
+            in the self-audit (concept ch. 13.2).
+    RevealedActor:
+      type: object
+      description: |
+        The outcome of a reveal. For a user actor the resolved identity
+        (user_id/subject_id/display_name) is set and is_user is true; for a
+        system/service actor is_user is false, label carries the actor's own
+        label and the identity fields are null.
+      required:
+        - event_id
+        - actor_type
+        - is_user
+        - label
+      properties:
+        event_id:
+          type: string
+          description: The revealed audit event's id (uuid).
+        actor_type:
+          type: string
+          description: The target event's actor type (user, system or service).
+        is_user:
+          type: boolean
+          description: Whether the target actor was a user and an identity was resolved.
+        label:
+          type: string
+          description: |
+            Display label: the resolved display name (or the "User
+            #<short-id>" fallback of a pseudonymised row) for a user actor,
+            or the system/service actor's own label otherwise.
+        user_id:
+          type: [string, 'null']
+          description: The resolved internal users.id (null for a non-user actor).
+        subject_id:
+          type: [string, 'null']
+          description: The resolved issuer-qualified external subject (null for a non-user actor).
+        display_name:
+          type: [string, 'null']
+          description: The resolved display name (null when pseudonymised or for a non-user actor).
     # --- Error envelope (RFC 9457, ADR-011) --------------------------------
     ProblemDetails:
       type: object

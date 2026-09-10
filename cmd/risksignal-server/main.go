@@ -168,11 +168,13 @@ func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (ht
 	gate.Mount(mux, "GET /version", "", httpapi.VersionHandler(buildinfo.Current()))
 
 	svc := newSignalService(pool)
-	// The I1b signal reads require signals.read (ARCH-005 §5); the declaration
-	// is bound at registration through the gate.
+	// The I1b signal reads require signals.read and the I5a identity reveal
+	// requires audit.reveal_identity (ARCH-005 §5, §7); each declaration is
+	// bound at registration through the gate.
 	gate.Declare("GET /api/v1/signals", domain.PermissionSignalsRead)
 	gate.Declare("GET /api/v1/signals/{signal_id}", domain.PermissionSignalsRead)
-	httpapi.RegisterSignalRoutes(gate.Decorate(mux), httpapi.NewSignalsHandler(svc, logger))
+	gate.Declare("POST /api/v1/audit-events/{id}/reveal-actor", domain.PermissionAuditRevealIdentity)
+	httpapi.RegisterAPIRoutes(gate.Decorate(mux), httpapi.NewAPIHandler(svc, svc, logger))
 
 	return httpapi.NewHandlerWithAuth(mux, logger, auth), nil
 }
@@ -259,6 +261,7 @@ func newSignalService(pool *pgxpool.Pool) *application.Service {
 		Quarantine:      repo.NewQuarantineRepo(q),
 		Components:      repo.NewComponentRepo(q),
 		Inventory:       repo.NewInventoryRepo(q),
+		Users:           repo.NewUserRepo(q),
 		Clock:           clock.RealClock{},
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)
