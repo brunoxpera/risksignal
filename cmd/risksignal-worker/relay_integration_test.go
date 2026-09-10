@@ -211,18 +211,20 @@ func TestOutboxRelayDrainDeliversOnceAndRedeliveryIsIdempotent(t *testing.T) {
 	q := gen.New(pool)
 
 	// The production wiring of runWithContext: the postgres relay store
-	// behind the worker relay, with the signal.created sink registered on
-	// its dispatch registry. The test wraps the sink in a counter so the
-	// number of dispatches is observable.
+	// behind the worker relay, with a counting no-op handler registered on
+	// its dispatch registry. (In production the signal.created key is owned
+	// by the I4 notify handler, WP-4.06; this integration test only exercises
+	// the relay's claim/dispatch/ack/dead-letter mechanics, so a counting
+	// no-op stands in for any handler.) The counter makes the number of
+	// dispatches observable.
 	relay, err := worker.NewRelay(repo.NewOutboxRelay(q), discardLogger())
 	if err != nil {
 		t.Fatalf("worker.NewRelay: %v", err)
 	}
 	var sinkCalls atomic.Int32
-	realSink := worker.SignalCreatedSink(discardLogger())
 	if err := relay.Register(application.EventTypeSignalCreated, worker.Handler(func(ctx context.Context, ev worker.ClaimedEvent) error {
 		sinkCalls.Add(1)
-		return realSink(ctx, ev)
+		return nil
 	})); err != nil {
 		t.Fatalf("relay.Register: %v", err)
 	}

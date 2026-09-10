@@ -14,7 +14,6 @@ package worker
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"reflect"
 	"testing"
 )
@@ -288,18 +287,5 @@ func TestRelayRegisterRejectsInvalidBindings(t *testing.T) {
 	}
 	if err := relay.Register("signal.created", handler); err == nil {
 		t.Fatal("Registering the same type twice succeeded, want an error")
-	}
-}
-
-// TestSignalCreatedSinkIsANoOp: the I1b sink accepts the event and reports
-// success — with and without a logger — so the observable delivery effect
-// is the relay's ack transition, nothing else.
-func TestSignalCreatedSinkIsANoOp(t *testing.T) {
-	event := ClaimedEvent{ID: "88888888-8888-8888-8888-888888888888", Type: "signal.created", Payload: []byte(`{"priority":"P1"}`)}
-
-	for _, logger := range []*slog.Logger{nil, discardLogger()} {
-		if err := SignalCreatedSink(logger)(context.Background(), event); err != nil {
-			t.Fatalf("SignalCreatedSink returned %v, want nil", err)
-		}
 	}
 }

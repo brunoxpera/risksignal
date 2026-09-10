@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/brunoxpera/risksignal/internal/adapters/notify"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
@@ -44,6 +45,33 @@ import (
 	"github.com/brunoxpera/risksignal/internal/platform/logging"
 	"github.com/brunoxpera/risksignal/internal/platform/metrics"
 )
+
+// buildNotifyPort assembles the notification channel dispatcher from the
+// resolved configuration (D-006): the in-app surface is always present; the
+// SMTP relay (Mailpit in the local environment) and the signed webhook join
+// it only when the operator configured and enabled a target. An
+// enabled-but-incomplete channel is a wiring error — the config validation
+// already rejects that, so this is the defensive backstop.
+func buildNotifyPort(cfg *config.Config) (notify.NotifyPort, error) {
+	ports := map[notify.NotifyChannel]notify.NotifyPort{
+		notify.ChannelInApp: notify.NewInAppPort(),
+	}
+	if cfg.Notify.SMTP.Enabled {
+		port, err := notify.NewSMTPPort(notify.NetSMTPMailer{Addr: cfg.Notify.SMTP.Addr}, cfg.Notify.SMTP.From, cfg.Notify.SMTP.To)
+		if err != nil {
+			return nil, err
+		}
+		ports[notify.ChannelSMTP] = port
+	}
+	if cfg.Notify.Webhook.Enabled {
+		port, err := notify.NewWebhookPort(cfg.Notify.Webhook.URL, cfg.Notify.Webhook.Secret, nil)
+		if err != nil {
+			return nil, err
+		}
+		ports[notify.ChannelWebhook] = port
+	}
+	return notify.NewDispatcher(ports), nil
+}
 
 // shutdownGracePeriod bounds the worker shutdown (WP-1a.10: clean shutdown
 // with a grace period): after a shutdown signal the scheduler stops
@@ -98,18 +126,17 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	defer pool.Close()
 
 	// The outbox relay (WP-1b.06, ARCH-001 §2) executes one drain per
-	// scheduler cycle. Its dispatch registry carries the I1b signal.created
-	// sink — a no-op standing in for the I4 notification adapter, which
-	// grows onto the same registry key in I4 (ch. 14.3
-	// notification.deliver) — and, since WP-2.08 (DEV-042, ARCH-002 §5),
-	// the source.run job types: source.fetch and source.normalize, driven
-	// through the application service below.
+	// scheduler cycle. Its dispatch registry is filled below by the job
+	// handlers of the I2/I3/I4 work packages: the source.run job types
+	// (source.fetch and source.normalize, WP-2.08 / DEV-042, ARCH-002 §5),
+	// the matching job types (matching.rebuild, matching.recompute, ARCH-003),
+	// the priority.recompute handler (ARCH-004 §5, WP-4.05), the sla.evaluate
+	// scheduler's escalation/reminder events and the notify handler of the
+	// I4 notification kinds (ARCH-004 §6.3, WP-4.06) — which replaced the
+	// I1b signal.created no-op sink on the same registry key.
 	q := gen.New(pool)
 	relay, err := worker.NewRelay(repo.NewOutboxRelay(q), logger)
 	if err != nil {
-		return fmt.Errorf("configure outbox relay: %w", err)
-	}
-	if err := relay.Register(application.EventTypeSignalCreated, worker.SignalCreatedSink(logger)); err != nil {
 		return fmt.Errorf("configure outbox relay: %w", err)
 	}
 
@@ -222,6 +249,46 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	}
 	if err := priorityJobs.RegisterHandlers(relay); err != nil {
 		return fmt.Errorf("configure priority recompute jobs: %w", err)
+	}
+
+	// The notify handler (ARCH-004 §6.3, WP-4.06) delivers the four
+	// notification outbox kinds — signal.created, signal.escalated,
+	// signal.reopen_proposed and reminder — through the NotifyPort: the
+	// in-app row itself plus, for an active notification, the configured
+	// SMTP relay (Mailpit in the local environment, D-004) and the signed
+	// webhook. It replaced the I1b signal.created no-op sink: the channel
+	// policy is config-derived (notify.*, D-006), delivery is keyed on the
+	// immutable outbox event id (exactly one notification per event and
+	// channel, FR-023) and a delivered P1 create/escalate fulfils the
+	// signal's notification SLA clock. There is no production mail/webhook
+	// target in I4 — the SMTP/webhook channels are enabled only when the
+	// operator configures a target.
+	notifyPort, err := buildNotifyPort(cfg)
+	if err != nil {
+		return fmt.Errorf("configure notify port: %w", err)
+	}
+	notifyJobs, err := worker.NewNotifyJobs(worker.NotifyJobsDeps{
+		Notifications: repo.NewNotificationRepo(q),
+		SlaClocks:     repo.NewSlaClockRepo(q),
+		Port:          notifyPort,
+		Policy: worker.NotifyPolicy{
+			P2Active:       cfg.Notify.P2Active,
+			SMTPEnabled:    cfg.Notify.SMTP.Enabled,
+			SMTPTo:         cfg.Notify.SMTP.To,
+			WebhookEnabled: cfg.Notify.Webhook.Enabled,
+			WebhookURL:     cfg.Notify.Webhook.URL,
+		},
+		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
+			return postgres.WithTx(ctx, pool, fn)
+		},
+		Clock:  clock.RealClock{},
+		Logger: logger,
+	})
+	if err != nil {
+		return fmt.Errorf("configure notify jobs: %w", err)
+	}
+	if err := notifyJobs.RegisterHandlers(relay); err != nil {
+		return fmt.Errorf("configure notify jobs: %w", err)
 	}
 
 	// The sla.evaluate scheduler (ARCH-004 §4.4, WP-4.05) runs the breach
