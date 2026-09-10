@@ -36,11 +36,13 @@ import (
 
 	"github.com/brunoxpera/risksignal/db/migrations"
 	"github.com/brunoxpera/risksignal/internal/adapters/httpapi"
+	"github.com/brunoxpera/risksignal/internal/adapters/oidc"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
 	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
 	"github.com/brunoxpera/risksignal/internal/platform/buildinfo"
 	"github.com/brunoxpera/risksignal/internal/platform/clock"
 	"github.com/brunoxpera/risksignal/internal/platform/config"
@@ -87,9 +89,14 @@ func serve(cfg *config.Config, logger *slog.Logger) error {
 	}
 	defer pool.Close()
 
+	handler, err := newHandler(cfg, pool, logger)
+	if err != nil {
+		return err
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.HTTP.Addr,
-		Handler:           newHandler(cfg, pool, logger),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second, // slow-header protection
 		IdleTimeout:       60 * time.Second,
 		// net/http internals (e.g. panics that escape the chain) go through
@@ -132,23 +139,101 @@ func serve(cfg *config.Config, logger *slog.Logger) error {
 
 // newHandler builds the route table of the server and wraps it in the
 // WP-1a.06 middleware chain (correlation ID, access log, panic recovery,
-// security headers, CSP, CORS off, body limit). WP-1a.07 registers the
-// System endpoints of concept ch. 10.2 on the ServeMux; WP-1b.08 registers
-// the generated I1b signal reads of ARCH-001 §4 (GET /api/v1/signals and
-// GET /api/v1/signals/{signal_id}) on the same mux — the application
-// service over the database pool serves them, and the chain applies to
-// them like to every other route. Every other path still 404s — through
-// the same chain, whose access log writes one structured record per
+// security headers, CSP, CORS off, body limit) plus the I5a authentication
+// middleware (ARCH-005 §5). WP-1a.07 registers the System endpoints of
+// concept ch. 10.2 on the ServeMux; WP-1b.08 registers the generated I1b
+// signal reads of ARCH-001 §4 (GET /api/v1/signals and
+// GET /api/v1/signals/{signal_id}) on the same mux behind the I5a per-route
+// permission declaration (signals.read). Every other path still 404s —
+// through the same chain, whose access log writes one structured record per
 // request (WP-1a.08).
-func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) http.Handler {
+//
+// The authentication middleware is built from the configuration: with the
+// local bypass enabled it authenticates as the seeded dev principal (local
+// mode + loopback bind, enforced by config.Validate); otherwise it verifies
+// Bearer tokens through the OIDC verifier, and a misconfigured oidc.* fails
+// here — before the process binds.
+func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (http.Handler, error) {
+	auth, err := buildAuthMiddleware(cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+
 	mux := http.NewServeMux()
-	mux.Handle("GET /health/live", httpapi.LiveHandler())
-	mux.Handle("GET /health/ready", httpapi.ReadyHandler(readinessProbes(cfg, pool)))
-	mux.Handle("GET /version", httpapi.VersionHandler(buildinfo.Current()))
+	gate := httpapi.NewPermissionGate(nil, logger) // declarations bind; the WP-5a.06 principal checker activates the early gate
+
+	// Public routes (no identity): the operational probes, the build metadata.
+	gate.Mount(mux, "GET /health/live", "", httpapi.LiveHandler())
+	gate.Mount(mux, "GET /health/ready", "", httpapi.ReadyHandler(readinessProbes(cfg, pool)))
+	gate.Mount(mux, "GET /version", "", httpapi.VersionHandler(buildinfo.Current()))
 
 	svc := newSignalService(pool)
-	httpapi.RegisterSignalRoutes(mux, httpapi.NewSignalsHandler(svc, logger))
-	return httpapi.NewHandler(mux, logger)
+	// The I1b signal reads require signals.read (ARCH-005 §5); the declaration
+	// is bound at registration through the gate.
+	gate.Declare("GET /api/v1/signals", domain.PermissionSignalsRead)
+	gate.Declare("GET /api/v1/signals/{signal_id}", domain.PermissionSignalsRead)
+	httpapi.RegisterSignalRoutes(gate.Decorate(mux), httpapi.NewSignalsHandler(svc, logger))
+
+	return httpapi.NewHandlerWithAuth(mux, logger, auth), nil
+}
+
+// buildAuthMiddleware assembles the I5a authentication middleware from the
+// configuration (ARCH-005 §2/§4/§5). With the local bypass enabled the dev
+// principal is used and no OIDC verifier is required; otherwise the OIDC
+// verifier is built from oidc.* — a misconfiguration (missing client id,
+// unknown role mapping) is a startup error.
+func buildAuthMiddleware(cfg *config.Config, logger *slog.Logger) (httpapi.Middleware, error) {
+	opts := httpapi.AuthOptions{
+		BypassEnabled:     cfg.Auth.BypassEnabled,
+		BypassPrincipal:   cfg.Auth.BypassPrincipal,
+		SessionCookieName: cfg.OIDC.SessionCookieName,
+	}
+	var verifier httpapi.TokenVerifier
+	if !cfg.Auth.BypassEnabled {
+		v, err := oidc.New(oidcAdapterConfig(cfg.OIDC))
+		if err != nil {
+			return nil, fmt.Errorf("oidc: %w", err)
+		}
+		verifier = oidcVerifier{v: v}
+	}
+	return httpapi.AuthenticationMiddleware(verifier, nil, opts), nil
+}
+
+// oidcAdapterConfig maps the platform oidc.* keys onto the OIDC adapter
+// configuration (ARCH-005 §2). The role-mapping values are validated against
+// the domain role vocabulary by the adapter's normalize step.
+func oidcAdapterConfig(o config.OIDC) oidc.Config {
+	var mappings map[string]domain.Role
+	if len(o.RoleMappings) > 0 {
+		mappings = make(map[string]domain.Role, len(o.RoleMappings))
+		for claim, role := range o.RoleMappings {
+			mappings[claim] = domain.Role(role)
+		}
+	}
+	return oidc.Config{
+		Issuer:       o.Issuer,
+		ClientID:     o.ClientID,
+		Audience:     o.Audience,
+		RedirectURL:  o.RedirectURL,
+		Scopes:       o.Scopes,
+		RolesClaim:   o.RolesClaim,
+		RoleMappings: mappings,
+	}
+}
+
+// oidcVerifier adapts *oidc.Verifier (which returns the OIDC Identity incl.
+// the first-login role seed) onto the httpapi.TokenVerifier port
+// (domain.Identity): the middleware authenticates only, so the role seed is
+// intentionally dropped at this boundary — roles are re-read by the use case,
+// never taken from the token (ARCH-005 §2/§5).
+type oidcVerifier struct{ v *oidc.Verifier }
+
+func (a oidcVerifier) Verify(ctx context.Context, rawToken string) (domain.Identity, error) {
+	id, err := a.v.Verify(ctx, rawToken)
+	if err != nil {
+		return domain.Identity{}, err
+	}
+	return domain.Identity{SubjectID: id.SubjectID, DisplayName: id.DisplayName, Email: id.Email}, nil
 }
 
 // newSignalService assembles the application service behind the signal API

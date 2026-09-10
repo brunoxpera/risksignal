@@ -30,6 +30,8 @@ const (
 	titleInvalidRequest = "Invalid request"
 	titleSignalNotFound = "Signal not found"
 	titleConflict       = "Conflict"
+	titleUnauthorized   = "Unauthorized"
+	titleForbidden      = "Forbidden"
 	titleInternalError  = "Internal server error"
 )
 

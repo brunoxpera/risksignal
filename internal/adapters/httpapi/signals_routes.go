@@ -20,11 +20,15 @@ import (
 // routes with their HTTP-method patterns and wires the generated
 // parameter-binding wrapper in front of the handler.
 //
+// mux is a gen.ServeMux, so the composition root can pass a decorated router
+// (httpapi.PermissionGate.Decorate) to bind the per-route permission gate at
+// registration; a plain *http.ServeMux mounts the routes ungated.
+//
 // A binding failure of the generated wrapper (a malformed query value such
 // as ?limit=abc, or a repeated parameter) is a client mistake; the default
 // plain-text error handler is replaced so even those answer as RFC 9457
 // problem details carrying the correlation id, like every other API error.
-func RegisterSignalRoutes(mux *http.ServeMux, api gen.ServerInterface) {
+func RegisterSignalRoutes(mux gen.ServeMux, api gen.ServerInterface) {
 	gen.HandlerWithOptions(api, gen.StdHTTPServerOptions{
 		BaseRouter: mux,
 		ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {

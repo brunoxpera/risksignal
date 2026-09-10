@@ -58,6 +58,23 @@ func NewHandler(h http.Handler, logger *slog.Logger) http.Handler {
 	)(h)
 }
 
+// NewHandlerWithAuth wraps h with the complete WP-1a.06 middleware chain plus
+// the given authentication middleware (WP-5a.05) as the innermost layer, so
+// an authentication failure (401) still carries the correlation id, the
+// security headers and the access-log record of the chain.
+func NewHandlerWithAuth(h http.Handler, logger *slog.Logger, auth Middleware) http.Handler {
+	return Chain(
+		CorrelationID,
+		AccessLog(logger),
+		RecoverPanic(logger),
+		SecurityHeaders,
+		ContentSecurityPolicy,
+		CORSDisabled,
+		LimitBody(MaxBodyBytes),
+		auth,
+	)(h)
+}
+
 // statusRecorder records the first response status while writing through to
 // the wrapped ResponseWriter. The access log needs the final status, and the
 // panic recovery needs to know whether the handler already started answering.

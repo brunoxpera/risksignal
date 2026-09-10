@@ -125,7 +125,11 @@ func TestSignalContractAgainstSeededServer(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	// The real composition root behind httptest.
-	srv := httptest.NewServer(newHandler(testConfig(dbURL), pool, discardLogger()))
+	handler, err := newHandler(testConfig(dbURL), pool, discardLogger())
+	if err != nil {
+		t.Fatalf("newHandler: %v", err)
+	}
+	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
 	client, err := gen.NewClientWithResponses(srv.URL)

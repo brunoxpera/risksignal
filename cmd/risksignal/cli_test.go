@@ -475,8 +475,48 @@ const goldenDiagnoseConfigJSON = `{
       "set": true,
       "source": "env"
     },
+    "oidc.client_id": {
+      "value": "",
+      "source": "default"
+    },
+    "oidc.client_secret_ref": {
+      "set": true,
+      "source": "default"
+    },
+    "oidc.redirect_url": {
+      "set": true,
+      "source": "default"
+    },
+    "oidc.scopes": {
+      "value": "openid profile email",
+      "source": "default"
+    },
+    "oidc.roles_claim": {
+      "value": "roles",
+      "source": "default"
+    },
+    "oidc.role_mappings": {
+      "value": "0 mapping(s)",
+      "source": "default"
+    },
+    "oidc.audience": {
+      "value": "",
+      "source": "default"
+    },
+    "oidc.session_cookie_name": {
+      "value": "risksignal_session",
+      "source": "default"
+    },
+    "oidc.session_ttl": {
+      "value": "8h0m0s",
+      "source": "default"
+    },
     "auth.bypass_enabled": {
       "value": false,
+      "source": "default"
+    },
+    "auth.bypass_principal": {
+      "value": "local-developer",
       "source": "default"
     },
     "worker.interval": {

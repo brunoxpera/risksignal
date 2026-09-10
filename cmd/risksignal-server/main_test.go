@@ -72,18 +72,17 @@ func embeddedVersions(t *testing.T) []int64 {
 const defaultTestDBURL = "postgres://risksignal:risksignal@127.0.0.1:5432/risksignal?sslmode=disable"
 
 // testConfig returns a valid local configuration for the given database URL.
+// It enables the local authentication bypass (valid: env=local, loopback
+// bind) so the composition-root tests exercise the real route table as the
+// seeded dev principal without an OIDC provider.
 func testConfig(dbURL string) *config.Config {
-	return &config.Config{
-		SchemaVersion: config.SchemaVersion,
-		Env:           "local",
-		HTTP:          config.HTTP{Addr: "127.0.0.1:0"},
-		Database:      config.Database{URL: dbURL},
-		OIDC:          config.OIDC{Issuer: "http://127.0.0.1:9000/oidc"},
-		// The worker section is part of schema v1; readiness re-validates
-		// the whole configuration, so every worker duration must be positive
-		// even though the server never runs the scheduler.
-		Worker: config.Worker{Interval: 30 * time.Second, SLAEvaluateInterval: time.Minute, SLAReminderCadence: time.Hour},
-	}
+	cfg := config.Defaults()
+	cfg.Env = "local"
+	cfg.HTTP = config.HTTP{Addr: "127.0.0.1:0"}
+	cfg.Database = config.Database{URL: dbURL}
+	cfg.OIDC.Issuer = "http://127.0.0.1:9000/oidc"
+	cfg.Auth.BypassEnabled = true
+	return &cfg
 }
 
 // discardLogger keeps the middleware chain quiet in tests. The chain takes a
@@ -146,7 +145,10 @@ func TestHealthWithDatabaseDown(t *testing.T) {
 		t.Fatalf("postgres.NewPool: %v", err)
 	}
 	defer pool.Close()
-	h := newHandler(cfg, pool, discardLogger())
+	h, err := newHandler(cfg, pool, discardLogger())
+	if err != nil {
+		t.Fatalf("newHandler: %v", err)
+	}
 
 	live := get(t, h, "/health/live")
 	if live.Code != http.StatusOK {
@@ -223,7 +225,10 @@ func TestHealthReadyWithMigratedDatabase(t *testing.T) {
 	}
 	defer pool.Close()
 
-	h := newHandler(testConfig(dbURL), pool, discardLogger())
+	h, err := newHandler(testConfig(dbURL), pool, discardLogger())
+	if err != nil {
+		t.Fatalf("newHandler: %v", err)
+	}
 
 	live := get(t, h, "/health/live")
 	if live.Code != http.StatusOK {
@@ -289,4 +294,72 @@ func newServerTestDB(t *testing.T) string {
 
 	u.Path = "/" + name
 	return u.String()
+}
+
+// TestUnauthenticatedRequestReturns401 proves the I5a authentication
+// middleware at the composition root (ARCH-005 §5): with no credentials an
+// API request is answered 401 with an RFC 9457 problem detail — before any
+// use case or database access — while the public probes stay open. The OIDC
+// verifier is built (bypass off, client id set) but never consulted.
+func TestUnauthenticatedRequestReturns401(t *testing.T) {
+	cfg := testConfig("postgres://risksignal:risksignal@" + closedAddr(t) + "/risksignal?sslmode=disable")
+	cfg.Auth.BypassEnabled = false
+	cfg.OIDC.ClientID = "risksignal-web"
+
+	pool, err := postgres.NewPool(context.Background(), cfg.Database.URL)
+	if err != nil {
+		t.Fatalf("postgres.NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	h, err := newHandler(cfg, pool, discardLogger())
+	if err != nil {
+		t.Fatalf("newHandler: %v", err)
+	}
+
+	rec := get(t, h, "/api/v1/signals")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("/api/v1/signals status = %d, want 401 (body %s)", rec.Code, rec.Body.String())
+	}
+	var p struct {
+		Status        int    `json:"status"`
+		Title         string `json:"title"`
+		CorrelationId string `json:"correlation_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil {
+		t.Fatalf("decode 401 problem detail %q: %v", rec.Body.String(), err)
+	}
+	if p.Status != http.StatusUnauthorized || p.Title != "Unauthorized" || p.CorrelationId == "" {
+		t.Errorf("401 problem = %+v, want status 401, title Unauthorized, correlation id", p)
+	}
+	if rec.Header().Get("WWW-Authenticate") != "Bearer" {
+		t.Errorf("WWW-Authenticate = %q, want Bearer", rec.Header().Get("WWW-Authenticate"))
+	}
+
+	// The public probes need no credentials.
+	if live := get(t, h, "/health/live"); live.Code != http.StatusOK {
+		t.Errorf("/health/live status = %d, want 200 (public)", live.Code)
+	}
+	if version := get(t, h, "/version"); version.Code != http.StatusOK {
+		t.Errorf("/version status = %d, want 200 (public)", version.Code)
+	}
+}
+
+// TestNewHandlerFailsOnInvalidOIDCConfig proves a misconfigured oidc.* block
+// fails at handler construction — before the process binds — when the local
+// bypass is off.
+func TestNewHandlerFailsOnInvalidOIDCConfig(t *testing.T) {
+	cfg := testConfig("postgres://risksignal:risksignal@" + closedAddr(t) + "/risksignal?sslmode=disable")
+	cfg.Auth.BypassEnabled = false
+	cfg.OIDC.ClientID = "" // mandatory once the bypass is off
+
+	pool, err := postgres.NewPool(context.Background(), cfg.Database.URL)
+	if err != nil {
+		t.Fatalf("postgres.NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	if _, err := newHandler(cfg, pool, discardLogger()); err == nil {
+		t.Fatal("newHandler succeeded with a missing oidc.client_id, want error")
+	}
 }
