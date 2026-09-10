@@ -23,6 +23,7 @@ type apiHandlers struct {
 	*signalsHandler
 	auditRevealHandler
 	signalCommandHandler
+	i5bContractHandlers
 }
 
 // Compile-time proof that the composed handler implements every generated
@@ -50,6 +51,7 @@ func NewAPIHandler(query SignalsQuery, reveal AuditReveal, commands SignalComman
 		signalsHandler:       &signalsHandler{query: query, logger: logger},
 		auditRevealHandler:   auditRevealHandler{reveal: reveal, logger: logger},
 		signalCommandHandler: signalCommandHandler{commands: commands, logger: logger},
+		i5bContractHandlers:  i5bContractHandlers{logger: logger},
 	}
 	return gen.NewStrictHandlerWithOptions(h, []gen.StrictMiddlewareFunc{recordRequestPath},
 		gen.StrictHTTPServerOptions{

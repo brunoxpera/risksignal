@@ -24,6 +24,33 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for AssetType.
+const (
+	ApplicationFramework AssetType = "application_framework"
+	CloudSaas            AssetType = "cloud_saas"
+	ContainerImage       AssetType = "container_image"
+	NetworkSecurity      AssetType = "network_security"
+	ServerVm             AssetType = "server_vm"
+)
+
+// Valid indicates whether the value is a known member of the AssetType enum.
+func (e AssetType) Valid() bool {
+	switch e {
+	case ApplicationFramework:
+		return true
+	case CloudSaas:
+		return true
+	case ContainerImage:
+		return true
+	case NetworkSecurity:
+		return true
+	case ServerVm:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Confidence.
 const (
 	ConfidenceHigh   Confidence = "high"
@@ -75,6 +102,33 @@ func (e Criticality) Valid() bool {
 	}
 }
 
+// Defines values for Environment.
+const (
+	EnvironmentDevelopment Environment = "development"
+	EnvironmentProduction  Environment = "production"
+	EnvironmentStaging     Environment = "staging"
+	EnvironmentTest        Environment = "test"
+	EnvironmentUnknown     Environment = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the Environment enum.
+func (e Environment) Valid() bool {
+	switch e {
+	case EnvironmentDevelopment:
+		return true
+	case EnvironmentProduction:
+		return true
+	case EnvironmentStaging:
+		return true
+	case EnvironmentTest:
+		return true
+	case EnvironmentUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Exposure.
 const (
 	ExposureInternal Exposure = "internal"
@@ -93,6 +147,27 @@ func (e Exposure) Valid() bool {
 	case ExposureIsolated:
 		return true
 	case ExposureUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for InventoryImportStatus.
+const (
+	Committed InventoryImportStatus = "committed"
+	Failed    InventoryImportStatus = "failed"
+	Pending   InventoryImportStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the InventoryImportStatus enum.
+func (e InventoryImportStatus) Valid() bool {
+	switch e {
+	case Committed:
+		return true
+	case Failed:
+		return true
+	case Pending:
 		return true
 	default:
 		return false
@@ -159,10 +234,88 @@ func (e Priority) Valid() bool {
 	}
 }
 
+// Defines values for Role.
+const (
+	Administrator     Role = "administrator"
+	Auditor           Role = "auditor"
+	ProductOwner      Role = "product_owner"
+	SecurityAnalyst   Role = "security_analyst"
+	SystemResponsible Role = "system_responsible"
+)
+
+// Valid indicates whether the value is a known member of the Role enum.
+func (e Role) Valid() bool {
+	switch e {
+	case Administrator:
+		return true
+	case Auditor:
+		return true
+	case ProductOwner:
+		return true
+	case SecurityAnalyst:
+		return true
+	case SystemResponsible:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SLATarget.
+const (
+	Acknowledgement SLATarget = "acknowledgement"
+	Assessment      SLATarget = "assessment"
+	Decision        SLATarget = "decision"
+	Notification    SLATarget = "notification"
+)
+
+// Valid indicates whether the value is a known member of the SLATarget enum.
+func (e SLATarget) Valid() bool {
+	switch e {
+	case Acknowledgement:
+		return true
+	case Assessment:
+		return true
+	case Decision:
+		return true
+	case Notification:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for Scope.
+const (
+	All      Scope = "all"
+	Assigned Scope = "assigned"
+	Own      Scope = "own"
+)
+
+// Valid indicates whether the value is a known member of the Scope enum.
+func (e Scope) Valid() bool {
+	switch e {
+	case All:
+		return true
+	case Assigned:
+		return true
+	case Own:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SignalCommandRequestCommand.
 const (
 	Acknowledge      SignalCommandRequestCommand = "acknowledge"
+	AddComment       SignalCommandRequestCommand = "add_comment"
+	AssignOwner      SignalCommandRequestCommand = "assign_owner"
+	ChangeStatus     SignalCommandRequestCommand = "change_status"
 	OverridePriority SignalCommandRequestCommand = "override_priority"
+	PauseSla         SignalCommandRequestCommand = "pause_sla"
+	ResumeSla        SignalCommandRequestCommand = "resume_sla"
+	RevertPriority   SignalCommandRequestCommand = "revert_priority"
 )
 
 // Valid indicates whether the value is a known member of the SignalCommandRequestCommand enum.
@@ -170,7 +323,19 @@ func (e SignalCommandRequestCommand) Valid() bool {
 	switch e {
 	case Acknowledge:
 		return true
+	case AddComment:
+		return true
+	case AssignOwner:
+		return true
+	case ChangeStatus:
+		return true
 	case OverridePriority:
+		return true
+	case PauseSla:
+		return true
+	case ResumeSla:
+		return true
+	case RevertPriority:
 		return true
 	default:
 		return false
@@ -207,17 +372,207 @@ func (e SignalStatus) Valid() bool {
 	}
 }
 
+// Defines values for VersionScheme.
+const (
+	VersionSchemeCalver  VersionScheme = "calver"
+	VersionSchemeDebian  VersionScheme = "debian"
+	VersionSchemeGeneric VersionScheme = "generic"
+	VersionSchemeMaven   VersionScheme = "maven"
+	VersionSchemeRpm     VersionScheme = "rpm"
+	VersionSchemeSemver  VersionScheme = "semver"
+	VersionSchemeUnknown VersionScheme = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the VersionScheme enum.
+func (e VersionScheme) Valid() bool {
+	switch e {
+	case VersionSchemeCalver:
+		return true
+	case VersionSchemeDebian:
+		return true
+	case VersionSchemeGeneric:
+		return true
+	case VersionSchemeMaven:
+		return true
+	case VersionSchemeRpm:
+		return true
+	case VersionSchemeSemver:
+		return true
+	case VersionSchemeUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Asset One inventoried asset (ARCH-003 §1.1): its import identity (source,
+// external_id), the human name, the classification vocabularies, the
+// owner and its lifecycle flags (deactivate-never-delete).
+type Asset struct {
+	// Criticality Business criticality of the asset (concept ch. 6.2).
+	Criticality Criticality `json:"criticality"`
+	Deactivated bool        `json:"deactivated"`
+
+	// Environment Runtime environment of an asset (ch. 6.2); visible context only, never a priority driver.
+	Environment Environment `json:"environment"`
+
+	// Exposure Exposure of the asset to the internet (concept ch. 6.2).
+	Exposure Exposure `json:"exposure"`
+
+	// ExternalId Import idempotency key half; unique with source.
+	ExternalId string `json:"external_id"`
+
+	// Id Asset identifier (uuid).
+	Id   string `json:"id"`
+	Name string `json:"name"`
+
+	// Owner Owner principal id; null when unassigned.
+	Owner  *string `json:"owner"`
+	Source string  `json:"source"`
+
+	// Type Inventory asset type (ch. 6.2); the vocabulary grows by migration and API versioning.
+	Type AssetType `json:"type"`
+
+	// Verified Last manual data-quality verification; informational.
+	Verified bool `json:"verified"`
+}
+
+// AssetComponents One asset together with its components — the GET
+// /assets/{id}/components read (ARCH-006 §2.2), also reused by the
+// signal-detail asset context.
+type AssetComponents struct {
+	// Asset One inventoried asset (ARCH-003 §1.1): its import identity (source,
+	// external_id), the human name, the classification vocabularies, the
+	// owner and its lifecycle flags (deactivate-never-delete).
+	Asset      Asset       `json:"asset"`
+	Components []Component `json:"components"`
+}
+
+// AssetList One page of the asset read (ARCH-006 §2.2).
+type AssetList struct {
+	Data []Asset `json:"data"`
+
+	// NextCursor Opaque cursor of the next page; null on the last page.
+	NextCursor *string `json:"next_cursor"`
+}
+
+// AssetType Inventory asset type (ch. 6.2); the vocabulary grows by migration and API versioning.
+type AssetType string
+
+// Component One inventoried component of an asset (ARCH-003 §1.2): the raw
+// identifiers verbatim ("" when absent), the inferred version scheme
+// and the lifecycle flag.
+type Component struct {
+	AssetId     string `json:"asset_id"`
+	Cpe         string `json:"cpe"`
+	Deactivated bool   `json:"deactivated"`
+	Digest      string `json:"digest"`
+	Id          string `json:"id"`
+	Image       string `json:"image"`
+	Product     string `json:"product"`
+	Purl        string `json:"purl"`
+	Vendor      string `json:"vendor"`
+	Version     string `json:"version"`
+
+	// VersionScheme Version-ordering scheme of a component, inferred at import time (ARCH-003 §2).
+	VersionScheme VersionScheme `json:"version_scheme"`
+}
+
 // Confidence Reliability of the vulnerability-to-component assignment, derived from the match method (ADR-015).
 type Confidence string
 
 // Criticality Business criticality of the asset (concept ch. 6.2).
 type Criticality string
 
+// Environment Runtime environment of an asset (ch. 6.2); visible context only, never a priority driver.
+type Environment string
+
 // Exposure Exposure of the asset to the internet (concept ch. 6.2).
 type Exposure string
 
+// InventoryImport One staged inventory import record (ARCH-006 §2.1): its id and status,
+// the creation and (nullable) commit instants, the preview tallies and
+// the positioned error/warning report.
+type InventoryImport struct {
+	// CommittedAt Commit instant (null until committed).
+	CommittedAt *time.Time `json:"committed_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+
+	// Id Staged import identifier (uuid).
+	Id string `json:"id"`
+
+	// Preview The validate + preview tallies of one staged import (ARCH-006 §2.1):
+	// the readable row count, the positioned error/warning counts and the
+	// created/updated/unchanged tallies a commit of the clean rows would
+	// produce.
+	Preview InventoryImportPreview `json:"preview"`
+
+	// Problems The positioned validation errors of the upload.
+	Problems []InventoryImportProblem `json:"problems"`
+
+	// Status Lifecycle of a staged import record (ARCH-006 §2.1).
+	Status InventoryImportStatus `json:"status"`
+
+	// Warnings The data-quality warnings of the upload.
+	Warnings []InventoryImportWarning `json:"warnings"`
+}
+
+// InventoryImportPreview The validate + preview tallies of one staged import (ARCH-006 §2.1):
+// the readable row count, the positioned error/warning counts and the
+// created/updated/unchanged tallies a commit of the clean rows would
+// produce.
+type InventoryImportPreview struct {
+	AssetsCreated       int `json:"assets_created"`
+	AssetsUnchanged     int `json:"assets_unchanged"`
+	AssetsUpdated       int `json:"assets_updated"`
+	ComponentsCreated   int `json:"components_created"`
+	ComponentsUnchanged int `json:"components_unchanged"`
+	ComponentsUpdated   int `json:"components_updated"`
+
+	// Errors Positions that failed validation.
+	Errors int `json:"errors"`
+
+	// Rows Readable data rows of the CSV.
+	Rows int `json:"rows"`
+
+	// Warnings Data-quality warnings (unknown criticality/exposure).
+	Warnings int `json:"warnings"`
+}
+
+// InventoryImportProblem One positioned validation failure of an inventory CSV (ARCH-003 §1.3):
+// the 1-based physical line, the offending column name ("" for a
+// row/header-spanning problem), the human-readable reason and the
+// offending cell verbatim ("" when no single cell is at fault).
+type InventoryImportProblem struct {
+	Column string `json:"column"`
+	Input  string `json:"input"`
+	Line   int    `json:"line"`
+	Reason string `json:"reason"`
+}
+
+// InventoryImportStatus Lifecycle of a staged import record (ARCH-006 §2.1).
+type InventoryImportStatus string
+
+// InventoryImportWarning One data-quality warning of an inventory CSV (ARCH-003 §1.3): the
+// first contributing data line, the field, the unknown value and the
+// reason.
+type InventoryImportWarning struct {
+	Field  string `json:"field"`
+	Line   int    `json:"line"`
+	Reason string `json:"reason"`
+	Value  string `json:"value"`
+}
+
 // MatchMethod How the vulnerability was matched to the component (ADR-015); the full method-led set.
 type MatchMethod string
+
+// PermissionGrant One permission→scope grant of a role (ARCH-005 §3 matrix).
+type PermissionGrant struct {
+	Permission string `json:"permission"`
+
+	// Scope Object scope of a permission grant (ARCH-005 §3).
+	Scope Scope `json:"scope"`
+}
 
 // Priority Urgency class of a signal (concept ch. 6.2, ch. 9.3); P1 is most urgent.
 type Priority string
@@ -283,6 +638,28 @@ type RevealedActor struct {
 	UserId *string `json:"user_id,omitempty"`
 }
 
+// Role Internal authorisation role (ARCH-005 §1/§3); the fixed five-role vocabulary from code.
+type Role string
+
+// RoleDescriptor One role of the catalogue with its permission grants (ARCH-005 §1/§3, ARCH-006 §3.3).
+type RoleDescriptor struct {
+	Permissions []PermissionGrant `json:"permissions"`
+
+	// Role Internal authorisation role (ARCH-005 §1/§3); the fixed five-role vocabulary from code.
+	Role Role `json:"role"`
+}
+
+// RoleList The complete role catalogue (ARCH-006 §3.3).
+type RoleList struct {
+	Data []RoleDescriptor `json:"data"`
+}
+
+// SLATarget Reaction-time target of a signal (ch. 6.3, ARCH-004 §4.1).
+type SLATarget string
+
+// Scope Object scope of a permission grant (ARCH-005 §3).
+type Scope string
+
 // Signal One readable risk signal, joined with its asset and product.
 type Signal struct {
 	// Asset The joined inventory asset of a signal (ARCH-001 §4 asset).
@@ -339,37 +716,81 @@ type SignalAsset struct {
 	Type string `json:"type"`
 }
 
-// SignalCommandRequest One triage command on one signal (the I5a reference operation of the
-// API/CLI channel-parity proof). `acknowledge` moves a new signal to
-// in_review; `override_priority` replaces the effective priority and
-// requires a priority and a reason.
+// SignalCommandRequest One explicit triage command on one signal — the full I5b command
+// surface (ARCH-006 §1.2, concept ch. 10.3). The `command` property is
+// the discriminator: it selects which of the eight commands is applied
+// and therefore which fields are required. The command is never an
+// object patch — every value is an explicit input, never an implicit
+// default.
+//
+// Required fields per command:
+//   - acknowledge:       expected_version
+//   - change_status:     status, expected_version
+//   - assign_owner:      owner_id ("" clears), expected_version
+//   - add_comment:       comment
+//   - override_priority: priority, reason, expected_version
+//   - revert_priority:   expected_version
+//   - pause_sla:         target, reason
+//   - resume_sla:        target, reason
+//
+// `expected_version` is the optimistic-lock token, mandatory only on the
+// five version-guarded commands (acknowledge, change_status,
+// assign_owner, override_priority, revert_priority); comments append and
+// SLA pause/resume are guarded by clock state, not a row version
+// (ARCH-006 §1.2). `reason` is mandatory for override_priority and
+// pause_sla/resume_sla and for the guarded change_status edges
+// (closed-entry / reopen); the domain enforces those residual rules.
 type SignalCommandRequest struct {
-	// Command The command to apply.
+	// Command The command to apply (the discriminator of the request).
 	Command SignalCommandRequestCommand `json:"command"`
 
-	// ExpectedVersion Optimistic-lock token the caller last read.
-	ExpectedVersion int `json:"expected_version"`
+	// Comment Append-only comment body (add_comment).
+	Comment *string `json:"comment,omitempty"`
+
+	// ExpectedVersion Optimistic-lock token the caller last read (version-guarded commands only).
+	ExpectedVersion *int `json:"expected_version,omitempty"`
+
+	// OwnerId Owner principal id (assign_owner); the empty string clears the assignment.
+	OwnerId *string `json:"owner_id,omitempty"`
 
 	// Priority Urgency class of a signal (concept ch. 6.2, ch. 9.3); P1 is most urgent.
 	Priority *Priority `json:"priority,omitempty"`
 
-	// Reason Mandatory, non-blank justification for override_priority.
+	// Reason Non-blank justification; mandatory per command (override_priority, pause_sla, resume_sla, guarded change_status).
 	Reason *string `json:"reason,omitempty"`
+
+	// Status Lifecycle state of a signal (ch. 6.2, ch. 6.3) — new, in_review, action_planned, resolved, accepted, not_affected.
+	Status *SignalStatus `json:"status,omitempty"`
+
+	// Target Reaction-time target of a signal (ch. 6.3, ARCH-004 §4.1).
+	Target *SLATarget `json:"target,omitempty"`
 }
 
-// SignalCommandRequestCommand The command to apply.
+// SignalCommandRequestCommand The command to apply (the discriminator of the request).
 type SignalCommandRequestCommand string
 
-// SignalCommandResult The signal after a command was applied.
+// SignalCommandResult The signal after a command was applied. `status`/`priority`/`version`
+// always carry the post-command state; the nullable detail fields carry
+// the command-specific outcome — `owner_id` for assign_owner, `target`
+// for pause_sla/resume_sla and `auto_priority` for override_priority /
+// revert_priority (null when the command does not apply to the field).
 type SignalCommandResult struct {
-	Command string `json:"command"`
-	Id      string `json:"id"`
+	// AutoPriority The computed priority preserved by override_priority; null for the other commands.
+	AutoPriority *Priority `json:"auto_priority"`
+	Command      string    `json:"command"`
+	Id           string    `json:"id"`
+
+	// OwnerId The owner principal after assign_owner; null for the other commands.
+	OwnerId *string `json:"owner_id"`
 
 	// Priority Urgency class of a signal (concept ch. 6.2, ch. 9.3); P1 is most urgent.
 	Priority Priority `json:"priority"`
 
 	// Status Lifecycle state of a signal (ch. 6.2, ch. 6.3) — new, in_review, action_planned, resolved, accepted, not_affected.
 	Status SignalStatus `json:"status"`
+
+	// Target The SLA target after pause_sla/resume_sla; null for the other commands.
+	Target *SLATarget `json:"target"`
 
 	// Version The optimistic-lock version after the command.
 	Version int `json:"version"`
@@ -394,6 +815,79 @@ type SignalProduct struct {
 // SignalStatus Lifecycle state of a signal (ch. 6.2, ch. 6.3) — new, in_review, action_planned, resolved, accepted, not_affected.
 type SignalStatus string
 
+// UpdateUserRolesRequest The role-administration write (ARCH-006 §3.3, ARCH-005 §1): grant
+// and/or revoke roles on one user. Each change writes its own
+// `users.role_granted` / `users.role_revoked` audit event.
+type UpdateUserRolesRequest struct {
+	// Grant Roles to grant.
+	Grant []Role `json:"grant"`
+
+	// Revoke Roles to revoke.
+	Revoke []Role `json:"revoke"`
+}
+
+// User One internal user with its current roles (ARCH-005 §1, ARCH-006
+// §3.3). Users are deactivated, never deleted (ADR-014); email is an
+// optional notification recipient and never the login key.
+type User struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// DeactivatedAt Deactivation instant (null = active).
+	DeactivatedAt *time.Time `json:"deactivated_at"`
+	DisplayName   string     `json:"display_name"`
+
+	// Email Optional e-mail (notification recipient only).
+	Email *string `json:"email"`
+
+	// Id Stable internal users.id (uuid) — the audit actor id for user actors.
+	Id          string     `json:"id"`
+	LastLoginAt *time.Time `json:"last_login_at"`
+
+	// Roles The user's current roles; empty means deny-by-default.
+	Roles []Role `json:"roles"`
+
+	// SubjectId Issuer-qualified external OIDC subject ("<issuer>::<sub>").
+	SubjectId string `json:"subject_id"`
+}
+
+// UserList One page of the user read (ARCH-006 §3.3).
+type UserList struct {
+	Data []User `json:"data"`
+
+	// NextCursor Opaque cursor of the next page; null on the last page.
+	NextCursor *string `json:"next_cursor"`
+}
+
+// VersionScheme Version-ordering scheme of a component, inferred at import time (ARCH-003 §2).
+type VersionScheme string
+
+// ListAssetsParams defines parameters for ListAssets.
+type ListAssetsParams struct {
+	// Type Only assets of this type.
+	Type *AssetType `form:"type,omitempty" json:"type,omitempty"`
+
+	// Environment Only assets in this environment.
+	Environment *Environment `form:"environment,omitempty" json:"environment,omitempty"`
+
+	// Criticality Only assets of this criticality.
+	Criticality *Criticality `form:"criticality,omitempty" json:"criticality,omitempty"`
+
+	// Exposure Only assets with this exposure.
+	Exposure *Exposure `form:"exposure,omitempty" json:"exposure,omitempty"`
+
+	// OwnerId Only assets owned by this principal id.
+	OwnerId *string `form:"owner_id,omitempty" json:"owner_id,omitempty"`
+
+	// Source Only assets whose import source is this source.
+	Source *string `form:"source,omitempty" json:"source,omitempty"`
+
+	// Limit Maximum page size.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque pagination cursor from a previous page's next_cursor.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
 // ListSignalsParams defines parameters for ListSignals.
 type ListSignalsParams struct {
 	// Priority Only signals of this priority (P1-P4).
@@ -409,11 +903,23 @@ type ListSignalsParams struct {
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// ListUsersParams defines parameters for ListUsers.
+type ListUsersParams struct {
+	// Limit Maximum page size.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque pagination cursor from a previous page's next_cursor.
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
 // RevealAuditEventActorJSONRequestBody defines body for RevealAuditEventActor for application/json ContentType.
 type RevealAuditEventActorJSONRequestBody = RevealActorRequest
 
 // SignalCommandJSONRequestBody defines body for SignalCommand for application/json ContentType.
 type SignalCommandJSONRequestBody = SignalCommandRequest
+
+// UpdateUserRolesJSONRequestBody defines body for UpdateUserRoles for application/json ContentType.
+type UpdateUserRolesJSONRequestBody = UpdateUserRolesRequest
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -489,6 +995,26 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
+	// ListAssets List inventory assets
+	//
+	// Cursor-paginated, filterable asset read (ARCH-006 §2.2, concept ch.
+	// 10.4). Assets sort stably; the page envelope always carries a
+	// next_cursor (null on the last page). Object scope injects
+	// owner_id = principal.id for the assigned case. Requires
+	// `inventory.read`.
+	//
+	// Corresponds with GET /api/v1/assets (the `ListAssets` operationId).
+	ListAssets(ctx context.Context, params *ListAssetsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetAssetComponents Read one asset and its components
+	//
+	// The asset detail read (ARCH-006 §2.2): one asset together with its
+	// components; also reused by the signal-detail asset context. Requires
+	// `inventory.read`.
+	//
+	// Corresponds with GET /api/v1/assets/{id}/components (the `GetAssetComponents` operationId).
+	GetAssetComponents(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// RevealAuditEventActorWithBody Reveal the actor identity of an audit event
 	//
 	// The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
@@ -522,6 +1048,50 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
 	RevealAuditEventActor(ctx context.Context, id string, body RevealAuditEventActorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateInventoryImportWithBody Upload an inventory CSV for validation and preview
+	//
+	// The staged inventory import, first step (ARCH-006 §2.1, concept ch.
+	// 10.2): upload the CSV, run the validate + preview diff against the
+	// persisted state, persist a staged import record and return its
+	// import_id together with the preview tallies and the positioned
+	// error/warning report. Nothing is written to the inventory — the
+	// staged record is committed by POST /inventory/imports/{id}/commit.
+	// The upload is bounded by the configured InventoryMaxBytes; an
+	// oversized body is a 413. Requires `inventory.manage`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/inventory/imports (the `CreateInventoryImport` operationId).
+	CreateInventoryImportWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetInventoryImport Read a staged inventory import
+	//
+	// Return the stored staged import's status, preview tallies and
+	// error/warning counts (ARCH-006 §2.1). Requires `inventory.manage`.
+	//
+	// Corresponds with GET /api/v1/inventory/imports/{id} (the `GetInventoryImport` operationId).
+	GetInventoryImport(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CommitInventoryImport Commit a staged inventory import
+	//
+	// Load the stored bytes of a staged import and run the existing I3
+	// CommitInventory command (one transaction, audited, enqueues one
+	// matching.rebuild on change), then mark the record committed
+	// (ARCH-006 §2.1). Re-committing an already-committed record is a no-op
+	// returning the stored result (idempotent). Requires `inventory.manage`.
+	//
+	// Corresponds with POST /api/v1/inventory/imports/{id}/commit (the `CommitInventoryImport` operationId).
+	CommitInventoryImport(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRoles List the role vocabulary
+	//
+	// The role catalogue (ARCH-006 §3.3, ARCH-005 §1): the fixed five-role
+	// vocabulary from code, each with its permission→scope grants. Requires
+	// `users.roles.manage`.
+	//
+	// Corresponds with GET /api/v1/roles (the `ListRoles` operationId).
+	ListRoles(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSignals List signals
 	//
@@ -574,6 +1144,88 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/signals/{signal_id}/commands (the `SignalCommand` operationId).
 	SignalCommand(ctx context.Context, signalId string, body SignalCommandJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListUsers List internal users
+	//
+	// The user/role administration read (ARCH-006 §3.3, concept ch. 10.2):
+	// a cursor-paginated list of internal users with their current roles.
+	// Requires `users.roles.manage`.
+	//
+	// Corresponds with GET /api/v1/users (the `ListUsers` operationId).
+	ListUsers(ctx context.Context, params *ListUsersParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeactivateUser Deactivate a user
+	//
+	// Deactivate-never-delete (ARCH-006 §3.3, ADR-014): stamp the user's
+	// deactivation instant; the internal id stays permanently referenceable
+	// so the audit trail stays resolvable. Requires `users.roles.manage`.
+	//
+	// Corresponds with POST /api/v1/users/{id}/deactivate (the `DeactivateUser` operationId).
+	DeactivateUser(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateUserRolesWithBody Grant and/or revoke a user's roles
+	//
+	// The role-administration write (ARCH-006 §3.3, ARCH-005 §1): grant
+	// and/or revoke roles on one user, writing a `users.role_granted` /
+	// `users.role_revoked` audit event per change (concept ch. 13.2).
+	// Requires `users.roles.manage`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PATCH /api/v1/users/{id}/roles (the `UpdateUserRoles` operationId).
+	UpdateUserRolesWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateUserRoles Grant and/or revoke a user's roles
+	//
+	// The role-administration write (ARCH-006 §3.3, ARCH-005 §1): grant
+	// and/or revoke roles on one user, writing a `users.role_granted` /
+	// `users.role_revoked` audit event per change (concept ch. 13.2).
+	// Requires `users.roles.manage`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PATCH /api/v1/users/{id}/roles (the `UpdateUserRoles` operationId).
+	UpdateUserRoles(ctx context.Context, id string, body UpdateUserRolesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// ListAssets List inventory assets
+//
+// Cursor-paginated, filterable asset read (ARCH-006 §2.2, concept ch.
+// 10.4). Assets sort stably; the page envelope always carries a
+// next_cursor (null on the last page). Object scope injects
+// owner_id = principal.id for the assigned case. Requires
+// `inventory.read`.
+//
+// Corresponds with GET /api/v1/assets (the `ListAssets` operationId).
+func (c *Client) ListAssets(ctx context.Context, params *ListAssetsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListAssetsRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetAssetComponents Read one asset and its components
+//
+// The asset detail read (ARCH-006 §2.2): one asset together with its
+// components; also reused by the signal-detail asset context. Requires
+// `inventory.read`.
+//
+// Corresponds with GET /api/v1/assets/{id}/components (the `GetAssetComponents` operationId).
+func (c *Client) GetAssetComponents(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAssetComponentsRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 // RevealAuditEventActorWithBody Reveal the actor identity of an audit event
@@ -620,6 +1272,90 @@ func (c *Client) RevealAuditEventActorWithBody(ctx context.Context, id string, c
 // Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
 func (c *Client) RevealAuditEventActor(ctx context.Context, id string, body RevealAuditEventActorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRevealAuditEventActorRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateInventoryImportWithBody Upload an inventory CSV for validation and preview
+//
+// The staged inventory import, first step (ARCH-006 §2.1, concept ch.
+// 10.2): upload the CSV, run the validate + preview diff against the
+// persisted state, persist a staged import record and return its
+// import_id together with the preview tallies and the positioned
+// error/warning report. Nothing is written to the inventory — the
+// staged record is committed by POST /inventory/imports/{id}/commit.
+// The upload is bounded by the configured InventoryMaxBytes; an
+// oversized body is a 413. Requires `inventory.manage`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/inventory/imports (the `CreateInventoryImport` operationId).
+func (c *Client) CreateInventoryImportWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateInventoryImportRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetInventoryImport Read a staged inventory import
+//
+// Return the stored staged import's status, preview tallies and
+// error/warning counts (ARCH-006 §2.1). Requires `inventory.manage`.
+//
+// Corresponds with GET /api/v1/inventory/imports/{id} (the `GetInventoryImport` operationId).
+func (c *Client) GetInventoryImport(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetInventoryImportRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CommitInventoryImport Commit a staged inventory import
+//
+// Load the stored bytes of a staged import and run the existing I3
+// CommitInventory command (one transaction, audited, enqueues one
+// matching.rebuild on change), then mark the record committed
+// (ARCH-006 §2.1). Re-committing an already-committed record is a no-op
+// returning the stored result (idempotent). Requires `inventory.manage`.
+//
+// Corresponds with POST /api/v1/inventory/imports/{id}/commit (the `CommitInventoryImport` operationId).
+func (c *Client) CommitInventoryImport(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCommitInventoryImportRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListRoles List the role vocabulary
+//
+// The role catalogue (ARCH-006 §3.3, ARCH-005 §1): the fixed five-role
+// vocabulary from code, each with its permission→scope grants. Requires
+// `users.roles.manage`.
+//
+// Corresponds with GET /api/v1/roles (the `ListRoles` operationId).
+func (c *Client) ListRoles(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRolesRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -722,6 +1458,260 @@ func (c *Client) SignalCommand(ctx context.Context, signalId string, body Signal
 	return c.Client.Do(req)
 }
 
+// ListUsers List internal users
+//
+// The user/role administration read (ARCH-006 §3.3, concept ch. 10.2):
+// a cursor-paginated list of internal users with their current roles.
+// Requires `users.roles.manage`.
+//
+// Corresponds with GET /api/v1/users (the `ListUsers` operationId).
+func (c *Client) ListUsers(ctx context.Context, params *ListUsersParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListUsersRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeactivateUser Deactivate a user
+//
+// Deactivate-never-delete (ARCH-006 §3.3, ADR-014): stamp the user's
+// deactivation instant; the internal id stays permanently referenceable
+// so the audit trail stays resolvable. Requires `users.roles.manage`.
+//
+// Corresponds with POST /api/v1/users/{id}/deactivate (the `DeactivateUser` operationId).
+func (c *Client) DeactivateUser(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeactivateUserRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateUserRolesWithBody Grant and/or revoke a user's roles
+//
+// The role-administration write (ARCH-006 §3.3, ARCH-005 §1): grant
+// and/or revoke roles on one user, writing a `users.role_granted` /
+// `users.role_revoked` audit event per change (concept ch. 13.2).
+// Requires `users.roles.manage`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PATCH /api/v1/users/{id}/roles (the `UpdateUserRoles` operationId).
+func (c *Client) UpdateUserRolesWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateUserRolesRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateUserRoles Grant and/or revoke a user's roles
+//
+// The role-administration write (ARCH-006 §3.3, ARCH-005 §1): grant
+// and/or revoke roles on one user, writing a `users.role_granted` /
+// `users.role_revoked` audit event per change (concept ch. 13.2).
+// Requires `users.roles.manage`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PATCH /api/v1/users/{id}/roles (the `UpdateUserRoles` operationId).
+func (c *Client) UpdateUserRoles(ctx context.Context, id string, body UpdateUserRolesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateUserRolesRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NewListAssetsRequest constructs an http.Request for the ListAssets method
+func NewListAssetsRequest(server string, params *ListAssetsParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assets")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Type != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "type", *params.Type, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Environment != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "environment", *params.Environment, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Criticality != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "criticality", *params.Criticality, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Exposure != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "exposure", *params.Exposure, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.OwnerId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "owner_id", *params.OwnerId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Source != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "source", *params.Source, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetAssetComponentsRequest constructs an http.Request for the GetAssetComponents method
+func NewGetAssetComponentsRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/assets/%s/components", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewRevealAuditEventActorRequest calls the generic RevealAuditEventActor builder with application/json body
 func NewRevealAuditEventActorRequest(server string, id string, body RevealAuditEventActorJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -765,6 +1755,130 @@ func NewRevealAuditEventActorRequestWithBody(server string, id string, contentTy
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewCreateInventoryImportRequestWithBody constructs an http.Request for the CreateInventoryImport method, with any body, and a specified content type
+func NewCreateInventoryImportRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/inventory/imports")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetInventoryImportRequest constructs an http.Request for the GetInventoryImport method
+func NewGetInventoryImportRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/inventory/imports/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCommitInventoryImportRequest constructs an http.Request for the CommitInventoryImport method
+func NewCommitInventoryImportRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/inventory/imports/%s/commit", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListRolesRequest constructs an http.Request for the ListRoles method
+func NewListRolesRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/roles")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -940,6 +2054,153 @@ func NewSignalCommandRequestWithBody(server string, signalId string, contentType
 	return req, nil
 }
 
+// NewListUsersRequest constructs an http.Request for the ListUsers method
+func NewListUsersRequest(server string, params *ListUsersParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/users")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDeactivateUserRequest constructs an http.Request for the DeactivateUser method
+func NewDeactivateUserRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/users/%s/deactivate", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateUserRolesRequest calls the generic UpdateUserRoles builder with application/json body
+func NewUpdateUserRolesRequest(server string, id string, body UpdateUserRolesJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateUserRolesRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewUpdateUserRolesRequestWithBody constructs an http.Request for the UpdateUserRoles method, with any body, and a specified content type
+func NewUpdateUserRolesRequestWithBody(server string, id string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/users/%s/roles", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -984,6 +2245,30 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// ListAssetsWithResponse List inventory assets
+	//
+	// Cursor-paginated, filterable asset read (ARCH-006 §2.2, concept ch.
+	// 10.4). Assets sort stably; the page envelope always carries a
+	// next_cursor (null on the last page). Object scope injects
+	// owner_id = principal.id for the assigned case. Requires
+	// `inventory.read`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/assets (the `ListAssets` operationId).
+	ListAssetsWithResponse(ctx context.Context, params *ListAssetsParams, reqEditors ...RequestEditorFn) (*ListAssetsResponse, error)
+
+	// GetAssetComponentsWithResponse Read one asset and its components
+	//
+	// The asset detail read (ARCH-006 §2.2): one asset together with its
+	// components; also reused by the signal-detail asset context. Requires
+	// `inventory.read`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/assets/{id}/components (the `GetAssetComponents` operationId).
+	GetAssetComponentsWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetAssetComponentsResponse, error)
+
 	// RevealAuditEventActorWithBodyWithResponse Reveal the actor identity of an audit event
 	//
 	// The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
@@ -1017,6 +2302,56 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
 	RevealAuditEventActorWithResponse(ctx context.Context, id string, body RevealAuditEventActorJSONRequestBody, reqEditors ...RequestEditorFn) (*RevealAuditEventActorResponse, error)
+
+	// CreateInventoryImportWithBodyWithResponse Upload an inventory CSV for validation and preview
+	//
+	// The staged inventory import, first step (ARCH-006 §2.1, concept ch.
+	// 10.2): upload the CSV, run the validate + preview diff against the
+	// persisted state, persist a staged import record and return its
+	// import_id together with the preview tallies and the positioned
+	// error/warning report. Nothing is written to the inventory — the
+	// staged record is committed by POST /inventory/imports/{id}/commit.
+	// The upload is bounded by the configured InventoryMaxBytes; an
+	// oversized body is a 413. Requires `inventory.manage`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/inventory/imports (the `CreateInventoryImport` operationId).
+	CreateInventoryImportWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateInventoryImportResponse, error)
+
+	// GetInventoryImportWithResponse Read a staged inventory import
+	//
+	// Return the stored staged import's status, preview tallies and
+	// error/warning counts (ARCH-006 §2.1). Requires `inventory.manage`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/inventory/imports/{id} (the `GetInventoryImport` operationId).
+	GetInventoryImportWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetInventoryImportResponse, error)
+
+	// CommitInventoryImportWithResponse Commit a staged inventory import
+	//
+	// Load the stored bytes of a staged import and run the existing I3
+	// CommitInventory command (one transaction, audited, enqueues one
+	// matching.rebuild on change), then mark the record committed
+	// (ARCH-006 §2.1). Re-committing an already-committed record is a no-op
+	// returning the stored result (idempotent). Requires `inventory.manage`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/inventory/imports/{id}/commit (the `CommitInventoryImport` operationId).
+	CommitInventoryImportWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*CommitInventoryImportResponse, error)
+
+	// ListRolesWithResponse List the role vocabulary
+	//
+	// The role catalogue (ARCH-006 §3.3, ARCH-005 §1): the fixed five-role
+	// vocabulary from code, each with its permission→scope grants. Requires
+	// `users.roles.manage`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/roles (the `ListRoles` operationId).
+	ListRolesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListRolesResponse, error)
 
 	// ListSignalsWithResponse List signals
 	//
@@ -1073,6 +2408,183 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/signals/{signal_id}/commands (the `SignalCommand` operationId).
 	SignalCommandWithResponse(ctx context.Context, signalId string, body SignalCommandJSONRequestBody, reqEditors ...RequestEditorFn) (*SignalCommandResponse, error)
+
+	// ListUsersWithResponse List internal users
+	//
+	// The user/role administration read (ARCH-006 §3.3, concept ch. 10.2):
+	// a cursor-paginated list of internal users with their current roles.
+	// Requires `users.roles.manage`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/users (the `ListUsers` operationId).
+	ListUsersWithResponse(ctx context.Context, params *ListUsersParams, reqEditors ...RequestEditorFn) (*ListUsersResponse, error)
+
+	// DeactivateUserWithResponse Deactivate a user
+	//
+	// Deactivate-never-delete (ARCH-006 §3.3, ADR-014): stamp the user's
+	// deactivation instant; the internal id stays permanently referenceable
+	// so the audit trail stays resolvable. Requires `users.roles.manage`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/users/{id}/deactivate (the `DeactivateUser` operationId).
+	DeactivateUserWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*DeactivateUserResponse, error)
+
+	// UpdateUserRolesWithBodyWithResponse Grant and/or revoke a user's roles
+	//
+	// The role-administration write (ARCH-006 §3.3, ARCH-005 §1): grant
+	// and/or revoke roles on one user, writing a `users.role_granted` /
+	// `users.role_revoked` audit event per change (concept ch. 13.2).
+	// Requires `users.roles.manage`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PATCH /api/v1/users/{id}/roles (the `UpdateUserRoles` operationId).
+	UpdateUserRolesWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateUserRolesResponse, error)
+
+	// UpdateUserRolesWithResponse Grant and/or revoke a user's roles
+	//
+	// The role-administration write (ARCH-006 §3.3, ARCH-005 §1): grant
+	// and/or revoke roles on one user, writing a `users.role_granted` /
+	// `users.role_revoked` audit event per change (concept ch. 13.2).
+	// Requires `users.roles.manage`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PATCH /api/v1/users/{id}/roles (the `UpdateUserRoles` operationId).
+	UpdateUserRolesWithResponse(ctx context.Context, id string, body UpdateUserRolesJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateUserRolesResponse, error)
+}
+
+type ListAssetsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AssetList
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListAssetsResponse) GetJSON200() *AssetList {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListAssetsResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListAssetsResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ListAssetsResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListAssetsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListAssetsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListAssetsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListAssetsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetAssetComponentsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *AssetComponents
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetAssetComponentsResponse) GetJSON200() *AssetComponents {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetAssetComponentsResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetAssetComponentsResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetAssetComponentsResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetAssetComponentsResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetAssetComponentsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAssetComponentsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAssetComponentsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetAssetComponentsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type RevealAuditEventActorResponse struct {
@@ -1138,6 +2650,275 @@ func (r RevealAuditEventActorResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RevealAuditEventActorResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateInventoryImportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *InventoryImport
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateInventoryImportResponse) GetJSON200() *InventoryImport {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateInventoryImportResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateInventoryImportResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r CreateInventoryImportResponse) GetJSON413() *ProblemDetails {
+	return r.JSON413
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r CreateInventoryImportResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateInventoryImportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateInventoryImportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateInventoryImportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateInventoryImportResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetInventoryImportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *InventoryImport
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetInventoryImportResponse) GetJSON200() *InventoryImport {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetInventoryImportResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetInventoryImportResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetInventoryImportResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetInventoryImportResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetInventoryImportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetInventoryImportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetInventoryImportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetInventoryImportResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CommitInventoryImportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *InventoryImport
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CommitInventoryImportResponse) GetJSON200() *InventoryImport {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CommitInventoryImportResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CommitInventoryImportResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CommitInventoryImportResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CommitInventoryImportResponse) GetJSON409() *ProblemDetails {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r CommitInventoryImportResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CommitInventoryImportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CommitInventoryImportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CommitInventoryImportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CommitInventoryImportResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListRolesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RoleList
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListRolesResponse) GetJSON200() *RoleList {
+	return r.JSON200
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListRolesResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ListRolesResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListRolesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRolesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRolesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListRolesResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1337,6 +3118,256 @@ func (r SignalCommandResponse) ContentType() string {
 	return ""
 }
 
+type ListUsersResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *UserList
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListUsersResponse) GetJSON200() *UserList {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListUsersResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListUsersResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ListUsersResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListUsersResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListUsersResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListUsersResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListUsersResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeactivateUserResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *User
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r DeactivateUserResponse) GetJSON200() *User {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r DeactivateUserResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DeactivateUserResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeactivateUserResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DeactivateUserResponse) GetJSON409() *ProblemDetails {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r DeactivateUserResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r DeactivateUserResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeactivateUserResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeactivateUserResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeactivateUserResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpdateUserRolesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *User
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateUserRolesResponse) GetJSON200() *User {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r UpdateUserRolesResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r UpdateUserRolesResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r UpdateUserRolesResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r UpdateUserRolesResponse) GetJSON409() *ProblemDetails {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r UpdateUserRolesResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateUserRolesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateUserRolesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateUserRolesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateUserRolesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// ListAssetsWithResponse List inventory assets
+//
+// Cursor-paginated, filterable asset read (ARCH-006 §2.2, concept ch.
+// 10.4). Assets sort stably; the page envelope always carries a
+// next_cursor (null on the last page). Object scope injects
+// owner_id = principal.id for the assigned case. Requires
+// `inventory.read`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/assets (the `ListAssets` operationId).
+func (c *ClientWithResponses) ListAssetsWithResponse(ctx context.Context, params *ListAssetsParams, reqEditors ...RequestEditorFn) (*ListAssetsResponse, error) {
+	rsp, err := c.ListAssets(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListAssetsResponse(rsp)
+}
+
+// GetAssetComponentsWithResponse Read one asset and its components
+//
+// The asset detail read (ARCH-006 §2.2): one asset together with its
+// components; also reused by the signal-detail asset context. Requires
+// `inventory.read`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/assets/{id}/components (the `GetAssetComponents` operationId).
+func (c *ClientWithResponses) GetAssetComponentsWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetAssetComponentsResponse, error) {
+	rsp, err := c.GetAssetComponents(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAssetComponentsResponse(rsp)
+}
+
 // RevealAuditEventActorWithBodyWithResponse Reveal the actor identity of an audit event
 //
 // The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
@@ -1381,6 +3412,80 @@ func (c *ClientWithResponses) RevealAuditEventActorWithResponse(ctx context.Cont
 		return nil, err
 	}
 	return ParseRevealAuditEventActorResponse(rsp)
+}
+
+// CreateInventoryImportWithBodyWithResponse Upload an inventory CSV for validation and preview
+//
+// The staged inventory import, first step (ARCH-006 §2.1, concept ch.
+// 10.2): upload the CSV, run the validate + preview diff against the
+// persisted state, persist a staged import record and return its
+// import_id together with the preview tallies and the positioned
+// error/warning report. Nothing is written to the inventory — the
+// staged record is committed by POST /inventory/imports/{id}/commit.
+// The upload is bounded by the configured InventoryMaxBytes; an
+// oversized body is a 413. Requires `inventory.manage`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/inventory/imports (the `CreateInventoryImport` operationId).
+func (c *ClientWithResponses) CreateInventoryImportWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateInventoryImportResponse, error) {
+	rsp, err := c.CreateInventoryImportWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateInventoryImportResponse(rsp)
+}
+
+// GetInventoryImportWithResponse Read a staged inventory import
+//
+// Return the stored staged import's status, preview tallies and
+// error/warning counts (ARCH-006 §2.1). Requires `inventory.manage`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/inventory/imports/{id} (the `GetInventoryImport` operationId).
+func (c *ClientWithResponses) GetInventoryImportWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetInventoryImportResponse, error) {
+	rsp, err := c.GetInventoryImport(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetInventoryImportResponse(rsp)
+}
+
+// CommitInventoryImportWithResponse Commit a staged inventory import
+//
+// Load the stored bytes of a staged import and run the existing I3
+// CommitInventory command (one transaction, audited, enqueues one
+// matching.rebuild on change), then mark the record committed
+// (ARCH-006 §2.1). Re-committing an already-committed record is a no-op
+// returning the stored result (idempotent). Requires `inventory.manage`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/inventory/imports/{id}/commit (the `CommitInventoryImport` operationId).
+func (c *ClientWithResponses) CommitInventoryImportWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*CommitInventoryImportResponse, error) {
+	rsp, err := c.CommitInventoryImport(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCommitInventoryImportResponse(rsp)
+}
+
+// ListRolesWithResponse List the role vocabulary
+//
+// The role catalogue (ARCH-006 §3.3, ARCH-005 §1): the fixed five-role
+// vocabulary from code, each with its permission→scope grants. Requires
+// `users.roles.manage`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/roles (the `ListRoles` operationId).
+func (c *ClientWithResponses) ListRolesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListRolesResponse, error) {
+	rsp, err := c.ListRoles(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRolesResponse(rsp)
 }
 
 // ListSignalsWithResponse List signals
@@ -1463,6 +3568,177 @@ func (c *ClientWithResponses) SignalCommandWithResponse(ctx context.Context, sig
 	return ParseSignalCommandResponse(rsp)
 }
 
+// ListUsersWithResponse List internal users
+//
+// The user/role administration read (ARCH-006 §3.3, concept ch. 10.2):
+// a cursor-paginated list of internal users with their current roles.
+// Requires `users.roles.manage`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/users (the `ListUsers` operationId).
+func (c *ClientWithResponses) ListUsersWithResponse(ctx context.Context, params *ListUsersParams, reqEditors ...RequestEditorFn) (*ListUsersResponse, error) {
+	rsp, err := c.ListUsers(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListUsersResponse(rsp)
+}
+
+// DeactivateUserWithResponse Deactivate a user
+//
+// Deactivate-never-delete (ARCH-006 §3.3, ADR-014): stamp the user's
+// deactivation instant; the internal id stays permanently referenceable
+// so the audit trail stays resolvable. Requires `users.roles.manage`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/users/{id}/deactivate (the `DeactivateUser` operationId).
+func (c *ClientWithResponses) DeactivateUserWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*DeactivateUserResponse, error) {
+	rsp, err := c.DeactivateUser(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeactivateUserResponse(rsp)
+}
+
+// UpdateUserRolesWithBodyWithResponse Grant and/or revoke a user's roles
+//
+// The role-administration write (ARCH-006 §3.3, ARCH-005 §1): grant
+// and/or revoke roles on one user, writing a `users.role_granted` /
+// `users.role_revoked` audit event per change (concept ch. 13.2).
+// Requires `users.roles.manage`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PATCH /api/v1/users/{id}/roles (the `UpdateUserRoles` operationId).
+func (c *ClientWithResponses) UpdateUserRolesWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateUserRolesResponse, error) {
+	rsp, err := c.UpdateUserRolesWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateUserRolesResponse(rsp)
+}
+
+// UpdateUserRolesWithResponse Grant and/or revoke a user's roles
+//
+// The role-administration write (ARCH-006 §3.3, ARCH-005 §1): grant
+// and/or revoke roles on one user, writing a `users.role_granted` /
+// `users.role_revoked` audit event per change (concept ch. 13.2).
+// Requires `users.roles.manage`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PATCH /api/v1/users/{id}/roles (the `UpdateUserRoles` operationId).
+func (c *ClientWithResponses) UpdateUserRolesWithResponse(ctx context.Context, id string, body UpdateUserRolesJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateUserRolesResponse, error) {
+	rsp, err := c.UpdateUserRoles(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateUserRolesResponse(rsp)
+}
+
+// ParseListAssetsResponse parses an HTTP response from a ListAssetsWithResponse call
+func ParseListAssetsResponse(rsp *http.Response) (*ListAssetsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListAssetsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AssetList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetAssetComponentsResponse parses an HTTP response from a GetAssetComponentsWithResponse call
+func ParseGetAssetComponentsResponse(rsp *http.Response) (*GetAssetComponentsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAssetComponentsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest AssetComponents
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRevealAuditEventActorResponse parses an HTTP response from a RevealAuditEventActorWithResponse call
 func ParseRevealAuditEventActorResponse(rsp *http.Response) (*RevealAuditEventActorResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -1504,6 +3780,215 @@ func ParseRevealAuditEventActorResponse(rsp *http.Response) (*RevealAuditEventAc
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateInventoryImportResponse parses an HTTP response from a CreateInventoryImportWithResponse call
+func ParseCreateInventoryImportResponse(rsp *http.Response) (*CreateInventoryImportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateInventoryImportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InventoryImport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetInventoryImportResponse parses an HTTP response from a GetInventoryImportWithResponse call
+func ParseGetInventoryImportResponse(rsp *http.Response) (*GetInventoryImportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetInventoryImportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InventoryImport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCommitInventoryImportResponse parses an HTTP response from a CommitInventoryImportWithResponse call
+func ParseCommitInventoryImportResponse(rsp *http.Response) (*CommitInventoryImportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CommitInventoryImportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InventoryImport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListRolesResponse parses an HTTP response from a ListRolesWithResponse call
+func ParseListRolesResponse(rsp *http.Response) (*ListRolesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRolesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RoleList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest ProblemDetails
@@ -1665,11 +4150,198 @@ func ParseSignalCommandResponse(rsp *http.Response) (*SignalCommandResponse, err
 	return response, nil
 }
 
+// ParseListUsersResponse parses an HTTP response from a ListUsersWithResponse call
+func ParseListUsersResponse(rsp *http.Response) (*ListUsersResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListUsersResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest UserList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeactivateUserResponse parses an HTTP response from a DeactivateUserWithResponse call
+func ParseDeactivateUserResponse(rsp *http.Response) (*DeactivateUserResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeactivateUserResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest User
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateUserRolesResponse parses an HTTP response from a UpdateUserRolesWithResponse call
+func ParseUpdateUserRolesResponse(rsp *http.Response) (*UpdateUserRolesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateUserRolesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest User
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListAssets List inventory assets
+	// (GET /api/v1/assets)
+	ListAssets(w http.ResponseWriter, r *http.Request, params ListAssetsParams)
+	// GetAssetComponents Read one asset and its components
+	// (GET /api/v1/assets/{id}/components)
+	GetAssetComponents(w http.ResponseWriter, r *http.Request, id string)
 	// RevealAuditEventActor Reveal the actor identity of an audit event
 	// (POST /api/v1/audit-events/{id}/reveal-actor)
 	RevealAuditEventActor(w http.ResponseWriter, r *http.Request, id string)
+	// CreateInventoryImport Upload an inventory CSV for validation and preview
+	// (POST /api/v1/inventory/imports)
+	CreateInventoryImport(w http.ResponseWriter, r *http.Request)
+	// GetInventoryImport Read a staged inventory import
+	// (GET /api/v1/inventory/imports/{id})
+	GetInventoryImport(w http.ResponseWriter, r *http.Request, id string)
+	// CommitInventoryImport Commit a staged inventory import
+	// (POST /api/v1/inventory/imports/{id}/commit)
+	CommitInventoryImport(w http.ResponseWriter, r *http.Request, id string)
+	// ListRoles List the role vocabulary
+	// (GET /api/v1/roles)
+	ListRoles(w http.ResponseWriter, r *http.Request)
 	// ListSignals List signals
 	// (GET /api/v1/signals)
 	ListSignals(w http.ResponseWriter, r *http.Request, params ListSignalsParams)
@@ -1679,6 +4351,15 @@ type ServerInterface interface {
 	// SignalCommand Apply one triage command to a signal
 	// (POST /api/v1/signals/{signal_id}/commands)
 	SignalCommand(w http.ResponseWriter, r *http.Request, signalId string)
+	// ListUsers List internal users
+	// (GET /api/v1/users)
+	ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams)
+	// DeactivateUser Deactivate a user
+	// (POST /api/v1/users/{id}/deactivate)
+	DeactivateUser(w http.ResponseWriter, r *http.Request, id string)
+	// UpdateUserRoles Grant and/or revoke a user's roles
+	// (PATCH /api/v1/users/{id}/roles)
+	UpdateUserRoles(w http.ResponseWriter, r *http.Request, id string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -1689,6 +4370,156 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListAssets operation middleware
+func (siw *ServerInterfaceWrapper) ListAssets(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAssetsParams
+
+	// ------------- Optional query parameter "type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "type", r.URL.Query(), &params.Type, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "environment" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "environment", r.URL.Query(), &params.Environment, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "environment"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "criticality" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "criticality", r.URL.Query(), &params.Criticality, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "criticality"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "criticality", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "exposure" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "exposure", r.URL.Query(), &params.Exposure, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "exposure"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "exposure", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "owner_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "owner_id", r.URL.Query(), &params.OwnerId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "owner_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "owner_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "source" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "source", r.URL.Query(), &params.Source, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "source"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "source", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAssets(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAssetComponents operation middleware
+func (siw *ServerInterfaceWrapper) GetAssetComponents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAssetComponents(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // RevealAuditEventActor operation middleware
 func (siw *ServerInterfaceWrapper) RevealAuditEventActor(w http.ResponseWriter, r *http.Request) {
@@ -1707,6 +4538,86 @@ func (siw *ServerInterfaceWrapper) RevealAuditEventActor(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevealAuditEventActor(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateInventoryImport operation middleware
+func (siw *ServerInterfaceWrapper) CreateInventoryImport(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateInventoryImport(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetInventoryImport operation middleware
+func (siw *ServerInterfaceWrapper) GetInventoryImport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetInventoryImport(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CommitInventoryImport operation middleware
+func (siw *ServerInterfaceWrapper) CommitInventoryImport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CommitInventoryImport(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRoles operation middleware
+func (siw *ServerInterfaceWrapper) ListRoles(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRoles(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1840,6 +4751,104 @@ func (siw *ServerInterfaceWrapper) SignalCommand(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListUsers operation middleware
+func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListUsersParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUsers(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeactivateUser operation middleware
+func (siw *ServerInterfaceWrapper) DeactivateUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeactivateUser(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateUserRoles operation middleware
+func (siw *ServerInterfaceWrapper) UpdateUserRoles(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateUserRoles(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -1964,8 +4973,159 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/signals/{signal_id}", wrapper.GetSignal)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/signals/{signal_id}/commands", wrapper.SignalCommand)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/audit-events/{id}/reveal-actor", wrapper.RevealAuditEventActor)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/inventory/imports", wrapper.CreateInventoryImport)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/inventory/imports/{id}", wrapper.GetInventoryImport)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/inventory/imports/{id}/commit", wrapper.CommitInventoryImport)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/assets", wrapper.ListAssets)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/assets/{id}/components", wrapper.GetAssetComponents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/users", wrapper.ListUsers)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/roles", wrapper.ListRoles)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/users/{id}/roles", wrapper.UpdateUserRoles)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/users/{id}/deactivate", wrapper.DeactivateUser)
 
 	return m
+}
+
+type ListAssetsRequestObject struct {
+	Params ListAssetsParams
+}
+
+type ListAssetsResponseObject interface {
+	VisitListAssetsResponse(w http.ResponseWriter) error
+}
+
+type ListAssets200JSONResponse AssetList
+
+func (response ListAssets200JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAssets400JSONResponse ProblemDetails
+
+func (response ListAssets400JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAssets403JSONResponse ProblemDetails
+
+func (response ListAssets403JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAssets500JSONResponse ProblemDetails
+
+func (response ListAssets500JSONResponse) VisitListAssetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetComponentsRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetAssetComponentsResponseObject interface {
+	VisitGetAssetComponentsResponse(w http.ResponseWriter) error
+}
+
+type GetAssetComponents200JSONResponse AssetComponents
+
+func (response GetAssetComponents200JSONResponse) VisitGetAssetComponentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetComponents400JSONResponse ProblemDetails
+
+func (response GetAssetComponents400JSONResponse) VisitGetAssetComponentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetComponents403JSONResponse ProblemDetails
+
+func (response GetAssetComponents403JSONResponse) VisitGetAssetComponentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetComponents404JSONResponse ProblemDetails
+
+func (response GetAssetComponents404JSONResponse) VisitGetAssetComponentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAssetComponents500JSONResponse ProblemDetails
+
+func (response GetAssetComponents500JSONResponse) VisitGetAssetComponentsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type RevealAuditEventActorRequestObject struct {
@@ -2036,6 +5196,303 @@ func (response RevealAuditEventActor404JSONResponse) VisitRevealAuditEventActorR
 type RevealAuditEventActor500JSONResponse ProblemDetails
 
 func (response RevealAuditEventActor500JSONResponse) VisitRevealAuditEventActorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInventoryImportRequestObject struct {
+	Body io.Reader
+}
+
+type CreateInventoryImportResponseObject interface {
+	VisitCreateInventoryImportResponse(w http.ResponseWriter) error
+}
+
+type CreateInventoryImport200JSONResponse InventoryImport
+
+func (response CreateInventoryImport200JSONResponse) VisitCreateInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInventoryImport400JSONResponse ProblemDetails
+
+func (response CreateInventoryImport400JSONResponse) VisitCreateInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInventoryImport403JSONResponse ProblemDetails
+
+func (response CreateInventoryImport403JSONResponse) VisitCreateInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInventoryImport413JSONResponse ProblemDetails
+
+func (response CreateInventoryImport413JSONResponse) VisitCreateInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateInventoryImport500JSONResponse ProblemDetails
+
+func (response CreateInventoryImport500JSONResponse) VisitCreateInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInventoryImportRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetInventoryImportResponseObject interface {
+	VisitGetInventoryImportResponse(w http.ResponseWriter) error
+}
+
+type GetInventoryImport200JSONResponse InventoryImport
+
+func (response GetInventoryImport200JSONResponse) VisitGetInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInventoryImport400JSONResponse ProblemDetails
+
+func (response GetInventoryImport400JSONResponse) VisitGetInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInventoryImport403JSONResponse ProblemDetails
+
+func (response GetInventoryImport403JSONResponse) VisitGetInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInventoryImport404JSONResponse ProblemDetails
+
+func (response GetInventoryImport404JSONResponse) VisitGetInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetInventoryImport500JSONResponse ProblemDetails
+
+func (response GetInventoryImport500JSONResponse) VisitGetInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CommitInventoryImportRequestObject struct {
+	Id string `json:"id"`
+}
+
+type CommitInventoryImportResponseObject interface {
+	VisitCommitInventoryImportResponse(w http.ResponseWriter) error
+}
+
+type CommitInventoryImport200JSONResponse InventoryImport
+
+func (response CommitInventoryImport200JSONResponse) VisitCommitInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CommitInventoryImport400JSONResponse ProblemDetails
+
+func (response CommitInventoryImport400JSONResponse) VisitCommitInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CommitInventoryImport403JSONResponse ProblemDetails
+
+func (response CommitInventoryImport403JSONResponse) VisitCommitInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CommitInventoryImport404JSONResponse ProblemDetails
+
+func (response CommitInventoryImport404JSONResponse) VisitCommitInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CommitInventoryImport409JSONResponse ProblemDetails
+
+func (response CommitInventoryImport409JSONResponse) VisitCommitInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CommitInventoryImport500JSONResponse ProblemDetails
+
+func (response CommitInventoryImport500JSONResponse) VisitCommitInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRolesRequestObject struct {
+}
+
+type ListRolesResponseObject interface {
+	VisitListRolesResponse(w http.ResponseWriter) error
+}
+
+type ListRoles200JSONResponse RoleList
+
+func (response ListRoles200JSONResponse) VisitListRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRoles403JSONResponse ProblemDetails
+
+func (response ListRoles403JSONResponse) VisitListRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRoles500JSONResponse ProblemDetails
+
+func (response ListRoles500JSONResponse) VisitListRolesResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -2254,11 +5711,278 @@ func (response SignalCommand500JSONResponse) VisitSignalCommandResponse(w http.R
 	return err
 }
 
+type ListUsersRequestObject struct {
+	Params ListUsersParams
+}
+
+type ListUsersResponseObject interface {
+	VisitListUsersResponse(w http.ResponseWriter) error
+}
+
+type ListUsers200JSONResponse UserList
+
+func (response ListUsers200JSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUsers400JSONResponse ProblemDetails
+
+func (response ListUsers400JSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUsers403JSONResponse ProblemDetails
+
+func (response ListUsers403JSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListUsers500JSONResponse ProblemDetails
+
+func (response ListUsers500JSONResponse) VisitListUsersResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateUserRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DeactivateUserResponseObject interface {
+	VisitDeactivateUserResponse(w http.ResponseWriter) error
+}
+
+type DeactivateUser200JSONResponse User
+
+func (response DeactivateUser200JSONResponse) VisitDeactivateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateUser400JSONResponse ProblemDetails
+
+func (response DeactivateUser400JSONResponse) VisitDeactivateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateUser403JSONResponse ProblemDetails
+
+func (response DeactivateUser403JSONResponse) VisitDeactivateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateUser404JSONResponse ProblemDetails
+
+func (response DeactivateUser404JSONResponse) VisitDeactivateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateUser409JSONResponse ProblemDetails
+
+func (response DeactivateUser409JSONResponse) VisitDeactivateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeactivateUser500JSONResponse ProblemDetails
+
+func (response DeactivateUser500JSONResponse) VisitDeactivateUserResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserRolesRequestObject struct {
+	Id   string `json:"id"`
+	Body *UpdateUserRolesJSONRequestBody
+}
+
+type UpdateUserRolesResponseObject interface {
+	VisitUpdateUserRolesResponse(w http.ResponseWriter) error
+}
+
+type UpdateUserRoles200JSONResponse User
+
+func (response UpdateUserRoles200JSONResponse) VisitUpdateUserRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserRoles400JSONResponse ProblemDetails
+
+func (response UpdateUserRoles400JSONResponse) VisitUpdateUserRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserRoles403JSONResponse ProblemDetails
+
+func (response UpdateUserRoles403JSONResponse) VisitUpdateUserRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserRoles404JSONResponse ProblemDetails
+
+func (response UpdateUserRoles404JSONResponse) VisitUpdateUserRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserRoles409JSONResponse ProblemDetails
+
+func (response UpdateUserRoles409JSONResponse) VisitUpdateUserRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateUserRoles500JSONResponse ProblemDetails
+
+func (response UpdateUserRoles500JSONResponse) VisitUpdateUserRolesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// ListAssets List inventory assets
+	// (GET /api/v1/assets)
+	ListAssets(ctx context.Context, request ListAssetsRequestObject) (ListAssetsResponseObject, error)
+	// GetAssetComponents Read one asset and its components
+	// (GET /api/v1/assets/{id}/components)
+	GetAssetComponents(ctx context.Context, request GetAssetComponentsRequestObject) (GetAssetComponentsResponseObject, error)
 	// RevealAuditEventActor Reveal the actor identity of an audit event
 	// (POST /api/v1/audit-events/{id}/reveal-actor)
 	RevealAuditEventActor(ctx context.Context, request RevealAuditEventActorRequestObject) (RevealAuditEventActorResponseObject, error)
+	// CreateInventoryImport Upload an inventory CSV for validation and preview
+	// (POST /api/v1/inventory/imports)
+	CreateInventoryImport(ctx context.Context, request CreateInventoryImportRequestObject) (CreateInventoryImportResponseObject, error)
+	// GetInventoryImport Read a staged inventory import
+	// (GET /api/v1/inventory/imports/{id})
+	GetInventoryImport(ctx context.Context, request GetInventoryImportRequestObject) (GetInventoryImportResponseObject, error)
+	// CommitInventoryImport Commit a staged inventory import
+	// (POST /api/v1/inventory/imports/{id}/commit)
+	CommitInventoryImport(ctx context.Context, request CommitInventoryImportRequestObject) (CommitInventoryImportResponseObject, error)
+	// ListRoles List the role vocabulary
+	// (GET /api/v1/roles)
+	ListRoles(ctx context.Context, request ListRolesRequestObject) (ListRolesResponseObject, error)
 	// ListSignals List signals
 	// (GET /api/v1/signals)
 	ListSignals(ctx context.Context, request ListSignalsRequestObject) (ListSignalsResponseObject, error)
@@ -2268,6 +5992,15 @@ type StrictServerInterface interface {
 	// SignalCommand Apply one triage command to a signal
 	// (POST /api/v1/signals/{signal_id}/commands)
 	SignalCommand(ctx context.Context, request SignalCommandRequestObject) (SignalCommandResponseObject, error)
+	// ListUsers List internal users
+	// (GET /api/v1/users)
+	ListUsers(ctx context.Context, request ListUsersRequestObject) (ListUsersResponseObject, error)
+	// DeactivateUser Deactivate a user
+	// (POST /api/v1/users/{id}/deactivate)
+	DeactivateUser(ctx context.Context, request DeactivateUserRequestObject) (DeactivateUserResponseObject, error)
+	// UpdateUserRoles Grant and/or revoke a user's roles
+	// (PATCH /api/v1/users/{id}/roles)
+	UpdateUserRoles(ctx context.Context, request UpdateUserRolesRequestObject) (UpdateUserRolesResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -2309,6 +6042,58 @@ type strictHandler struct {
 	options     StrictHTTPServerOptions
 }
 
+// ListAssets operation middleware
+func (sh *strictHandler) ListAssets(w http.ResponseWriter, r *http.Request, params ListAssetsParams) {
+	var request ListAssetsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAssets(ctx, request.(ListAssetsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAssets")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAssetsResponseObject); ok {
+		if err := validResponse.VisitListAssetsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAssetComponents operation middleware
+func (sh *strictHandler) GetAssetComponents(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetAssetComponentsRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAssetComponents(ctx, request.(GetAssetComponentsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAssetComponents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAssetComponentsResponseObject); ok {
+		if err := validResponse.VisitGetAssetComponentsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RevealAuditEventActor operation middleware
 func (sh *strictHandler) RevealAuditEventActor(w http.ResponseWriter, r *http.Request, id string) {
 	var request RevealAuditEventActorRequestObject
@@ -2335,6 +6120,108 @@ func (sh *strictHandler) RevealAuditEventActor(w http.ResponseWriter, r *http.Re
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevealAuditEventActorResponseObject); ok {
 		if err := validResponse.VisitRevealAuditEventActorResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateInventoryImport operation middleware
+func (sh *strictHandler) CreateInventoryImport(w http.ResponseWriter, r *http.Request) {
+	var request CreateInventoryImportRequestObject
+
+	request.Body = r.Body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateInventoryImport(ctx, request.(CreateInventoryImportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateInventoryImport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateInventoryImportResponseObject); ok {
+		if err := validResponse.VisitCreateInventoryImportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetInventoryImport operation middleware
+func (sh *strictHandler) GetInventoryImport(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetInventoryImportRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetInventoryImport(ctx, request.(GetInventoryImportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetInventoryImport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetInventoryImportResponseObject); ok {
+		if err := validResponse.VisitGetInventoryImportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CommitInventoryImport operation middleware
+func (sh *strictHandler) CommitInventoryImport(w http.ResponseWriter, r *http.Request, id string) {
+	var request CommitInventoryImportRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CommitInventoryImport(ctx, request.(CommitInventoryImportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CommitInventoryImport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CommitInventoryImportResponseObject); ok {
+		if err := validResponse.VisitCommitInventoryImportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListRoles operation middleware
+func (sh *strictHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
+	var request ListRolesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRoles(ctx, request.(ListRolesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRoles")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListRolesResponseObject); ok {
+		if err := validResponse.VisitListRolesResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -2427,81 +6314,237 @@ func (sh *strictHandler) SignalCommand(w http.ResponseWriter, r *http.Request, s
 	}
 }
 
+// ListUsers operation middleware
+func (sh *strictHandler) ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams) {
+	var request ListUsersRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListUsers(ctx, request.(ListUsersRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListUsers")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListUsersResponseObject); ok {
+		if err := validResponse.VisitListUsersResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeactivateUser operation middleware
+func (sh *strictHandler) DeactivateUser(w http.ResponseWriter, r *http.Request, id string) {
+	var request DeactivateUserRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeactivateUser(ctx, request.(DeactivateUserRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeactivateUser")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeactivateUserResponseObject); ok {
+		if err := validResponse.VisitDeactivateUserResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateUserRoles operation middleware
+func (sh *strictHandler) UpdateUserRoles(w http.ResponseWriter, r *http.Request, id string) {
+	var request UpdateUserRolesRequestObject
+
+	request.Id = id
+
+	var body UpdateUserRolesJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateUserRoles(ctx, request.(UpdateUserRolesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateUserRoles")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateUserRolesResponseObject); ok {
+		if err := validResponse.VisitUpdateUserRolesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
 // Stored as a slice of fixed-width chunks rather than one concatenated
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"+uoeI7sl2+Pj/w4A",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

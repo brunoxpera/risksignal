@@ -78,12 +78,21 @@ func (h signalCommandHandler) SignalCommand(ctx context.Context, request gen.Sig
 		return h.signalCommandError(ctx, err)
 	}
 
+	// expected_version is optional in the generalised I5b request schema
+	// (only the version-guarded commands require it); the two I5a reference
+	// commands below are version-guarded, so a missing token reaches the use
+	// case as 0 and is rejected there (WP-5b.04 owns the full dispatch).
+	expectedVersion := 0
+	if request.Body.ExpectedVersion != nil {
+		expectedVersion = *request.Body.ExpectedVersion
+	}
+
 	var sig domain.RiskSignal
 	switch request.Body.Command {
 	case gen.Acknowledge:
 		sig, err = h.commands.AcknowledgeSignal(ctx, application.AcknowledgeSignalInput{
 			SignalID:        request.SignalId,
-			ExpectedVersion: request.Body.ExpectedVersion,
+			ExpectedVersion: expectedVersion,
 			Actor:           actor,
 		})
 	case gen.OverridePriority:
@@ -99,7 +108,7 @@ func (h signalCommandHandler) SignalCommand(ctx context.Context, request gen.Sig
 			SignalID:        request.SignalId,
 			Priority:        domain.Priority(priority),
 			Reason:          reason,
-			ExpectedVersion: request.Body.ExpectedVersion,
+			ExpectedVersion: expectedVersion,
 			Actor:           actor,
 		})
 	default:

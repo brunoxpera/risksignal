@@ -290,6 +290,534 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/inventory/imports:
+    post:
+      operationId: createInventoryImport
+      summary: Upload an inventory CSV for validation and preview
+      description: |
+        The staged inventory import, first step (ARCH-006 §2.1, concept ch.
+        10.2): upload the CSV, run the validate + preview diff against the
+        persisted state, persist a staged import record and return its
+        import_id together with the preview tallies and the positioned
+        error/warning report. Nothing is written to the inventory — the
+        staged record is committed by POST /inventory/imports/{id}/commit.
+        The upload is bounded by the configured InventoryMaxBytes; an
+        oversized body is a 413. Requires `inventory.manage`.
+      requestBody:
+        required: true
+        description: The inventory CSV (bounded by InventoryMaxBytes).
+        content:
+          text/csv:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: |
+            The staged import record: its import_id, the preview tallies and
+            the positioned error/warning report. The import is not yet
+            committed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryImport'
+        '400':
+          description: |
+            The request is not acceptable as given: an unreadable CSV or a
+            body the binding cannot read. Rendered as an RFC 9457 problem
+            detail; nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: |
+            The authenticated principal may not exercise `inventory.manage`
+            (deny-by-default). The denied request wrote nothing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '413':
+          description: |
+            The uploaded CSV exceeds InventoryMaxBytes; the parse is rejected
+            before any record is staged. Rendered as an RFC 9457 problem
+            detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error (for example an unreachable database).
+            The cause never leaves the server: the problem detail is the
+            generic internal-error shape without a detail field (concept
+            ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/inventory/imports/{id}:
+    get:
+      operationId: getInventoryImport
+      summary: Read a staged inventory import
+      description: |
+        Return the stored staged import's status, preview tallies and
+        error/warning counts (ARCH-006 §2.1). Requires `inventory.manage`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Import record identifier (uuid).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The stored staged import record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryImport'
+        '400':
+          description: The id path parameter is not a well-formed identifier (uuid).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `inventory.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No staged import exists for this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error (for example an unreachable database).
+            The cause never leaves the server: the problem detail is the
+            generic internal-error shape without a detail field (concept
+            ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/inventory/imports/{id}/commit:
+    post:
+      operationId: commitInventoryImport
+      summary: Commit a staged inventory import
+      description: |
+        Load the stored bytes of a staged import and run the existing I3
+        CommitInventory command (one transaction, audited, enqueues one
+        matching.rebuild on change), then mark the record committed
+        (ARCH-006 §2.1). Re-committing an already-committed record is a no-op
+        returning the stored result (idempotent). Requires `inventory.manage`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Import record identifier (uuid).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: |
+            The import record after the commit (status committed, committed_at
+            set) with its result tallies.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InventoryImport'
+        '400':
+          description: The id path parameter is not a well-formed identifier (uuid).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `inventory.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No staged import exists for this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: |
+            The commit conflicts with the record's state (for example a
+            failed import). Nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error (for example an unreachable database or
+            a failed matching.rebuild enqueue, which rolls the whole commit
+            back). The cause never leaves the server: the problem detail is
+            the generic internal-error shape without a detail field (concept
+            ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/assets:
+    get:
+      operationId: listAssets
+      summary: List inventory assets
+      description: |
+        Cursor-paginated, filterable asset read (ARCH-006 §2.2, concept ch.
+        10.4). Assets sort stably; the page envelope always carries a
+        next_cursor (null on the last page). Object scope injects
+        owner_id = principal.id for the assigned case. Requires
+        `inventory.read`.
+      parameters:
+        - name: type
+          in: query
+          required: false
+          description: Only assets of this type.
+          schema:
+            $ref: '#/components/schemas/AssetType'
+        - name: environment
+          in: query
+          required: false
+          description: Only assets in this environment.
+          schema:
+            $ref: '#/components/schemas/Environment'
+        - name: criticality
+          in: query
+          required: false
+          description: Only assets of this criticality.
+          schema:
+            $ref: '#/components/schemas/Criticality'
+        - name: exposure
+          in: query
+          required: false
+          description: Only assets with this exposure.
+          schema:
+            $ref: '#/components/schemas/Exposure'
+        - name: owner_id
+          in: query
+          required: false
+          description: Only assets owned by this principal id.
+          schema:
+            type: string
+        - name: source
+          in: query
+          required: false
+          description: Only assets whose import source is this source.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Maximum page size.
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque pagination cursor from a previous page's next_cursor.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of assets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetList'
+        '400':
+          description: |
+            The request is not acceptable as given: an out-of-vocabulary
+            filter, a limit outside [1, 100] or a malformed cursor. Rendered
+            as an RFC 9457 problem detail whose detail names the offending
+            value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `inventory.read`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error (for example an unreachable database).
+            The cause never leaves the server: the problem detail is the
+            generic internal-error shape without a detail field (concept
+            ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/assets/{id}/components:
+    get:
+      operationId: getAssetComponents
+      summary: Read one asset and its components
+      description: |
+        The asset detail read (ARCH-006 §2.2): one asset together with its
+        components; also reused by the signal-detail asset context. Requires
+        `inventory.read`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Asset identifier (uuid).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The asset and its components.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetComponents'
+        '400':
+          description: The id path parameter is not a well-formed identifier (uuid).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `inventory.read`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No asset exists for this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error (for example an unreachable database).
+            The cause never leaves the server: the problem detail is the
+            generic internal-error shape without a detail field (concept
+            ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      summary: List internal users
+      description: |
+        The user/role administration read (ARCH-006 §3.3, concept ch. 10.2):
+        a cursor-paginated list of internal users with their current roles.
+        Requires `users.roles.manage`.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum page size.
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque pagination cursor from a previous page's next_cursor.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of users.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserList'
+        '400':
+          description: A limit outside [1, 100] or a malformed cursor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `users.roles.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error (for example an unreachable database).
+            The cause never leaves the server: the problem detail is the
+            generic internal-error shape without a detail field (concept
+            ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/roles:
+    get:
+      operationId: listRoles
+      summary: List the role vocabulary
+      description: |
+        The role catalogue (ARCH-006 §3.3, ARCH-005 §1): the fixed five-role
+        vocabulary from code, each with its permission→scope grants. Requires
+        `users.roles.manage`.
+      responses:
+        '200':
+          description: The role vocabulary with its permission grants.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleList'
+        '403':
+          description: The authenticated principal may not exercise `users.roles.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server:
+            the problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/users/{id}/roles:
+    patch:
+      operationId: updateUserRoles
+      summary: Grant and/or revoke a user's roles
+      description: |
+        The role-administration write (ARCH-006 §3.3, ARCH-005 §1): grant
+        and/or revoke roles on one user, writing a `users.role_granted` /
+        `users.role_revoked` audit event per change (concept ch. 13.2).
+        Requires `users.roles.manage`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: User identifier (uuid).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRolesRequest'
+      responses:
+        '200':
+          description: The user with its roles after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: |
+            The request is not acceptable as given: a malformed user id, an
+            out-of-vocabulary role or an unparsable body. Rendered as an RFC
+            9457 problem detail; nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `users.roles.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No user exists for this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: |
+            The change conflicts with the user's state (for example a role
+            change on a deactivated user). Nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server:
+            the problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/users/{id}/deactivate:
+    post:
+      operationId: deactivateUser
+      summary: Deactivate a user
+      description: |
+        Deactivate-never-delete (ARCH-006 §3.3, ADR-014): stamp the user's
+        deactivation instant; the internal id stays permanently referenceable
+        so the audit trail stays resolvable. Requires `users.roles.manage`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: User identifier (uuid).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The user after deactivation (deactivated_at set).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: The id path parameter is not a well-formed identifier (uuid).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `users.roles.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No user exists for this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: |
+            The user is already deactivated (the guarded transition did not
+            apply). Nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server:
+            the problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
 components:
   schemas:
     # --- Core signal read (ARCH-001 §4) -----------------------------------
@@ -394,40 +922,142 @@ components:
         next_cursor:
           type: [string, 'null']
           description: Opaque cursor of the next page; null on the last page.
-    # --- I5a reference command (ARCH-005 §8 channel parity) ---------------
+    # --- Signal command surface (ARCH-006 §1.2: eight explicit commands) --
     SignalCommandRequest:
       type: object
       description: |
-        One triage command on one signal (the I5a reference operation of the
-        API/CLI channel-parity proof). `acknowledge` moves a new signal to
-        in_review; `override_priority` replaces the effective priority and
-        requires a priority and a reason.
+        One explicit triage command on one signal — the full I5b command
+        surface (ARCH-006 §1.2, concept ch. 10.3). The `command` property is
+        the discriminator: it selects which of the eight commands is applied
+        and therefore which fields are required. The command is never an
+        object patch — every value is an explicit input, never an implicit
+        default.
+
+        Required fields per command:
+          - acknowledge:       expected_version
+          - change_status:     status, expected_version
+          - assign_owner:      owner_id ("" clears), expected_version
+          - add_comment:       comment
+          - override_priority: priority, reason, expected_version
+          - revert_priority:   expected_version
+          - pause_sla:         target, reason
+          - resume_sla:        target, reason
+
+        `expected_version` is the optimistic-lock token, mandatory only on the
+        five version-guarded commands (acknowledge, change_status,
+        assign_owner, override_priority, revert_priority); comments append and
+        SLA pause/resume are guarded by clock state, not a row version
+        (ARCH-006 §1.2). `reason` is mandatory for override_priority and
+        pause_sla/resume_sla and for the guarded change_status edges
+        (closed-entry / reopen); the domain enforces those residual rules.
       required:
         - command
-        - expected_version
       properties:
         command:
           type: string
-          description: The command to apply.
-          enum: [acknowledge, override_priority]
+          description: The command to apply (the discriminator of the request).
+          enum:
+            - acknowledge
+            - change_status
+            - assign_owner
+            - add_comment
+            - override_priority
+            - revert_priority
+            - pause_sla
+            - resume_sla
         expected_version:
           type: integer
           minimum: 1
-          description: Optimistic-lock token the caller last read.
-        priority:
-          $ref: '#/components/schemas/Priority'
+          description: Optimistic-lock token the caller last read (version-guarded commands only).
+        status:
+          $ref: '#/components/schemas/SignalStatus'
         reason:
           type: string
-          description: Mandatory, non-blank justification for override_priority.
+          description: Non-blank justification; mandatory per command (override_priority, pause_sla, resume_sla, guarded change_status).
+        owner_id:
+          type: string
+          description: Owner principal id (assign_owner); the empty string clears the assignment.
+        comment:
+          type: string
+          description: Append-only comment body (add_comment).
+        priority:
+          $ref: '#/components/schemas/Priority'
+        target:
+          $ref: '#/components/schemas/SLATarget'
+      allOf:
+        - if:
+            properties:
+              command:
+                const: acknowledge
+            required: [command]
+          then:
+            required: [expected_version]
+        - if:
+            properties:
+              command:
+                const: change_status
+            required: [command]
+          then:
+            required: [expected_version, status]
+        - if:
+            properties:
+              command:
+                const: assign_owner
+            required: [command]
+          then:
+            required: [expected_version, owner_id]
+        - if:
+            properties:
+              command:
+                const: add_comment
+            required: [command]
+          then:
+            required: [comment]
+        - if:
+            properties:
+              command:
+                const: override_priority
+            required: [command]
+          then:
+            required: [expected_version, priority, reason]
+        - if:
+            properties:
+              command:
+                const: revert_priority
+            required: [command]
+          then:
+            required: [expected_version]
+        - if:
+            properties:
+              command:
+                const: pause_sla
+            required: [command]
+          then:
+            required: [target, reason]
+        - if:
+            properties:
+              command:
+                const: resume_sla
+            required: [command]
+          then:
+            required: [target, reason]
     SignalCommandResult:
       type: object
-      description: The signal after a command was applied.
+      description: |
+        The signal after a command was applied. `status`/`priority`/`version`
+        always carry the post-command state; the nullable detail fields carry
+        the command-specific outcome — `owner_id` for assign_owner, `target`
+        for pause_sla/resume_sla and `auto_priority` for override_priority /
+        revert_priority (null when the command does not apply to the field).
       required:
         - id
         - command
         - status
         - priority
         - version
+        - owner_id
+        - target
+        - auto_priority
       properties:
         id:
           type: string
@@ -440,6 +1070,19 @@ components:
         version:
           type: integer
           description: The optimistic-lock version after the command.
+        owner_id:
+          type: [string, 'null']
+          description: The owner principal after assign_owner; null for the other commands.
+        target:
+          oneOf:
+            - $ref: '#/components/schemas/SLATarget'
+            - type: 'null'
+          description: The SLA target after pause_sla/resume_sla; null for the other commands.
+        auto_priority:
+          oneOf:
+            - $ref: '#/components/schemas/Priority'
+            - type: 'null'
+          description: The computed priority preserved by override_priority; null for the other commands.
 
     # --- Enum vocabularies (full domain sets since I4, ARCH-001 §4) --------
     Priority:
@@ -466,6 +1109,10 @@ components:
       type: string
       description: Exposure of the asset to the internet (concept ch. 6.2).
       enum: [internet, internal, isolated, unknown]
+    SLATarget:
+      type: string
+      description: Reaction-time target of a signal (ch. 6.3, ARCH-004 §4.1).
+      enum: [notification, acknowledgement, assessment, decision]
     # --- Identity reveal (ADR-014, ARCH-005 section 7) --------------------
     RevealActorRequest:
       type: object
@@ -517,6 +1164,378 @@ components:
         display_name:
           type: [string, 'null']
           description: The resolved display name (null when pseudonymised or for a non-user actor).
+    # --- I5b inventory import resources (ARCH-006 §2.1) --------------------
+    InventoryImportStatus:
+      type: string
+      description: Lifecycle of a staged import record (ARCH-006 §2.1).
+      enum: [pending, committed, failed]
+    InventoryImportPreview:
+      type: object
+      description: |
+        The validate + preview tallies of one staged import (ARCH-006 §2.1):
+        the readable row count, the positioned error/warning counts and the
+        created/updated/unchanged tallies a commit of the clean rows would
+        produce.
+      required:
+        - rows
+        - errors
+        - warnings
+        - assets_created
+        - assets_updated
+        - assets_unchanged
+        - components_created
+        - components_updated
+        - components_unchanged
+      properties:
+        rows:
+          type: integer
+          description: Readable data rows of the CSV.
+        errors:
+          type: integer
+          description: Positions that failed validation.
+        warnings:
+          type: integer
+          description: Data-quality warnings (unknown criticality/exposure).
+        assets_created:
+          type: integer
+        assets_updated:
+          type: integer
+        assets_unchanged:
+          type: integer
+        components_created:
+          type: integer
+        components_updated:
+          type: integer
+        components_unchanged:
+          type: integer
+    InventoryImportProblem:
+      type: object
+      description: |
+        One positioned validation failure of an inventory CSV (ARCH-003 §1.3):
+        the 1-based physical line, the offending column name ("" for a
+        row/header-spanning problem), the human-readable reason and the
+        offending cell verbatim ("" when no single cell is at fault).
+      required:
+        - line
+        - column
+        - reason
+        - input
+      properties:
+        line:
+          type: integer
+        column:
+          type: string
+        reason:
+          type: string
+        input:
+          type: string
+    InventoryImportWarning:
+      type: object
+      description: |
+        One data-quality warning of an inventory CSV (ARCH-003 §1.3): the
+        first contributing data line, the field, the unknown value and the
+        reason.
+      required:
+        - line
+        - field
+        - value
+        - reason
+      properties:
+        line:
+          type: integer
+        field:
+          type: string
+        value:
+          type: string
+        reason:
+          type: string
+    InventoryImport:
+      type: object
+      description: |
+        One staged inventory import record (ARCH-006 §2.1): its id and status,
+        the creation and (nullable) commit instants, the preview tallies and
+        the positioned error/warning report.
+      required:
+        - id
+        - status
+        - created_at
+        - committed_at
+        - preview
+        - problems
+        - warnings
+      properties:
+        id:
+          type: string
+          description: Staged import identifier (uuid).
+        status:
+          $ref: '#/components/schemas/InventoryImportStatus'
+        created_at:
+          type: string
+          format: date-time
+        committed_at:
+          type: [string, 'null']
+          format: date-time
+          description: Commit instant (null until committed).
+        preview:
+          $ref: '#/components/schemas/InventoryImportPreview'
+        problems:
+          type: array
+          description: The positioned validation errors of the upload.
+          items:
+            $ref: '#/components/schemas/InventoryImportProblem'
+        warnings:
+          type: array
+          description: The data-quality warnings of the upload.
+          items:
+            $ref: '#/components/schemas/InventoryImportWarning'
+    # --- I5b assets read resources (ARCH-006 §2.2) ------------------------
+    AssetType:
+      type: string
+      description: Inventory asset type (ch. 6.2); the vocabulary grows by migration and API versioning.
+      enum: [server_vm, application_framework, container_image, network_security, cloud_saas]
+    Environment:
+      type: string
+      description: Runtime environment of an asset (ch. 6.2); visible context only, never a priority driver.
+      enum: [production, staging, test, development, unknown]
+    VersionScheme:
+      type: string
+      description: Version-ordering scheme of a component, inferred at import time (ARCH-003 §2).
+      enum: [semver, debian, rpm, maven, calver, generic, unknown]
+    Asset:
+      type: object
+      description: |
+        One inventoried asset (ARCH-003 §1.1): its import identity (source,
+        external_id), the human name, the classification vocabularies, the
+        owner and its lifecycle flags (deactivate-never-delete).
+      required:
+        - id
+        - external_id
+        - source
+        - type
+        - name
+        - environment
+        - criticality
+        - exposure
+        - owner
+        - deactivated
+        - verified
+      properties:
+        id:
+          type: string
+          description: Asset identifier (uuid).
+        external_id:
+          type: string
+          description: Import idempotency key half; unique with source.
+        source:
+          type: string
+        type:
+          $ref: '#/components/schemas/AssetType'
+        name:
+          type: string
+        environment:
+          $ref: '#/components/schemas/Environment'
+        criticality:
+          $ref: '#/components/schemas/Criticality'
+        exposure:
+          $ref: '#/components/schemas/Exposure'
+        owner:
+          type: [string, 'null']
+          description: Owner principal id; null when unassigned.
+        deactivated:
+          type: boolean
+        verified:
+          type: boolean
+          description: Last manual data-quality verification; informational.
+    AssetList:
+      type: object
+      description: One page of the asset read (ARCH-006 §2.2).
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Asset'
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque cursor of the next page; null on the last page.
+    Component:
+      type: object
+      description: |
+        One inventoried component of an asset (ARCH-003 §1.2): the raw
+        identifiers verbatim ("" when absent), the inferred version scheme
+        and the lifecycle flag.
+      required:
+        - id
+        - asset_id
+        - vendor
+        - product
+        - version
+        - cpe
+        - purl
+        - image
+        - digest
+        - version_scheme
+        - deactivated
+      properties:
+        id:
+          type: string
+        asset_id:
+          type: string
+        vendor:
+          type: string
+        product:
+          type: string
+        version:
+          type: string
+        cpe:
+          type: string
+        purl:
+          type: string
+        image:
+          type: string
+        digest:
+          type: string
+        version_scheme:
+          $ref: '#/components/schemas/VersionScheme'
+        deactivated:
+          type: boolean
+    AssetComponents:
+      type: object
+      description: |
+        One asset together with its components — the GET
+        /assets/{id}/components read (ARCH-006 §2.2), also reused by the
+        signal-detail asset context.
+      required:
+        - asset
+        - components
+      properties:
+        asset:
+          $ref: '#/components/schemas/Asset'
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/Component'
+    # --- I5b user/role administration (ARCH-006 §3.3) ---------------------
+    Role:
+      type: string
+      description: Internal authorisation role (ARCH-005 §1/§3); the fixed five-role vocabulary from code.
+      enum: [security_analyst, system_responsible, administrator, auditor, product_owner]
+    Scope:
+      type: string
+      description: Object scope of a permission grant (ARCH-005 §3).
+      enum: [all, own, assigned]
+    PermissionGrant:
+      type: object
+      description: One permission→scope grant of a role (ARCH-005 §3 matrix).
+      required:
+        - permission
+        - scope
+      properties:
+        permission:
+          type: string
+        scope:
+          $ref: '#/components/schemas/Scope'
+    RoleDescriptor:
+      type: object
+      description: One role of the catalogue with its permission grants (ARCH-005 §1/§3, ARCH-006 §3.3).
+      required:
+        - role
+        - permissions
+      properties:
+        role:
+          $ref: '#/components/schemas/Role'
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PermissionGrant'
+    RoleList:
+      type: object
+      description: The complete role catalogue (ARCH-006 §3.3).
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoleDescriptor'
+    User:
+      type: object
+      description: |
+        One internal user with its current roles (ARCH-005 §1, ARCH-006
+        §3.3). Users are deactivated, never deleted (ADR-014); email is an
+        optional notification recipient and never the login key.
+      required:
+        - id
+        - subject_id
+        - display_name
+        - email
+        - roles
+        - deactivated_at
+        - last_login_at
+        - created_at
+      properties:
+        id:
+          type: string
+          description: Stable internal users.id (uuid) — the audit actor id for user actors.
+        subject_id:
+          type: string
+          description: Issuer-qualified external OIDC subject ("<issuer>::<sub>").
+        display_name:
+          type: string
+        email:
+          type: [string, 'null']
+          description: Optional e-mail (notification recipient only).
+        roles:
+          type: array
+          description: The user's current roles; empty means deny-by-default.
+          items:
+            $ref: '#/components/schemas/Role'
+        deactivated_at:
+          type: [string, 'null']
+          format: date-time
+          description: Deactivation instant (null = active).
+        last_login_at:
+          type: [string, 'null']
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    UserList:
+      type: object
+      description: One page of the user read (ARCH-006 §3.3).
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        next_cursor:
+          type: [string, 'null']
+          description: Opaque cursor of the next page; null on the last page.
+    UpdateUserRolesRequest:
+      type: object
+      description: |
+        The role-administration write (ARCH-006 §3.3, ARCH-005 §1): grant
+        and/or revoke roles on one user. Each change writes its own
+        `users.role_granted` / `users.role_revoked` audit event.
+      required:
+        - grant
+        - revoke
+      properties:
+        grant:
+          type: array
+          description: Roles to grant.
+          items:
+            $ref: '#/components/schemas/Role'
+        revoke:
+          type: array
+          description: Roles to revoke.
+          items:
+            $ref: '#/components/schemas/Role'
     # --- Error envelope (RFC 9457, ADR-011) --------------------------------
     ProblemDetails:
       type: object

@@ -153,7 +153,7 @@ func TestI5aExitCriteriaChannelParity(t *testing.T) {
 	defer cancel()
 
 	ack, err := client.SignalCommandWithResponse(ctx, apiSig.ID, gen.SignalCommandRequest{
-		Command: gen.Acknowledge, ExpectedVersion: apiSig.Version,
+		Command: gen.Acknowledge, ExpectedVersion: ptrInt(apiSig.Version),
 	})
 	if err != nil {
 		t.Fatalf("API acknowledge: %v", err)
@@ -162,7 +162,7 @@ func TestI5aExitCriteriaChannelParity(t *testing.T) {
 		t.Fatalf("API acknowledge status = %d (body %s), want 200", ack.StatusCode(), ack.Body)
 	}
 	override, err := client.SignalCommandWithResponse(ctx, apiSig.ID, gen.SignalCommandRequest{
-		Command: gen.OverridePriority, ExpectedVersion: ack.JSON200.Version,
+		Command: gen.OverridePriority, ExpectedVersion: ptrInt(ack.JSON200.Version),
 		Priority: ptrPriority(gen.P3), Reason: ptrString("decommissioned"),
 	})
 	if err != nil {
@@ -182,7 +182,7 @@ func TestI5aExitCriteriaChannelParity(t *testing.T) {
 	}
 	auditsBefore := len(parityReadAudits(t, apiPool, apiSig.ID))
 	denied, err := adminClient.SignalCommandWithResponse(ctx, apiSig.ID, gen.SignalCommandRequest{
-		Command: gen.Acknowledge, ExpectedVersion: apiState.Version,
+		Command: gen.Acknowledge, ExpectedVersion: ptrInt(apiState.Version),
 	})
 	if err != nil {
 		t.Fatalf("admin API acknowledge: %v", err)
@@ -252,6 +252,7 @@ func TestI5aExitCriteriaChannelParity(t *testing.T) {
 	}
 }
 
-// ptrPriority and ptrString build the optional request fields.
+// ptrPriority, ptrString and ptrInt build the optional request fields.
 func ptrPriority(p gen.Priority) *gen.Priority { return &p }
 func ptrString(s string) *string               { return &s }
+func ptrInt(i int) *int                        { return &i }
