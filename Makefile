@@ -82,7 +82,7 @@ SBOM_DIR := $(ARTIFACT_DIR)/sbom
 SCAN_DIR := $(ARTIFACT_DIR)/scan
 
 .PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
-	verify-connectivity ci-lint ci-test test-exit-criteria test-i5a-exit-criteria test-contract ci-build demo check-gofmt vet lint-golangci \
+	verify-connectivity ci-lint ci-test test-exit-criteria test-i5a-exit-criteria test-i5b-exit-criteria test-contract ci-build demo check-gofmt vet lint-golangci \
 	lint-licenses lint-secrets lint-openapi-validate lint-openapi-diff up-db image sbom scan sign
 
 ## build: compile all three binaries into bin/ with build metadata injected
@@ -134,9 +134,26 @@ ci-lint: check-gofmt vet lint-golangci lint-arch lint-licenses lint-secrets \
 ##          injection (internal/application), the bypass lock (config), the
 ##          token/claim hardening (oidc) and the API/CLI channel-parity proof
 ##          (cmd/risksignal) — run standalone with
-##          `make test-i5a-exit-criteria`.
+##          `make test-i5a-exit-criteria`. The suite also includes the I5b
+##          web/CLI exit-criteria proofs (WP-5b.09 / DEV-107, ARCH-006 §8
+##          a–c): the API/web/CLI channel parity of the eight signal commands,
+##          the staged inventory import and the user role grant/revoke, the
+##          §11.2 UX-guardrail gate (internal/adapters/web) and the outbox-
+##          append / import-commit atomicity fault injections — run standalone
+##          with `make test-i5b-exit-criteria`.
 ci-test: up-db
 	$(GO) test -race ./...
+
+## test-i5b-exit-criteria: run only the I5b exit-criteria suite (WP-5b.09 /
+##          DEV-107, ARCH-006 §8 a–c) — the cross-channel parity proofs (the
+##          eight signal commands, the staged inventory import, the role
+##          grant/revoke), the §11.2 UX-guardrail gate and the fault-injection
+##          rollback proofs — race-enabled against the compose database. A
+##          focused subset of `make ci-test`, which runs the same tests as part
+##          of `go test ./...`; the database-free guardrail gate runs
+##          regardless, the integration proofs skip cleanly without a database.
+test-i5b-exit-criteria: up-db
+	$(GO) test -race -count=1 -run 'I5bExitCriteria' ./cmd/risksignal ./internal/adapters/web
 
 ## test-i5a-exit-criteria: run only the I5a exit-criteria suite (WP-5a.08 /
 ##          DEV-096, ARCH-005 §8) — the role matrix + object scope + actor
