@@ -218,8 +218,10 @@ func (s *Service) QuarantineReprocess(ctx context.Context, in QuarantineReproces
 
 		// Clean pass: resolve, linking the new domain object a
 		// single-record pass materialised (ARCH-002 §4 resolved_* links;
-		// multi-record passes resolve with the outcome note).
-		updated, err := s.quarantine.MarkResolved(ctx, tx, current.ID, sink.singleVulnID(), "", "reprocessed: normalised ok", now)
+		// multi-record passes resolve with the outcome note) — the
+		// vulnerability through the sink's single-upsert link and the new
+		// evidence through the AddEvidence id return (ARCH-003 §7, DEV-053).
+		updated, err := s.quarantine.MarkResolved(ctx, tx, current.ID, sink.singleVulnID(), sink.singleEvidenceID(), "reprocessed: normalised ok", now)
 		if err != nil {
 			return err
 		}

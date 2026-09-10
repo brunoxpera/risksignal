@@ -174,13 +174,20 @@ func TestQuarantineReprocessResolvesWithAudit(t *testing.T) {
 	}
 
 	// The committed row is resolved and linked to the vulnerability the
-	// pass upserted (the single-record pass link, ARCH-002 §4).
+	// pass upserted (the single-record pass link, ARCH-002 §4) and to the
+	// evidence row it wrote (the AddEvidence id return, ARCH-003 §7).
 	committed, _ := h.db.quarantineByID("quar-1")
 	if committed.Status != domain.QuarantineStatusResolved || committed.ResolvedVulnerabilityID == "" {
 		t.Fatalf("committed row = %+v, want resolved with the new vulnerability linked", committed)
 	}
 	if len(h.db.vulns) != 1 || h.db.vulns[0].id != committed.ResolvedVulnerabilityID {
 		t.Fatalf("vulns = %+v, want the pass's vulnerability %s linked", h.db.vulns, committed.ResolvedVulnerabilityID)
+	}
+	if committed.ResolvedEvidenceID == "" {
+		t.Fatal("committed row links no evidence, want resolved_evidence_id on the pass's new evidence")
+	}
+	if len(h.db.evidenceRows) != 1 || h.db.evidenceRows[0].id != committed.ResolvedEvidenceID {
+		t.Fatalf("evidence rows = %+v, want the pass's evidence %s linked", h.db.evidenceRows, committed.ResolvedEvidenceID)
 	}
 
 	// The audit event of the terminal transition.
@@ -341,5 +348,47 @@ func TestQuarantineSnapshotMinimalNoSecrets(t *testing.T) {
 	}
 	if _, has := before["payload_hash"]; has {
 		t.Fatalf("snapshot leaks payload_hash: %s", ev.Before)
+	}
+}
+
+// TestQuarantineReprocessLinksEvidenceOnlyForSingleEvidencePass pins the
+// exactness of the resolved_evidence_id link (ARCH-003 §7, DEV-053): a
+// single-vulnerability pass that writes exactly one evidence row links that
+// evidence, while a pass with several evidences links only the
+// vulnerability — a multi-evidence pass names no single evidence and
+// resolves with the outcome note alone (mirroring the single-upsert
+// vulnerability link).
+func TestQuarantineReprocessLinksEvidenceOnlyForSingleEvidencePass(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	seedQuarantined(h, t)
+
+	src := &runSource{typ: application.SourceTypeKEV}
+	src.normalize = func(ctx context.Context, in application.NormalizeInput, sink application.NormalizeSink) (application.NormalizeResult, error) {
+		if err := emitVuln(ctx, sink, "CVE-2026-3001", "kev skeleton"); err != nil {
+			return application.NormalizeResult{}, err
+		}
+		if err := emitEvidence(ctx, sink, "CVE-2026-3001", domain.EvidenceTypeKEV); err != nil {
+			return application.NormalizeResult{}, err
+		}
+		if err := emitEvidence(ctx, sink, "CVE-2026-3001", domain.EvidenceTypeCVSS); err != nil {
+			return application.NormalizeResult{}, err
+		}
+		return application.NormalizeResult{Records: 3}, nil
+	}
+
+	result, err := h.svc.QuarantineReprocess(ctx, application.QuarantineReprocessInput{ID: "quar-1", Adapter: src})
+	if err != nil || !result.Resolved {
+		t.Fatalf("QuarantineReprocess = %+v, %v; want resolved", result, err)
+	}
+	committed, _ := h.db.quarantineByID("quar-1")
+	if committed.ResolvedVulnerabilityID == "" {
+		t.Fatal("committed row links no vulnerability, want the single upsert linked")
+	}
+	if committed.ResolvedEvidenceID != "" {
+		t.Fatalf("committed row evidence link = %q, want an empty link — a two-evidence pass names no single evidence", committed.ResolvedEvidenceID)
+	}
+	if len(h.db.evidenceRows) != 2 {
+		t.Fatalf("evidence rows = %d, want the pass's 2 distinct evidences", len(h.db.evidenceRows))
 	}
 }

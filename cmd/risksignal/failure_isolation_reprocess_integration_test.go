@@ -15,9 +15,11 @@ package main
 // parser/data fix — the reprocess re-reads the stored record, it never
 // refetches) and `quarantine reprocess <id>` re-runs the KEV normaliser:
 // the clean single-vulnerability pass resolves the row and links the
-// materialised CVE via resolved_vulnerability_id, with the terminal
-// transition audited (quarantine.resolved) atomically with the state
-// change. A resolved row is terminal: a further reprocess is rejected.
+// materialised CVE via resolved_vulnerability_id and its new evidence via
+// resolved_evidence_id (the AddEvidence id return, ARCH-003 §7), with the
+// terminal transition audited (quarantine.resolved) atomically with the
+// state change. A resolved row is terminal: a further reprocess is
+// rejected.
 //
 // The database server is the compose `db` service (make up) or any other
 // PostgreSQL reachable through RISKSIGNAL_TEST_DATABASE_URL; when none is
@@ -184,17 +186,24 @@ func TestRunSourceIsolatesMalformedRecordAndReprocessResolves(t *testing.T) {
 	if reprocessed.ResolvedVulnerabilityID == "" {
 		t.Fatal("reprocess linked no vulnerability, want resolved_vulnerability_id on the materialised CVE")
 	}
+	if reprocessed.ResolvedEvidenceID == "" {
+		t.Fatal("reprocess linked no evidence, want resolved_evidence_id on the pass's new evidence (ARCH-003 §7)")
+	}
 
 	// The committed row: resolved, linked to the CVE-2026-3001
-	// vulnerability the pass materialised.
-	var dbStatus, resolvedVulnID string
+	// vulnerability and the evidence the pass materialised.
+	var dbStatus, resolvedVulnID, resolvedEvidenceID string
 	if err := pool.QueryRow(ctx,
-		`SELECT status, COALESCE(resolved_vulnerability_id::text, '') FROM quarantine WHERE id = $1`,
-		qrow.ID).Scan(&dbStatus, &resolvedVulnID); err != nil {
+		`SELECT status, COALESCE(resolved_vulnerability_id::text, ''), COALESCE(resolved_evidence_id::text, '')
+		   FROM quarantine WHERE id = $1`,
+		qrow.ID).Scan(&dbStatus, &resolvedVulnID, &resolvedEvidenceID); err != nil {
 		t.Fatalf("read committed quarantine row: %v", err)
 	}
 	if dbStatus != "resolved" || resolvedVulnID != reprocessed.ResolvedVulnerabilityID {
 		t.Fatalf("committed row = %s / %s, want resolved with the linked vulnerability", dbStatus, resolvedVulnID)
+	}
+	if resolvedEvidenceID != reprocessed.ResolvedEvidenceID {
+		t.Fatalf("committed evidence link = %q, want the reported %q", resolvedEvidenceID, reprocessed.ResolvedEvidenceID)
 	}
 	var cveID string
 	if err := pool.QueryRow(ctx,
@@ -203,6 +212,17 @@ func TestRunSourceIsolatesMalformedRecordAndReprocessResolves(t *testing.T) {
 	}
 	if cveID != "CVE-2026-3001" {
 		t.Fatalf("linked vulnerability cve = %s, want CVE-2026-3001", cveID)
+	}
+	// The linked evidence is the pass's evidence row of the linked
+	// vulnerability (the AddEvidence id return the reprocess consumed).
+	var linkedEvidence int
+	if err := pool.QueryRow(ctx,
+		"SELECT count(*) FROM evidences WHERE id = $1 AND vulnerability_id = $2",
+		mustUUID(t, resolvedEvidenceID), mustUUID(t, resolvedVulnID)).Scan(&linkedEvidence); err != nil {
+		t.Fatalf("read linked evidence: %v", err)
+	}
+	if linkedEvidence != 1 {
+		t.Fatalf("linked evidence rows = %d, want 1 (the evidence of the linked vulnerability)", linkedEvidence)
 	}
 	assertTableCounts(t, pool, map[string]int{"vulnerabilities": 1, "evidences": 1, "quarantine": 1})
 

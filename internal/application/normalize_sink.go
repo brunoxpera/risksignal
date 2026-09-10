@@ -45,6 +45,12 @@ type normalizeSink struct {
 	// vulnOrder keeps the first-emission order for the reprocess link.
 	vulnIDs   map[string]string
 	vulnOrder []string
+
+	// evidenceIDs/evidenceOrder record the evidence rows this pass wrote
+	// (the id AddEvidence returned — new or already existing), the
+	// reprocess link to the isolated record's new evidence (ARCH-003 §7).
+	evidenceIDs   map[string]struct{}
+	evidenceOrder []string
 }
 
 // newNormalizeSink binds one pass's sink to its transaction and
@@ -58,6 +64,7 @@ func newNormalizeSink(service *Service, tx Tx, sourceID, runID, rawRecordID stri
 		rawRecordID: rawRecordID,
 		now:         now,
 		vulnIDs:     make(map[string]string),
+		evidenceIDs: make(map[string]struct{}),
 	}
 }
 
@@ -115,17 +122,27 @@ func (s *normalizeSink) Evidence(ctx context.Context, e domain.Evidence) error {
 	if !ok {
 		return InfraError("normalize_sink", fmt.Errorf("evidence for cve_id %q of a vulnerability this pass did not upsert; the adapter must emit the record's Vulnerability first", probe.CveID))
 	}
-	// The returned evidence id is the I2 forward-note of ARCH-003 §7: the
-	// reprocess path will link it into quarantine.resolved_evidence_id
-	// (DEV-053); the run path has no use for it yet and drops it.
-	if _, err := s.service.vulns.AddEvidence(ctx, s.tx, EvidenceRecord{
+	// AddEvidence returns the evidence id — newly inserted, or the already
+	// existing one of an identical earlier statement. The reprocess path
+	// links the id into quarantine.resolved_evidence_id (ARCH-003 §7, the I2
+	// forward-note DEV-053 consumes); the run path carries it no further. The
+	// order is the emission order, deduplicated, so a repeated statement of
+	// the same pass never counts twice.
+	id, err := s.service.vulns.AddEvidence(ctx, s.tx, EvidenceRecord{
 		VulnerabilityID: vulnID,
 		RawRecordID:     s.rawRecordID,
 		Type:            e.Type,
 		Value:           value,
 		ValueHash:       hash,
-	}, s.now); err != nil {
+	}, s.now)
+	if err != nil {
 		return err
+	}
+	if id != "" {
+		if _, seen := s.evidenceIDs[id]; !seen {
+			s.evidenceIDs[id] = struct{}{}
+			s.evidenceOrder = append(s.evidenceOrder, id)
+		}
 	}
 	return nil
 }
@@ -151,6 +168,20 @@ func (s *normalizeSink) singleVulnID() string {
 		return s.vulnIDs[s.vulnOrder[0]]
 	}
 	return ""
+}
+
+// singleEvidenceID returns the evidence id of the pass when the pass
+// materialised exactly one distinct vulnerability and wrote exactly one
+// evidence row for it, "" otherwise — the reprocess link of the isolated
+// record to its new evidence (ARCH-003 §7: quarantine.resolved_evidence_id),
+// mirroring singleVulnID's exactness. A pass with several evidences (or
+// several vulnerabilities) links no single evidence and resolves with the
+// outcome note alone.
+func (s *normalizeSink) singleEvidenceID() string {
+	if len(s.vulnOrder) != 1 || len(s.evidenceOrder) != 1 {
+		return ""
+	}
+	return s.evidenceOrder[0]
 }
 
 // compile-time check that the sink satisfies the seam the adapters stream
