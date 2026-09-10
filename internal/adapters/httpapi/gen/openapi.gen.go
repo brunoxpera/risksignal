@@ -129,6 +129,48 @@ func (e Environment) Valid() bool {
 	}
 }
 
+// Defines values for ExportFormat.
+const (
+	Csv  ExportFormat = "csv"
+	Json ExportFormat = "json"
+)
+
+// Valid indicates whether the value is a known member of the ExportFormat enum.
+func (e ExportFormat) Valid() bool {
+	switch e {
+	case Csv:
+		return true
+	case Json:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExportStatus.
+const (
+	ExportStatusCompleted ExportStatus = "completed"
+	ExportStatusExpired   ExportStatus = "expired"
+	ExportStatusFailed    ExportStatus = "failed"
+	ExportStatusPending   ExportStatus = "pending"
+)
+
+// Valid indicates whether the value is a known member of the ExportStatus enum.
+func (e ExportStatus) Valid() bool {
+	switch e {
+	case ExportStatusCompleted:
+		return true
+	case ExportStatusExpired:
+		return true
+	case ExportStatusFailed:
+		return true
+	case ExportStatusPending:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Exposure.
 const (
 	ExposureInternal Exposure = "internal"
@@ -155,19 +197,19 @@ func (e Exposure) Valid() bool {
 
 // Defines values for InventoryImportStatus.
 const (
-	Committed InventoryImportStatus = "committed"
-	Failed    InventoryImportStatus = "failed"
-	Pending   InventoryImportStatus = "pending"
+	InventoryImportStatusCommitted InventoryImportStatus = "committed"
+	InventoryImportStatusFailed    InventoryImportStatus = "failed"
+	InventoryImportStatusPending   InventoryImportStatus = "pending"
 )
 
 // Valid indicates whether the value is a known member of the InventoryImportStatus enum.
 func (e InventoryImportStatus) Valid() bool {
 	switch e {
-	case Committed:
+	case InventoryImportStatusCommitted:
 		return true
-	case Failed:
+	case InventoryImportStatusFailed:
 		return true
-	case Pending:
+	case InventoryImportStatusPending:
 		return true
 	default:
 		return false
@@ -486,6 +528,97 @@ type Criticality string
 
 // Environment Runtime environment of an asset (ch. 6.2); visible context only, never a priority driver.
 type Environment string
+
+// ExportCreateRequest The body of POST /exports (ARCH-007 §1.1): the frozen filter context
+// and the requested format.
+type ExportCreateRequest struct {
+	// Filter The frozen signal filter context of an export (ARCH-007 §1.2, the
+	// concept ch. 10.4 signal filter vocabulary: priority, status, asset_id,
+	// asset_type, product, cve, owner_id, source_id, created_from/to,
+	// sla_state, free_text). Every property is optional; an empty object is
+	// the unfiltered working list. The frozen filter is part of the export
+	// record and never changes after creation.
+	Filter ExportFilter `json:"filter"`
+
+	// Format Serialisation format of an export artifact (ARCH-007 §1.1).
+	Format ExportFormat `json:"format"`
+}
+
+// ExportFilter The frozen signal filter context of an export (ARCH-007 §1.2, the
+// concept ch. 10.4 signal filter vocabulary: priority, status, asset_id,
+// asset_type, product, cve, owner_id, source_id, created_from/to,
+// sla_state, free_text). Every property is optional; an empty object is
+// the unfiltered working list. The frozen filter is part of the export
+// record and never changes after creation.
+type ExportFilter struct {
+	AssetId *string `json:"asset_id,omitempty"`
+
+	// AssetType Inventory asset type (ch. 6.2); the vocabulary grows by migration and API versioning.
+	AssetType   *AssetType `json:"asset_type,omitempty"`
+	CreatedFrom *time.Time `json:"created_from,omitempty"`
+	CreatedTo   *time.Time `json:"created_to,omitempty"`
+	Cve         *string    `json:"cve,omitempty"`
+	FreeText    *string    `json:"free_text,omitempty"`
+	OwnerId     *string    `json:"owner_id,omitempty"`
+
+	// Priority Urgency class of a signal (concept ch. 6.2, ch. 9.3); P1 is most urgent.
+	Priority *Priority `json:"priority,omitempty"`
+	Product  *string   `json:"product,omitempty"`
+
+	// SlaState SLA state filter value; the domain enforces its vocabulary.
+	SlaState *string `json:"sla_state,omitempty"`
+	SourceId *string `json:"source_id,omitempty"`
+
+	// Status Lifecycle state of a signal (ch. 6.2, ch. 6.3) — new, in_review, action_planned, resolved, accepted, not_affected.
+	Status *SignalStatus `json:"status,omitempty"`
+}
+
+// ExportFormat Serialisation format of an export artifact (ARCH-007 §1.1).
+type ExportFormat string
+
+// ExportRecord One export job (ARCH-007 §1.1). The frozen filter and created_at are
+// fixed at creation; row_count/size_bytes/checksum/schema_version/
+// rule_version/expires_at are stamped when the worker job completes
+// (null while pending, failed or expired).
+type ExportRecord struct {
+	// Checksum SHA-256 of the artifact; null until completed.
+	Checksum *string `json:"checksum"`
+
+	// CreatedAt RFC 3339 UTC creation instant (injected clock).
+	CreatedAt time.Time `json:"created_at"`
+
+	// ExpiresAt RFC 3339 UTC expiry of the artifact; null until completed.
+	ExpiresAt *time.Time `json:"expires_at"`
+
+	// Filter The frozen signal filter context of an export (ARCH-007 §1.2, the
+	// concept ch. 10.4 signal filter vocabulary: priority, status, asset_id,
+	// asset_type, product, cve, owner_id, source_id, created_from/to,
+	// sla_state, free_text). Every property is optional; an empty object is
+	// the unfiltered working list. The frozen filter is part of the export
+	// record and never changes after creation.
+	Filter ExportFilter `json:"filter"`
+
+	// Id Export identifier (uuid).
+	Id string `json:"id"`
+
+	// RowCount Materialised row count; null until completed.
+	RowCount *int `json:"row_count"`
+
+	// RuleVersion Priority-rule version at generation time; null until completed.
+	RuleVersion *string `json:"rule_version"`
+
+	// SchemaVersion Export schema version stamped at generation; null until completed.
+	SchemaVersion *string `json:"schema_version"`
+
+	// SizeBytes Artifact size in bytes; null until completed.
+	SizeBytes *int `json:"size_bytes"`
+
+	// Status Lifecycle of an export job (ARCH-007 §1.1).
+	Status ExportStatus `json:"status"`
+}
+
+// ExportStatus Lifecycle of an export job (ARCH-007 §1.1).
+type ExportStatus string
 
 // Exposure Exposure of the asset to the internet (concept ch. 6.2).
 type Exposure string
@@ -915,6 +1048,9 @@ type ListUsersParams struct {
 // RevealAuditEventActorJSONRequestBody defines body for RevealAuditEventActor for application/json ContentType.
 type RevealAuditEventActorJSONRequestBody = RevealActorRequest
 
+// CreateExportJSONRequestBody defines body for CreateExport for application/json ContentType.
+type CreateExportJSONRequestBody = ExportCreateRequest
+
 // SignalCommandJSONRequestBody defines body for SignalCommand for application/json ContentType.
 type SignalCommandJSONRequestBody = SignalCommandRequest
 
@@ -1048,6 +1184,51 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
 	RevealAuditEventActor(ctx context.Context, id string, body RevealAuditEventActorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateExportWithBody Create an asynchronous export job
+	//
+	// Create an export (ARCH-007 §1.1): the body freezes the signal filter
+	// context and the requested format; a worker job then materialises the
+	// artifact. The frozen filter, creation instant and the schema/rule
+	// versions are stamped on the record; the artifact is time-limited and
+	// every download is audited. Requires `exports.create`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/exports (the `CreateExport` operationId).
+	CreateExportWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateExport Create an asynchronous export job
+	//
+	// Create an export (ARCH-007 §1.1): the body freezes the signal filter
+	// context and the requested format; a worker job then materialises the
+	// artifact. The frozen filter, creation instant and the schema/rule
+	// versions are stamped on the record; the artifact is time-limited and
+	// every download is audited. Requires `exports.create`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/exports (the `CreateExport` operationId).
+	CreateExport(ctx context.Context, body CreateExportJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetExport Get an export record
+	//
+	// The status read of one export (ARCH-007 §1.1): status, frozen filter,
+	// creation instant, row/size counts, checksum, the stamped schema/rule
+	// versions and the expiry. Object-scoped to the creator for a scoped
+	// grant. Requires `exports.create`.
+	//
+	// Corresponds with GET /api/v1/exports/{id} (the `GetExport` operationId).
+	GetExport(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DownloadExport Download the materialised export artifact
+	//
+	// Stream the stored artifact as an attachment (ARCH-007 §1.1). The
+	// download is time-limited — an expired export answers 410 — and every
+	// download is audited. Requires `exports.create`.
+	//
+	// Corresponds with GET /api/v1/exports/{id}/download (the `DownloadExport` operationId).
+	DownloadExport(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateInventoryImportWithBody Upload an inventory CSV for validation and preview
 	//
@@ -1272,6 +1453,91 @@ func (c *Client) RevealAuditEventActorWithBody(ctx context.Context, id string, c
 // Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
 func (c *Client) RevealAuditEventActor(ctx context.Context, id string, body RevealAuditEventActorJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRevealAuditEventActorRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateExportWithBody Create an asynchronous export job
+//
+// Create an export (ARCH-007 §1.1): the body freezes the signal filter
+// context and the requested format; a worker job then materialises the
+// artifact. The frozen filter, creation instant and the schema/rule
+// versions are stamped on the record; the artifact is time-limited and
+// every download is audited. Requires `exports.create`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/exports (the `CreateExport` operationId).
+func (c *Client) CreateExportWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateExportRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateExport Create an asynchronous export job
+//
+// Create an export (ARCH-007 §1.1): the body freezes the signal filter
+// context and the requested format; a worker job then materialises the
+// artifact. The frozen filter, creation instant and the schema/rule
+// versions are stamped on the record; the artifact is time-limited and
+// every download is audited. Requires `exports.create`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/exports (the `CreateExport` operationId).
+func (c *Client) CreateExport(ctx context.Context, body CreateExportJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateExportRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetExport Get an export record
+//
+// The status read of one export (ARCH-007 §1.1): status, frozen filter,
+// creation instant, row/size counts, checksum, the stamped schema/rule
+// versions and the expiry. Object-scoped to the creator for a scoped
+// grant. Requires `exports.create`.
+//
+// Corresponds with GET /api/v1/exports/{id} (the `GetExport` operationId).
+func (c *Client) GetExport(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetExportRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DownloadExport Download the materialised export artifact
+//
+// Stream the stored artifact as an attachment (ARCH-007 §1.1). The
+// download is time-limited — an expired export answers 410 — and every
+// download is audited. Requires `exports.create`.
+//
+// Corresponds with GET /api/v1/exports/{id}/download (the `DownloadExport` operationId).
+func (c *Client) DownloadExport(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDownloadExportRequest(c.Server, id)
 	if err != nil {
 		return nil, err
 	}
@@ -1755,6 +2021,114 @@ func NewRevealAuditEventActorRequestWithBody(server string, id string, contentTy
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewCreateExportRequest calls the generic CreateExport builder with application/json body
+func NewCreateExportRequest(server string, body CreateExportJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateExportRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateExportRequestWithBody constructs an http.Request for the CreateExport method, with any body, and a specified content type
+func NewCreateExportRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/exports")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetExportRequest constructs an http.Request for the GetExport method
+func NewGetExportRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/exports/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDownloadExportRequest constructs an http.Request for the DownloadExport method
+func NewDownloadExportRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/exports/%s/download", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -2303,6 +2677,55 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /api/v1/audit-events/{id}/reveal-actor (the `RevealAuditEventActor` operationId).
 	RevealAuditEventActorWithResponse(ctx context.Context, id string, body RevealAuditEventActorJSONRequestBody, reqEditors ...RequestEditorFn) (*RevealAuditEventActorResponse, error)
 
+	// CreateExportWithBodyWithResponse Create an asynchronous export job
+	//
+	// Create an export (ARCH-007 §1.1): the body freezes the signal filter
+	// context and the requested format; a worker job then materialises the
+	// artifact. The frozen filter, creation instant and the schema/rule
+	// versions are stamped on the record; the artifact is time-limited and
+	// every download is audited. Requires `exports.create`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/exports (the `CreateExport` operationId).
+	CreateExportWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateExportResponse, error)
+
+	// CreateExportWithResponse Create an asynchronous export job
+	//
+	// Create an export (ARCH-007 §1.1): the body freezes the signal filter
+	// context and the requested format; a worker job then materialises the
+	// artifact. The frozen filter, creation instant and the schema/rule
+	// versions are stamped on the record; the artifact is time-limited and
+	// every download is audited. Requires `exports.create`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/exports (the `CreateExport` operationId).
+	CreateExportWithResponse(ctx context.Context, body CreateExportJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateExportResponse, error)
+
+	// GetExportWithResponse Get an export record
+	//
+	// The status read of one export (ARCH-007 §1.1): status, frozen filter,
+	// creation instant, row/size counts, checksum, the stamped schema/rule
+	// versions and the expiry. Object-scoped to the creator for a scoped
+	// grant. Requires `exports.create`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/exports/{id} (the `GetExport` operationId).
+	GetExportWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetExportResponse, error)
+
+	// DownloadExportWithResponse Download the materialised export artifact
+	//
+	// Stream the stored artifact as an attachment (ARCH-007 §1.1). The
+	// download is time-limited — an expired export answers 410 — and every
+	// download is audited. Requires `exports.create`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/exports/{id}/download (the `DownloadExport` operationId).
+	DownloadExportWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*DownloadExportResponse, error)
+
 	// CreateInventoryImportWithBodyWithResponse Upload an inventory CSV for validation and preview
 	//
 	// The staged inventory import, first step (ARCH-006 §2.1, concept ch.
@@ -2650,6 +3073,213 @@ func (r RevealAuditEventActorResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RevealAuditEventActorResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateExportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExportRecord
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateExportResponse) GetJSON200() *ExportRecord {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateExportResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateExportResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r CreateExportResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateExportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateExportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateExportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateExportResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetExportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ExportRecord
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetExportResponse) GetJSON200() *ExportRecord {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetExportResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetExportResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetExportResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetExportResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetExportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetExportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetExportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetExportResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// DownloadExportResponse200Headers the declared response headers of an HTTP 200 response for DownloadExport
+type DownloadExportResponse200Headers struct {
+	ContentDisposition *string
+}
+
+type DownloadExportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON410 the response for an HTTP 410 `application/json` response
+	JSON410 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *DownloadExportResponse200Headers
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r DownloadExportResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DownloadExportResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DownloadExportResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON410 returns the response for an HTTP 410 `application/json` response
+func (r DownloadExportResponse) GetJSON410() *ProblemDetails {
+	return r.JSON410
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r DownloadExportResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r DownloadExportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DownloadExportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DownloadExportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DownloadExportResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3414,6 +4044,79 @@ func (c *ClientWithResponses) RevealAuditEventActorWithResponse(ctx context.Cont
 	return ParseRevealAuditEventActorResponse(rsp)
 }
 
+// CreateExportWithBodyWithResponse Create an asynchronous export job
+//
+// Create an export (ARCH-007 §1.1): the body freezes the signal filter
+// context and the requested format; a worker job then materialises the
+// artifact. The frozen filter, creation instant and the schema/rule
+// versions are stamped on the record; the artifact is time-limited and
+// every download is audited. Requires `exports.create`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/exports (the `CreateExport` operationId).
+func (c *ClientWithResponses) CreateExportWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateExportResponse, error) {
+	rsp, err := c.CreateExportWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateExportResponse(rsp)
+}
+
+// CreateExportWithResponse Create an asynchronous export job
+//
+// Create an export (ARCH-007 §1.1): the body freezes the signal filter
+// context and the requested format; a worker job then materialises the
+// artifact. The frozen filter, creation instant and the schema/rule
+// versions are stamped on the record; the artifact is time-limited and
+// every download is audited. Requires `exports.create`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/exports (the `CreateExport` operationId).
+func (c *ClientWithResponses) CreateExportWithResponse(ctx context.Context, body CreateExportJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateExportResponse, error) {
+	rsp, err := c.CreateExport(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateExportResponse(rsp)
+}
+
+// GetExportWithResponse Get an export record
+//
+// The status read of one export (ARCH-007 §1.1): status, frozen filter,
+// creation instant, row/size counts, checksum, the stamped schema/rule
+// versions and the expiry. Object-scoped to the creator for a scoped
+// grant. Requires `exports.create`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/exports/{id} (the `GetExport` operationId).
+func (c *ClientWithResponses) GetExportWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetExportResponse, error) {
+	rsp, err := c.GetExport(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetExportResponse(rsp)
+}
+
+// DownloadExportWithResponse Download the materialised export artifact
+//
+// Stream the stored artifact as an attachment (ARCH-007 §1.1). The
+// download is time-limited — an expired export answers 410 — and every
+// download is audited. Requires `exports.create`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/exports/{id}/download (the `DownloadExport` operationId).
+func (c *ClientWithResponses) DownloadExportWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*DownloadExportResponse, error) {
+	rsp, err := c.DownloadExport(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDownloadExportResponse(rsp)
+}
+
 // CreateInventoryImportWithBodyWithResponse Upload an inventory CSV for validation and preview
 //
 // The staged inventory import, first step (ARCH-006 §2.1, concept ch.
@@ -3788,6 +4491,174 @@ func ParseRevealAuditEventActorResponse(rsp *http.Response) (*RevealAuditEventAc
 		}
 		response.JSON500 = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseCreateExportResponse parses an HTTP response from a CreateExportWithResponse call
+func ParseCreateExportResponse(rsp *http.Response) (*CreateExportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateExportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExportRecord
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetExportResponse parses an HTTP response from a GetExportWithResponse call
+func ParseGetExportResponse(rsp *http.Response) (*GetExportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetExportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ExportRecord
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDownloadExportResponse parses an HTTP response from a DownloadExportWithResponse call
+func ParseDownloadExportResponse(rsp *http.Response) (*DownloadExportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DownloadExportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 410:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON410 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers DownloadExportResponse200Headers
+		if values := rsp.Header.Values("Content-Disposition"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Disposition", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ContentDisposition = &value
+		}
+		response.Headers200 = &headers
 	}
 
 	return response, nil
@@ -4330,6 +5201,15 @@ type ServerInterface interface {
 	// RevealAuditEventActor Reveal the actor identity of an audit event
 	// (POST /api/v1/audit-events/{id}/reveal-actor)
 	RevealAuditEventActor(w http.ResponseWriter, r *http.Request, id string)
+	// CreateExport Create an asynchronous export job
+	// (POST /api/v1/exports)
+	CreateExport(w http.ResponseWriter, r *http.Request)
+	// GetExport Get an export record
+	// (GET /api/v1/exports/{id})
+	GetExport(w http.ResponseWriter, r *http.Request, id string)
+	// DownloadExport Download the materialised export artifact
+	// (GET /api/v1/exports/{id}/download)
+	DownloadExport(w http.ResponseWriter, r *http.Request, id string)
 	// CreateInventoryImport Upload an inventory CSV for validation and preview
 	// (POST /api/v1/inventory/imports)
 	CreateInventoryImport(w http.ResponseWriter, r *http.Request)
@@ -4538,6 +5418,72 @@ func (siw *ServerInterfaceWrapper) RevealAuditEventActor(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevealAuditEventActor(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateExport operation middleware
+func (siw *ServerInterfaceWrapper) CreateExport(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateExport(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetExport operation middleware
+func (siw *ServerInterfaceWrapper) GetExport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetExport(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DownloadExport operation middleware
+func (siw *ServerInterfaceWrapper) DownloadExport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DownloadExport(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4982,6 +5928,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/roles", wrapper.ListRoles)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/users/{id}/roles", wrapper.UpdateUserRoles)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/users/{id}/deactivate", wrapper.DeactivateUser)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/exports", wrapper.CreateExport)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/exports/{id}", wrapper.GetExport)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/exports/{id}/download", wrapper.DownloadExport)
 
 	return m
 }
@@ -5196,6 +6145,254 @@ func (response RevealAuditEventActor404JSONResponse) VisitRevealAuditEventActorR
 type RevealAuditEventActor500JSONResponse ProblemDetails
 
 func (response RevealAuditEventActor500JSONResponse) VisitRevealAuditEventActorResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateExportRequestObject struct {
+	Body *CreateExportJSONRequestBody
+}
+
+type CreateExportResponseObject interface {
+	VisitCreateExportResponse(w http.ResponseWriter) error
+}
+
+type CreateExport200JSONResponse ExportRecord
+
+func (response CreateExport200JSONResponse) VisitCreateExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateExport400JSONResponse ProblemDetails
+
+func (response CreateExport400JSONResponse) VisitCreateExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateExport403JSONResponse ProblemDetails
+
+func (response CreateExport403JSONResponse) VisitCreateExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateExport500JSONResponse ProblemDetails
+
+func (response CreateExport500JSONResponse) VisitCreateExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetExportRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetExportResponseObject interface {
+	VisitGetExportResponse(w http.ResponseWriter) error
+}
+
+type GetExport200JSONResponse ExportRecord
+
+func (response GetExport200JSONResponse) VisitGetExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetExport400JSONResponse ProblemDetails
+
+func (response GetExport400JSONResponse) VisitGetExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetExport403JSONResponse ProblemDetails
+
+func (response GetExport403JSONResponse) VisitGetExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetExport404JSONResponse ProblemDetails
+
+func (response GetExport404JSONResponse) VisitGetExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetExport500JSONResponse ProblemDetails
+
+func (response GetExport500JSONResponse) VisitGetExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DownloadExportRequestObject struct {
+	Id string `json:"id"`
+}
+
+type DownloadExportResponseObject interface {
+	VisitDownloadExportResponse(w http.ResponseWriter) error
+}
+
+type DownloadExport200ResponseHeaders struct {
+	ContentDisposition *string
+}
+
+type DownloadExport200ApplicationoctetStreamResponse struct {
+	Body          io.Reader
+	Headers       DownloadExport200ResponseHeaders
+	ContentLength int64
+}
+
+func (response DownloadExport200ApplicationoctetStreamResponse) VisitDownloadExportResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	if response.Headers.ContentDisposition != nil {
+		w.Header().Set("Content-Disposition", fmt.Sprint(*response.Headers.ContentDisposition))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type DownloadExport400JSONResponse ProblemDetails
+
+func (response DownloadExport400JSONResponse) VisitDownloadExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DownloadExport403JSONResponse ProblemDetails
+
+func (response DownloadExport403JSONResponse) VisitDownloadExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DownloadExport404JSONResponse ProblemDetails
+
+func (response DownloadExport404JSONResponse) VisitDownloadExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DownloadExport410JSONResponse ProblemDetails
+
+func (response DownloadExport410JSONResponse) VisitDownloadExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(410)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DownloadExport500JSONResponse ProblemDetails
+
+func (response DownloadExport500JSONResponse) VisitDownloadExportResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -5971,6 +7168,15 @@ type StrictServerInterface interface {
 	// RevealAuditEventActor Reveal the actor identity of an audit event
 	// (POST /api/v1/audit-events/{id}/reveal-actor)
 	RevealAuditEventActor(ctx context.Context, request RevealAuditEventActorRequestObject) (RevealAuditEventActorResponseObject, error)
+	// CreateExport Create an asynchronous export job
+	// (POST /api/v1/exports)
+	CreateExport(ctx context.Context, request CreateExportRequestObject) (CreateExportResponseObject, error)
+	// GetExport Get an export record
+	// (GET /api/v1/exports/{id})
+	GetExport(ctx context.Context, request GetExportRequestObject) (GetExportResponseObject, error)
+	// DownloadExport Download the materialised export artifact
+	// (GET /api/v1/exports/{id}/download)
+	DownloadExport(ctx context.Context, request DownloadExportRequestObject) (DownloadExportResponseObject, error)
 	// CreateInventoryImport Upload an inventory CSV for validation and preview
 	// (POST /api/v1/inventory/imports)
 	CreateInventoryImport(ctx context.Context, request CreateInventoryImportRequestObject) (CreateInventoryImportResponseObject, error)
@@ -6120,6 +7326,89 @@ func (sh *strictHandler) RevealAuditEventActor(w http.ResponseWriter, r *http.Re
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevealAuditEventActorResponseObject); ok {
 		if err := validResponse.VisitRevealAuditEventActorResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateExport operation middleware
+func (sh *strictHandler) CreateExport(w http.ResponseWriter, r *http.Request) {
+	var request CreateExportRequestObject
+
+	var body CreateExportJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateExport(ctx, request.(CreateExportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateExport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateExportResponseObject); ok {
+		if err := validResponse.VisitCreateExportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetExport operation middleware
+func (sh *strictHandler) GetExport(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetExportRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetExport(ctx, request.(GetExportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetExport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetExportResponseObject); ok {
+		if err := validResponse.VisitGetExportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DownloadExport operation middleware
+func (sh *strictHandler) DownloadExport(w http.ResponseWriter, r *http.Request, id string) {
+	var request DownloadExportRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DownloadExport(ctx, request.(DownloadExportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DownloadExport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DownloadExportResponseObject); ok {
+		if err := validResponse.VisitDownloadExportResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -6404,147 +7693,167 @@ func (sh *strictHandler) UpdateUserRoles(w http.ResponseWriter, r *http.Request,
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"L2glZHw3y0Sc8XAeJEqhX8v/HwA=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

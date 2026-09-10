@@ -592,7 +592,7 @@ func TestI5bExitCriteriaChannelParityInventoryImport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("API commit: %v", err)
 	}
-	if commit.StatusCode() != http.StatusOK || commit.JSON200 == nil || commit.JSON200.Status != apigen.Committed {
+	if commit.StatusCode() != http.StatusOK || commit.JSON200 == nil || commit.JSON200.Status != apigen.InventoryImportStatusCommitted {
 		t.Fatalf("API commit status = %d (body %s), want 200 committed", commit.StatusCode(), commit.Body)
 	}
 

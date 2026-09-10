@@ -177,7 +177,7 @@ func TestInventoryImportStagedFlow(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &staged); err != nil {
 		t.Fatalf("decode staged: %v", err)
 	}
-	if staged.Id != "imp-1" || staged.Status != gen.Pending || staged.Preview.Rows != 1 || staged.Preview.Warnings != 1 {
+	if staged.Id != "imp-1" || staged.Status != gen.InventoryImportStatusPending || staged.Preview.Rows != 1 || staged.Preview.Warnings != 1 {
 		t.Fatalf("staged = %+v, want imp-1/pending/1 row/1 warning", staged)
 	}
 	if string(f.lastStage.File) != csv || f.lastStage.Actor.ID != "u-1" || f.lastStage.CorrelationID != "corr-123" {
@@ -202,7 +202,7 @@ func TestInventoryImportStagedFlow(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &committed); err != nil {
 		t.Fatalf("decode committed: %v", err)
 	}
-	if committed.Status != gen.Committed || committed.CommittedAt == nil {
+	if committed.Status != gen.InventoryImportStatusCommitted || committed.CommittedAt == nil {
 		t.Fatalf("committed = %+v, want committed with committed_at", committed)
 	}
 	if f.lastCommit.ID != "imp-1" {

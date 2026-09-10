@@ -818,6 +818,168 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  # --- I6 exports (ARCH-007 §1.1) ----------------------------------------
+  /api/v1/exports:
+    post:
+      operationId: createExport
+      summary: Create an asynchronous export job
+      description: |
+        Create an export (ARCH-007 §1.1): the body freezes the signal filter
+        context and the requested format; a worker job then materialises the
+        artifact. The frozen filter, creation instant and the schema/rule
+        versions are stamped on the record; the artifact is time-limited and
+        every download is audited. Requires `exports.create`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportCreateRequest'
+      responses:
+        '200':
+          description: The created export record (status pending).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportRecord'
+        '400':
+          description: |
+            The request is not acceptable as given: a missing format, an
+            out-of-vocabulary value in the frozen filter or a filter whose
+            complexity exceeds the bound. Rendered as an RFC 9457 problem
+            detail; nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `exports.create`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server: the
+            problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/exports/{id}:
+    get:
+      operationId: getExport
+      summary: Get an export record
+      description: |
+        The status read of one export (ARCH-007 §1.1): status, frozen filter,
+        creation instant, row/size counts, checksum, the stamped schema/rule
+        versions and the expiry. Object-scoped to the creator for a scoped
+        grant. Requires `exports.create`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Export identifier (uuid).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The requested export record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportRecord'
+        '400':
+          description: The id path parameter is not a well-formed identifier (uuid).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `exports.create`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No export exists for this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server: the
+            problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/exports/{id}/download:
+    get:
+      operationId: downloadExport
+      summary: Download the materialised export artifact
+      description: |
+        Stream the stored artifact as an attachment (ARCH-007 §1.1). The
+        download is time-limited — an expired export answers 410 — and every
+        download is audited. Requires `exports.create`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Export identifier (uuid).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The export artifact as a file download.
+          headers:
+            Content-Disposition:
+              description: Attachment filename of the artifact.
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: The id path parameter is not a well-formed identifier (uuid).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `exports.create`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No export exists for this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '410':
+          description: |
+            The export artifact has expired (checked against the injected
+            clock, NFR-015) and is no longer downloadable. Nothing is streamed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server: the
+            problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
 components:
   schemas:
     # --- Core signal read (ARCH-001 §4) -----------------------------------
@@ -1536,6 +1698,344 @@ components:
           description: Roles to revoke.
           items:
             $ref: '#/components/schemas/Role'
+    # --- I6 exports (ARCH-007 §1.2) ---------------------------------------
+    ExportFormat:
+      type: string
+      description: Serialisation format of an export artifact (ARCH-007 §1.1).
+      enum: [csv, json]
+    ExportStatus:
+      type: string
+      description: Lifecycle of an export job (ARCH-007 §1.1).
+      enum: [pending, completed, failed, expired]
+    ExportFilter:
+      type: object
+      description: |
+        The frozen signal filter context of an export (ARCH-007 §1.2, the
+        concept ch. 10.4 signal filter vocabulary: priority, status, asset_id,
+        asset_type, product, cve, owner_id, source_id, created_from/to,
+        sla_state, free_text). Every property is optional; an empty object is
+        the unfiltered working list. The frozen filter is part of the export
+        record and never changes after creation.
+      properties:
+        priority:
+          $ref: '#/components/schemas/Priority'
+        status:
+          $ref: '#/components/schemas/SignalStatus'
+        asset_id:
+          type: string
+        asset_type:
+          $ref: '#/components/schemas/AssetType'
+        product:
+          type: string
+        cve:
+          type: string
+        owner_id:
+          type: string
+        source_id:
+          type: string
+        created_from:
+          type: string
+          format: date-time
+        created_to:
+          type: string
+          format: date-time
+        sla_state:
+          type: string
+          description: SLA state filter value; the domain enforces its vocabulary.
+        free_text:
+          type: string
+    ExportCreateRequest:
+      type: object
+      description: |
+        The body of POST /exports (ARCH-007 §1.1): the frozen filter context
+        and the requested format.
+      required:
+        - filter
+        - format
+      properties:
+        filter:
+          $ref: '#/components/schemas/ExportFilter'
+        format:
+          $ref: '#/components/schemas/ExportFormat'
+    ExportRecord:
+      type: object
+      description: |
+        One export job (ARCH-007 §1.1). The frozen filter and created_at are
+        fixed at creation; row_count/size_bytes/checksum/schema_version/
+        rule_version/expires_at are stamped when the worker job completes
+        (null while pending, failed or expired).
+      required:
+        - id
+        - status
+        - filter
+        - created_at
+        - row_count
+        - size_bytes
+        - checksum
+        - schema_version
+        - rule_version
+        - expires_at
+      properties:
+        id:
+          type: string
+          description: Export identifier (uuid).
+        status:
+          $ref: '#/components/schemas/ExportStatus'
+        filter:
+          $ref: '#/components/schemas/ExportFilter'
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC creation instant (injected clock).
+        row_count:
+          type: [integer, 'null']
+          description: Materialised row count; null until completed.
+        size_bytes:
+          type: [integer, 'null']
+          description: Artifact size in bytes; null until completed.
+        checksum:
+          type: [string, 'null']
+          description: SHA-256 of the artifact; null until completed.
+        schema_version:
+          type: [string, 'null']
+          description: Export schema version stamped at generation; null until completed.
+        rule_version:
+          type: [string, 'null']
+          description: Priority-rule version at generation time; null until completed.
+        expires_at:
+          type: [string, 'null']
+          format: date-time
+          description: RFC 3339 UTC expiry of the artifact; null until completed.
+    # --- I6 retention + legal holds (ARCH-007 §2.1/§2.2) ------------------
+    RetentionStage:
+      type: string
+      description: Retention stage of a run (ARCH-007 §2.1); "pseudonymise" runs before "delete".
+      enum: [pseudonymise, delete]
+    RetentionRunStatus:
+      type: string
+      description: |
+        Lifecycle of a retention run (ARCH-007 §2.2): dry_run → approved →
+        executing → completed, plus failed/rejected. Only an approved run may
+        be executed; a rejected run is terminal.
+      enum: [dry_run, approved, executing, completed, failed, rejected]
+    RetentionDryRunReport:
+      type: object
+      description: |
+        The counts-only outcome of a retention dry-run (ARCH-007 §2.1): how
+        many candidates were found, how many are held, and how many would be
+        pseudonymised/deleted. It carries no business content.
+      required:
+        - candidates
+        - held
+        - to_pseudonymise
+        - to_delete
+      properties:
+        candidates:
+          type: integer
+        held:
+          type: integer
+        to_pseudonymise:
+          type: integer
+        to_delete:
+          type: integer
+    RetentionDryRunRequest:
+      type: object
+      description: |
+        The body of a retention dry-run (ARCH-007 §2.2): the policy, stage and
+        cutoff to propose. All properties are optional — the configured policy
+        defaults apply.
+      properties:
+        policy_id:
+          type: string
+        stage:
+          $ref: '#/components/schemas/RetentionStage'
+        cutoff:
+          type: string
+          format: date-time
+    RetentionApproveRequest:
+      type: object
+      description: |
+        The body of a retention approval (ARCH-007 §2.2): the mandatory
+        non-blank reason. Approval is the four-eyes half (permission
+        `settings.approve`, Product Owner); no deletion runs without an
+        approved run.
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+    RetentionExecuteRequest:
+      type: object
+      description: |
+        The body of a retention execution request (ARCH-007 §2.2): the
+        approved run to claim and the partition to process.
+      required:
+        - run_id
+      properties:
+        run_id:
+          type: string
+          description: The approved retention_runs.id to execute (uuid).
+        partition_key:
+          type: string
+          description: The partition to process; empty processes all approved partitions.
+    RetentionRun:
+      type: object
+      description: |
+        One retention run (ARCH-007 §2.1) — the operational record that
+        survives deletion. It carries counts and time ranges only, never
+        business content.
+      required:
+        - id
+        - policy_id
+        - stage
+        - cutoff
+        - partition_key
+        - status
+        - dry_run
+        - approved_by
+        - approved_at
+        - approval_reason
+        - started_at
+        - finished_at
+        - pseudonymised_count
+        - deleted_count
+        - failed_count
+        - last_error
+      properties:
+        id:
+          type: string
+          description: Retention run identifier (uuid).
+        policy_id:
+          type: string
+          description: Retention policy id, e.g. "closed-signals-5y".
+        stage:
+          $ref: '#/components/schemas/RetentionStage'
+        cutoff:
+          type: string
+          format: date-time
+          description: RFC 3339 UTC cutoff (closed_at <= cutoff is due).
+        partition_key:
+          type: string
+        status:
+          $ref: '#/components/schemas/RetentionRunStatus'
+        dry_run:
+          oneOf:
+            - $ref: '#/components/schemas/RetentionDryRunReport'
+            - type: 'null'
+          description: The dry-run counts; null until a dry-run is recorded.
+        approved_by:
+          type: [string, 'null']
+          description: Approving principal id; null until approved.
+        approved_at:
+          type: [string, 'null']
+          format: date-time
+        approval_reason:
+          type: [string, 'null']
+        started_at:
+          type: [string, 'null']
+          format: date-time
+        finished_at:
+          type: [string, 'null']
+          format: date-time
+        pseudonymised_count:
+          type: integer
+        deleted_count:
+          type: integer
+        failed_count:
+          type: integer
+        last_error:
+          type: [string, 'null']
+    RetentionRunList:
+      type: object
+      description: One page of the retention-run report (ARCH-007 §2.2).
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetentionRun'
+        next_cursor:
+          type: [string, 'null']
+    LegalHold:
+      type: object
+      description: |
+        One documented legal hold (ARCH-007 §2.1): it blocks both deletion and
+        pseudonymisation of the aggregate until released. Setting/releasing a
+        hold is audited.
+      required:
+        - id
+        - aggregate_type
+        - aggregate_id
+        - reason
+        - actor_id
+        - created_at
+        - released_at
+      properties:
+        id:
+          type: string
+          description: Legal hold identifier (uuid).
+        aggregate_type:
+          type: string
+          description: Type of the held aggregate; defaults to "risk_signal".
+        aggregate_id:
+          type: string
+          description: Identifier of the held aggregate (uuid).
+        reason:
+          type: string
+          description: Documented hold reason (mandatory, non-blank).
+        actor_id:
+          type: string
+          description: Principal id that set the hold.
+        created_at:
+          type: string
+          format: date-time
+        released_at:
+          type: [string, 'null']
+          format: date-time
+          description: Release instant; null while the hold is active.
+    LegalHoldList:
+      type: object
+      description: One page of the legal-hold read (ARCH-007 §2.1).
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/LegalHold'
+        next_cursor:
+          type: [string, 'null']
+    LegalHoldCreateRequest:
+      type: object
+      description: |
+        The body of a legal-hold creation (ARCH-007 §2.1): the aggregate to
+        hold and the mandatory documented reason.
+      required:
+        - aggregate_id
+        - reason
+      properties:
+        aggregate_type:
+          type: string
+          description: Aggregate type; defaults to "risk_signal" when omitted.
+        aggregate_id:
+          type: string
+          description: Identifier of the aggregate to hold (uuid).
+        reason:
+          type: string
+          description: Documented hold reason (mandatory, non-blank).
+    LegalHoldReleaseRequest:
+      type: object
+      description: |
+        The body of a legal-hold release (ARCH-007 §2.1): the mandatory
+        released reason.
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
     # --- Error envelope (RFC 9457, ADR-011) --------------------------------
     ProblemDetails:
       type: object

@@ -27,6 +27,9 @@ type apiHandlers struct {
 	*inventoryImportHandler
 	*assetsHandler
 	*userAdminHandler
+	// The I6 export operations are declared by the contract but not yet bound
+	// to their use cases (WP-6.07); the thin stubs answer the generic 500.
+	i6ContractHandlers
 }
 
 // Compile-time proof that the composed handler implements every generated
@@ -65,6 +68,7 @@ func NewAPIHandler(query SignalsQuery, reveal AuditReveal, commands SignalComman
 		inventoryImportHandler: &inventoryImportHandler{imports: surfaces.Inventory, logger: logger},
 		assetsHandler:          &assetsHandler{assets: surfaces.Assets, logger: logger},
 		userAdminHandler:       &userAdminHandler{admin: surfaces.Users, logger: logger},
+		i6ContractHandlers:     i6ContractHandlers{logger: logger},
 	}
 	return gen.NewStrictHandlerWithOptions(h, []gen.StrictMiddlewareFunc{recordRequestPath},
 		gen.StrictHTTPServerOptions{
