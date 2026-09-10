@@ -34,6 +34,10 @@ type UserRepo struct {
 // NewUserRepo binds the repository to one query set.
 func NewUserRepo(q *gen.Queries) *UserRepo { return &UserRepo{q: q} }
 
+// compile-time check that the repository satisfies the authorizer's read
+// port (WP-5a.06).
+var _ application.UserRepo = (*UserRepo)(nil)
+
 // UpsertBySubject implements the first-login create-or-read (ARCH-005 §1/§2):
 // the verified token's subject resolves the internal user, inserting the row
 // on the first login or refreshing display_name/email and the last-login
@@ -202,6 +206,50 @@ func (r *UserRepo) RevokeRole(ctx context.Context, tx application.Tx, userID str
 		return mapDBError(op, err)
 	}
 	return nil
+}
+
+// GetUserByID implements application.UserRepo (WP-5a.06): the authorise-time
+// read resolvePrincipal takes, mapping the stored users row onto the
+// application-level UserIdentity so the application layer never imports the
+// generated package. An unknown id stays a not-found Error (the authorizer
+// denies it); a deactivated user still resolves (the caller reads
+// DeactivatedAt).
+func (r *UserRepo) GetUserByID(ctx context.Context, id string) (application.UserIdentity, error) {
+	row, err := r.GetByID(ctx, id)
+	if err != nil {
+		return application.UserIdentity{}, err
+	}
+	return userIdentityFromRow(row), nil
+}
+
+// RolesByUserID implements application.UserRepo (WP-5a.06): the authorise-time
+// roles re-read, mapping the stored role rows onto domain.Role. A role value
+// the domain vocabulary does not know is skipped (an unknown role grants
+// nothing — fail closed); a user holding no roles yields an empty slice.
+func (r *UserRepo) RolesByUserID(ctx context.Context, userID string) ([]domain.Role, error) {
+	rows, err := r.ListRolesByUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	roles := make([]domain.Role, 0, len(rows))
+	for _, row := range rows {
+		role, err := domain.ParseRole(row.Role)
+		if err != nil {
+			continue // unknown role grants nothing (fail closed)
+		}
+		roles = append(roles, role)
+	}
+	return roles, nil
+}
+
+// userIdentityFromRow maps a stored users row onto the application-level
+// UserIdentity (deactivated_at NULL ⇒ the zero instant, i.e. active).
+func userIdentityFromRow(row gen.User) application.UserIdentity {
+	return application.UserIdentity{
+		ID:            uuidString(row.ID),
+		DisplayName:   row.DisplayName,
+		DeactivatedAt: tsTime(row.DeactivatedAt),
+	}
 }
 
 // ListRolesByUser returns one user's current roles ordered by role — the

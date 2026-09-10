@@ -185,6 +185,10 @@ type signalCommandPayload struct {
 func (s *Service) TransitionSignal(ctx context.Context, in TransitionSignalInput) (domain.RiskSignal, error) {
 	const op = "transition_signal"
 
+	principal, err := s.principalFor(ctx, op, in.Actor)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
 	if in.SignalID == "" {
 		return domain.RiskSignal{}, Validationf(op, "signal_id must not be empty")
 	}
@@ -201,6 +205,13 @@ func (s *Service) TransitionSignal(ctx context.Context, in TransitionSignalInput
 
 	current, err := s.signalTriage.GetRiskSignal(ctx, in.SignalID)
 	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	// The signals.triage gate runs after the load (the object is known) and
+	// before the guarded write: a Systemverantwortliche may triage only an
+	// assigned signal (owner_id = principal.id); the Analyst's all-scope
+	// passes unconditionally (ARCH-005 §5). A denial writes nothing.
+	if err := s.authorizeObject(op, principal, domain.PermissionSignalsTriage, domain.ScopeAssigned, current.Owner); err != nil {
 		return domain.RiskSignal{}, err
 	}
 	// Off-matrix edges are a state conflict (TR-001); a guarded edge without
@@ -263,6 +274,10 @@ func (s *Service) TransitionSignal(ctx context.Context, in TransitionSignalInput
 func (s *Service) AssignOwner(ctx context.Context, in AssignOwnerInput) (domain.RiskSignal, error) {
 	const op = "assign_owner"
 
+	principal, err := s.principalFor(ctx, op, in.Actor)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
 	if in.SignalID == "" {
 		return domain.RiskSignal{}, Validationf(op, "signal_id must not be empty")
 	}
@@ -276,6 +291,11 @@ func (s *Service) AssignOwner(ctx context.Context, in AssignOwnerInput) (domain.
 
 	current, err := s.signalTriage.GetRiskSignal(ctx, in.SignalID)
 	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	// signals.triage, object-scoped: only the signal's current owner may
+	// (re)assign it under the assigned scope (ARCH-005 §5).
+	if err := s.authorizeObject(op, principal, domain.PermissionSignalsTriage, domain.ScopeAssigned, current.Owner); err != nil {
 		return domain.RiskSignal{}, err
 	}
 	before, err := signalStateSnapshot(current, "")
@@ -317,6 +337,10 @@ func (s *Service) AssignOwner(ctx context.Context, in AssignOwnerInput) (domain.
 func (s *Service) AddComment(ctx context.Context, in AddCommentInput) (domain.Comment, error) {
 	const op = "add_comment"
 
+	principal, err := s.principalFor(ctx, op, in.Actor)
+	if err != nil {
+		return domain.Comment{}, err
+	}
 	if in.SignalID == "" {
 		return domain.Comment{}, Validationf(op, "signal_id must not be empty")
 	}
@@ -328,7 +352,11 @@ func (s *Service) AddComment(ctx context.Context, in AddCommentInput) (domain.Co
 		return domain.Comment{}, err
 	}
 
-	if _, err := s.signalTriage.GetRiskSignal(ctx, in.SignalID); err != nil {
+	current, err := s.signalTriage.GetRiskSignal(ctx, in.SignalID)
+	if err != nil {
+		return domain.Comment{}, err
+	}
+	if err := s.authorizeObject(op, principal, domain.PermissionSignalsTriage, domain.ScopeAssigned, current.Owner); err != nil {
 		return domain.Comment{}, err
 	}
 	correlationID := correlationOrNew(in.CorrelationID)
@@ -366,6 +394,10 @@ func (s *Service) AddComment(ctx context.Context, in AddCommentInput) (domain.Co
 func (s *Service) AcknowledgeSignal(ctx context.Context, in AcknowledgeSignalInput) (domain.RiskSignal, error) {
 	const op = "acknowledge_signal"
 
+	principal, err := s.principalFor(ctx, op, in.Actor)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
 	if in.SignalID == "" {
 		return domain.RiskSignal{}, Validationf(op, "signal_id must not be empty")
 	}
@@ -379,6 +411,9 @@ func (s *Service) AcknowledgeSignal(ctx context.Context, in AcknowledgeSignalInp
 
 	current, err := s.signalTriage.GetRiskSignal(ctx, in.SignalID)
 	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	if err := s.authorizeObject(op, principal, domain.PermissionSignalsTriage, domain.ScopeAssigned, current.Owner); err != nil {
 		return domain.RiskSignal{}, err
 	}
 	if err := domain.Transition(current.Status, domain.SignalStatusInReview); err != nil {
@@ -435,6 +470,12 @@ func (s *Service) AcknowledgeSignal(ctx context.Context, in AcknowledgeSignalInp
 func (s *Service) OverridePriority(ctx context.Context, in OverridePriorityInput) (domain.RiskSignal, error) {
 	const op = "override_priority"
 
+	// C-4 carry-over: the signals.override gate sits at the top, so a
+	// non-Analyst (e.g. an Administrator) is denied before the
+	// expected_version/domain checks run (ARCH-005 §5).
+	if _, err := s.authorize(ctx, op, in.Actor, domain.PermissionSignalsOverride, domain.ScopeAll, ""); err != nil {
+		return domain.RiskSignal{}, err
+	}
 	if in.SignalID == "" {
 		return domain.RiskSignal{}, Validationf(op, "signal_id must not be empty")
 	}
@@ -514,6 +555,12 @@ func (s *Service) OverridePriority(ctx context.Context, in OverridePriorityInput
 func (s *Service) RevertPriority(ctx context.Context, in RevertPriorityInput) (domain.RiskSignal, error) {
 	const op = "revert_priority"
 
+	// C-4 carry-over: revert is the inverse of the override decision
+	// authority, so it shares signals.override (ARCH-005 §5). The gate sits
+	// at the top, before the expected_version/domain checks.
+	if _, err := s.authorize(ctx, op, in.Actor, domain.PermissionSignalsOverride, domain.ScopeAll, ""); err != nil {
+		return domain.RiskSignal{}, err
+	}
 	if in.SignalID == "" {
 		return domain.RiskSignal{}, Validationf(op, "signal_id must not be empty")
 	}
@@ -574,6 +621,10 @@ func (s *Service) RevertPriority(ctx context.Context, in RevertPriorityInput) (d
 func (s *Service) PauseSla(ctx context.Context, in PauseSlaInput) (domain.SlaClock, error) {
 	const op = "pause_sla"
 
+	principal, err := s.principalFor(ctx, op, in.Actor)
+	if err != nil {
+		return domain.SlaClock{}, err
+	}
 	if in.SignalID == "" {
 		return domain.SlaClock{}, Validationf(op, "signal_id must not be empty")
 	}
@@ -587,7 +638,11 @@ func (s *Service) PauseSla(ctx context.Context, in PauseSlaInput) (domain.SlaClo
 	if err != nil {
 		return domain.SlaClock{}, err
 	}
-	if _, err := s.signalTriage.GetRiskSignal(ctx, in.SignalID); err != nil {
+	current, err := s.signalTriage.GetRiskSignal(ctx, in.SignalID)
+	if err != nil {
+		return domain.SlaClock{}, err
+	}
+	if err := s.authorizeObject(op, principal, domain.PermissionSignalsTriage, domain.ScopeAssigned, current.Owner); err != nil {
 		return domain.SlaClock{}, err
 	}
 	correlationID := correlationOrNew(in.CorrelationID)
@@ -626,6 +681,10 @@ func (s *Service) PauseSla(ctx context.Context, in PauseSlaInput) (domain.SlaClo
 func (s *Service) ResumeSla(ctx context.Context, in ResumeSlaInput) (domain.SlaClock, error) {
 	const op = "resume_sla"
 
+	principal, err := s.principalFor(ctx, op, in.Actor)
+	if err != nil {
+		return domain.SlaClock{}, err
+	}
 	if in.SignalID == "" {
 		return domain.SlaClock{}, Validationf(op, "signal_id must not be empty")
 	}
@@ -639,7 +698,11 @@ func (s *Service) ResumeSla(ctx context.Context, in ResumeSlaInput) (domain.SlaC
 	if err != nil {
 		return domain.SlaClock{}, err
 	}
-	if _, err := s.signalTriage.GetRiskSignal(ctx, in.SignalID); err != nil {
+	current, err := s.signalTriage.GetRiskSignal(ctx, in.SignalID)
+	if err != nil {
+		return domain.SlaClock{}, err
+	}
+	if err := s.authorizeObject(op, principal, domain.PermissionSignalsTriage, domain.ScopeAssigned, current.Owner); err != nil {
 		return domain.SlaClock{}, err
 	}
 	correlationID := correlationOrNew(in.CorrelationID)
@@ -977,14 +1040,16 @@ func slaClockMutationSnapshot(c domain.SlaClock, oldDeadline time.Time) (json.Ra
 	return json.Marshal(snap)
 }
 
-// signalActor resolves the audit principal of a triage/SLA command: an empty
-// Type defaults to the I1b system principal (user actors arrive with I5a);
-// an empty id is a client validation error — the actor of an audited command
-// is mandatory. I4 records the actor; the permission gate lands with I5a
-// (ARCH-004 §10).
+// signalActor resolves the audit principal of a triage/SLA command (ARCH-005
+// §6). I5a stops guessing a default: the actor type must be one of system,
+// user or service — the composition roots now supply the authenticated
+// principal (Type = "user", ID = users.id, DisplayName = snapshot) — and an
+// empty id is a client validation error (the actor of an audited command is
+// mandatory). The permission gate itself runs earlier in the command
+// (authz.go); this resolves the identity that is stamped into the audit row.
 func signalActor(op string, a Actor) (Actor, error) {
-	if a.Type == "" {
-		a.Type = ActorTypeSystem
+	if !validActorType(a.Type) {
+		return Actor{}, Validationf(op, "actor type %q must be one of %q, %q, %q", a.Type, ActorTypeSystem, ActorTypeUser, ActorTypeService)
 	}
 	if a.ID == "" {
 		return Actor{}, Validationf(op, "actor id must not be empty")

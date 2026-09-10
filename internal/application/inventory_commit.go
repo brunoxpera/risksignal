@@ -207,6 +207,12 @@ type CommitInventoryResult struct {
 func (s *Service) CommitInventory(ctx context.Context, in CommitInventoryInput) (CommitInventoryResult, error) {
 	const op = "inventory_commit"
 
+	// inventory.manage (Administrator-scope per the matrix): denied before the
+	// parse and before any transaction, so a denied commit writes nothing
+	// (ARCH-005 §5).
+	if _, err := s.authorize(ctx, op, in.Actor, domain.PermissionInventoryManage, domain.ScopeAll, ""); err != nil {
+		return CommitInventoryResult{}, err
+	}
 	actor := inventoryActor(in.Actor)
 	file, err := ParseInventoryCSV(bytes.NewReader(in.File))
 	if err != nil {

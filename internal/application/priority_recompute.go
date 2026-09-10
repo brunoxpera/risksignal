@@ -170,6 +170,12 @@ type priorityRulesPublishedPayload struct {
 func (s *Service) PublishPriorityRules(ctx context.Context, in PublishPriorityRulesInput) (PublishPriorityRulesResult, error) {
 	const op = "publish_priority_rules"
 
+	// rules.manage (Administrator; the ARCH-005 §3 extension): denied before
+	// the ruleset validation and before any transaction, so a denied publish
+	// writes nothing (ARCH-005 §5).
+	if _, err := s.authorize(ctx, op, in.Actor, domain.PermissionRulesManage, domain.ScopeAll, ""); err != nil {
+		return PublishPriorityRulesResult{}, err
+	}
 	if strings.TrimSpace(in.Reason) == "" {
 		return PublishPriorityRulesResult{}, Validationf(op, "publish reason must not be empty")
 	}

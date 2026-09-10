@@ -22,9 +22,13 @@ type Signal struct {
 	Asset      SignalAsset
 	Product    SignalProduct
 	Summary    string
-	CreatedAt  time.Time // RFC 3339 UTC, from the injected clock
-	Version    int       // optimistic-lock token
-	DueAt      *time.Time
+	// Owner is the signal's owner principal (users.id for a user-owned
+	// signal; "" when unassigned). It backs the `assigned`/`own` object-scope
+	// check of the single-signal read (ARCH-005 §5).
+	Owner     string
+	CreatedAt time.Time // RFC 3339 UTC, from the injected clock
+	Version   int       // optimistic-lock token
+	DueAt     *time.Time
 }
 
 // SignalAsset is the joined asset of a signal (ARCH-001 §4 asset).
@@ -49,6 +53,11 @@ type SignalProduct struct {
 type SignalFilter struct {
 	Priority *domain.Priority
 	Status   *domain.SignalStatus
+	// OwnerID restricts the working list to the signals owned by the given
+	// internal principal — the object-scope filter an `assigned`/`own` read
+	// grant injects at the query path (ARCH-005 §5): a Systemverantwortliche
+	// sees only their assigned signals. Nil keeps the filter open.
+	OwnerID *string
 }
 
 // AuditEvent is one append-only audit row (ARCH-001 §1 audit_events,

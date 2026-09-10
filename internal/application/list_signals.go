@@ -18,12 +18,16 @@ const (
 
 // ListSignalsInput is the working-list query (ARCH-001 §4): optional
 // priority/status filters, an opaque cursor and a page size. Limit 0 means
-// the default (20); limits above maxListLimit are rejected.
+// the default (20); limits above maxListLimit are rejected. Actor is the
+// authenticated principal: signals.read is gated per the matrix and an
+// `assigned`/`own` grant restricts the read to the principal's owned signals
+// (ARCH-005 §5).
 type ListSignalsInput struct {
 	Limit    int
 	Cursor   string
 	Priority *domain.Priority
 	Status   *domain.SignalStatus
+	Actor    Actor
 }
 
 // ListSignalsResult is one page of the working list. NextCursor is empty on
@@ -77,6 +81,19 @@ func decodeCursor(s string) (int, error) {
 func (s *Service) ListSignals(ctx context.Context, in ListSignalsInput) (ListSignalsResult, error) {
 	const op = "list_signals"
 
+	principal, err := s.principalFor(ctx, op, in.Actor)
+	if err != nil {
+		return ListSignalsResult{}, err
+	}
+	// signals.read per the matrix: a role-less user (or one without
+	// signals.read) is denied; an `assigned`/`own` grant scopes the query to
+	// the principal's owned signals (owner_id = principal.id) — the query
+	// path half of the object-scope rule (ARCH-005 §5).
+	scope := principal.GrantedScope(domain.PermissionSignalsRead)
+	if principal.InternalID != "" && scope == domain.ScopeNone {
+		return ListSignalsResult{}, Forbiddenf(op, "principal %q is not permitted %s", principal.InternalID, domain.PermissionSignalsRead)
+	}
+
 	limit := in.Limit
 	if limit == 0 {
 		limit = defaultListLimit
@@ -95,7 +112,12 @@ func (s *Service) ListSignals(ctx context.Context, in ListSignalsInput) (ListSig
 		return ListSignalsResult{}, err
 	}
 
-	rows, err := s.signals.List(ctx, SignalFilter{Priority: in.Priority, Status: in.Status}, limit, offset)
+	filter := SignalFilter{Priority: in.Priority, Status: in.Status}
+	if principal.InternalID != "" && (scope == domain.ScopeAssigned || scope == domain.ScopeOwn) {
+		owner := principal.InternalID
+		filter.OwnerID = &owner
+	}
+	rows, err := s.signals.List(ctx, filter, limit, offset)
 	if err != nil {
 		return ListSignalsResult{}, err
 	}

@@ -38,7 +38,7 @@ func TestGetSignalReturnsJoinedView(t *testing.T) {
 	}
 	h.db.signalViews = append(h.db.signalViews, want)
 
-	got, err := h.svc.GetSignal(ctx, "sig-1")
+	got, err := h.svc.GetSignal(ctx, application.GetSignalInput{SignalID: "sig-1"})
 	if err != nil {
 		t.Fatalf("GetSignal: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestGetSignalUnknownIDIsNotFound(t *testing.T) {
 	h := newHarness(t)
 	h.db.signalViews = append(h.db.signalViews, application.Signal{ID: "sig-1", Priority: domain.PriorityP4, Status: domain.SignalStatusNew})
 
-	_, err := h.svc.GetSignal(context.Background(), "sig-missing")
+	_, err := h.svc.GetSignal(context.Background(), application.GetSignalInput{SignalID: "sig-missing"})
 	if err == nil {
 		t.Fatal("GetSignal of an unknown id succeeded, want a not-found error")
 	}
@@ -76,7 +76,7 @@ func TestGetSignalUnknownIDIsNotFound(t *testing.T) {
 // TestGetSignalEmptyIDIsRejected: an empty id is a caller mistake.
 func TestGetSignalEmptyIDIsRejected(t *testing.T) {
 	h := newHarness(t)
-	_, err := h.svc.GetSignal(context.Background(), "")
+	_, err := h.svc.GetSignal(context.Background(), application.GetSignalInput{SignalID: ""})
 	if err == nil {
 		t.Fatal("GetSignal of an empty id succeeded, want a validation error")
 	}
@@ -98,7 +98,7 @@ func TestSignalDueAtNullRoundTrip(t *testing.T) {
 	}
 	h.db.signalViews = append(h.db.signalViews, view)
 
-	got, err := h.svc.GetSignal(context.Background(), "sig-1")
+	got, err := h.svc.GetSignal(context.Background(), application.GetSignalInput{SignalID: "sig-1"})
 	if err != nil {
 		t.Fatalf("GetSignal: %v", err)
 	}

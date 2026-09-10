@@ -107,6 +107,8 @@ func (h *signalsHandler) writeError(w http.ResponseWriter, r *http.Request, err 
 		writeProblem(w, r, http.StatusNotFound, titleSignalNotFound, errorCause(err))
 	case application.KindConflict:
 		writeProblem(w, r, http.StatusConflict, titleConflict, errorCause(err))
+	case application.KindForbidden:
+		writeProblem(w, r, http.StatusForbidden, titleForbidden, errorCause(err))
 	default:
 		h.logger.ErrorContext(r.Context(), "signal read failed", slog.Any("error", err))
 		writeProblem(w, r, http.StatusInternalServerError, titleInternalError, "")

@@ -40,7 +40,7 @@ import (
 // composition root (cmd/risksignal-server) passes the real service.
 type SignalsQuery interface {
 	ListSignals(ctx context.Context, in application.ListSignalsInput) (application.ListSignalsResult, error)
-	GetSignal(ctx context.Context, id string) (application.Signal, error)
+	GetSignal(ctx context.Context, in application.GetSignalInput) (application.Signal, error)
 }
 
 // signalsHandler implements gen.StrictServerInterface for the two I1b signal
@@ -147,6 +147,9 @@ func (h *signalsHandler) ListSignals(ctx context.Context, request gen.ListSignal
 		in.Cursor = *params.Cursor
 	}
 
+	// The authenticated principal is threaded into in.Actor by the I5a auth
+	// middleware (WP-5a.05) / the I5b adapter binding; until then the zero
+	// Actor leaves the application gate inert at this boundary (ARCH-005 §5).
 	page, err := h.query.ListSignals(ctx, in)
 	if err != nil {
 		return h.listError(ctx, err)
@@ -171,7 +174,7 @@ func (h *signalsHandler) ListSignals(ctx context.Context, request gen.ListSignal
 // object naming the id; a malformed id fails validation in the repository
 // and answers the typed 400 object.
 func (h *signalsHandler) GetSignal(ctx context.Context, request gen.GetSignalRequestObject) (gen.GetSignalResponseObject, error) {
-	sig, err := h.query.GetSignal(ctx, request.SignalId)
+	sig, err := h.query.GetSignal(ctx, application.GetSignalInput{SignalID: request.SignalId})
 	if err != nil {
 		switch kind, _ := application.ErrorKindOf(err); kind {
 		case application.KindNotFound:

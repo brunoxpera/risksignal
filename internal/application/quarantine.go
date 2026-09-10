@@ -96,6 +96,10 @@ func (s *Service) QuarantineList(ctx context.Context, in QuarantineListInput) ([
 func (s *Service) QuarantineAck(ctx context.Context, in QuarantineAckInput) (domain.Quarantine, error) {
 	const op = "quarantine_ack"
 
+	// sources.manage (Admin): a denied review writes nothing (ARCH-005 §5).
+	if _, err := s.authorize(ctx, op, in.Actor, domain.PermissionSourcesManage, domain.ScopeAll, ""); err != nil {
+		return domain.Quarantine{}, err
+	}
 	if in.ID == "" {
 		return domain.Quarantine{}, Validationf(op, "quarantine id must not be empty")
 	}
@@ -143,6 +147,10 @@ func (s *Service) QuarantineAck(ctx context.Context, in QuarantineAckInput) (dom
 func (s *Service) QuarantineReprocess(ctx context.Context, in QuarantineReprocessInput) (QuarantineReprocessResult, error) {
 	const op = "quarantine_reprocess"
 
+	// sources.manage (Admin): a denied reprocess writes nothing (ARCH-005 §5).
+	if _, err := s.authorize(ctx, op, in.Actor, domain.PermissionSourcesManage, domain.ScopeAll, ""); err != nil {
+		return QuarantineReprocessResult{}, err
+	}
 	if in.Adapter == nil {
 		return QuarantineReprocessResult{}, Validationf(op, "adapter must not be nil")
 	}

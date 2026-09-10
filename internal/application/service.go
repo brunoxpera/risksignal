@@ -54,6 +54,14 @@ type Service struct {
 	// five.
 	priorityRules PriorityRuleRepo
 	factorSource  PriorityFactorRepo
+	// users is the I5a identity read port of the authorizer (ARCH-005 §5,
+	// WP-5a.06): resolvePrincipal re-reads a user actor's deactivation state
+	// and current roles at authorise time. It is optional at construction —
+	// a composition root that never invokes a gated command with a user
+	// actor (the I1b–I4 worker/demo roots) leaves it nil; a Service whose
+	// user-invokable commands run under a user principal must carry it (the
+	// I5b root wires the DEV-089 postgres *repo.UserRepo).
+	users UserRepo
 	// slaProfile is the injected (priority, target) → reaction-time duration
 	// profile (ARCH-004 §4.2/§4.3). The triage commands read it to decide
 	// which SLA clocks a transition fulfils or resets; it defaults to the
@@ -107,6 +115,11 @@ type ServiceDeps struct {
 	// wires the postgres implementations).
 	PriorityRules PriorityRuleRepo
 	FactorSource  PriorityFactorRepo
+	// Users is the I5a identity read port of the authorizer (ARCH-005 §5,
+	// WP-5a.06). It is optional at construction like the triage/SLA ports:
+	// the I1b–I4 roots wire a Service without it and never gate a user
+	// actor; the I5b root wires the DEV-089 *repo.UserRepo.
+	Users UserRepo
 	// SlaTimeProfile is the injectable (priority, target) → reaction-time
 	// duration profile the I4 triage commands read to decide which SLA
 	// clocks a status change fulfils or resets (ARCH-004 §4.2/§4.3,
@@ -199,6 +212,7 @@ func NewService(deps ServiceDeps) *Service {
 		slaClocks:          deps.SlaClocks,
 		priorityRules:      deps.PriorityRules,
 		factorSource:       deps.FactorSource,
+		users:              deps.Users,
 		slaProfile:         slaProfile,
 		slaReminderCadence: slaReminderCadence,
 		clock:              deps.Clock,

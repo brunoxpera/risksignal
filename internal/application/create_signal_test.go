@@ -290,8 +290,8 @@ func TestCreateSignalValidationRejectsBadInput(t *testing.T) {
 	}{
 		{"empty match id", func(in *application.CreateSignalInput) { in.MatchID = "" }},
 		{"empty cve id", func(in *application.CreateSignalInput) { in.CveID = "" }},
-		{"non-system actor type", func(in *application.CreateSignalInput) {
-			in.Actor = application.Actor{Type: "user", ID: "someone"}
+		{"unknown actor type", func(in *application.CreateSignalInput) {
+			in.Actor = application.Actor{Type: "operator", ID: "someone"}
 		}},
 		{"empty actor id", func(in *application.CreateSignalInput) { in.Actor = systemActor("") }},
 		{"factor method without confidence", func(in *application.CreateSignalInput) {

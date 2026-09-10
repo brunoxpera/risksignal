@@ -76,9 +76,9 @@ func (f *fakeSignals) ListSignals(ctx context.Context, in application.ListSignal
 	return f.page, f.listErr
 }
 
-func (f *fakeSignals) GetSignal(ctx context.Context, id string) (application.Signal, error) {
+func (f *fakeSignals) GetSignal(ctx context.Context, in application.GetSignalInput) (application.Signal, error) {
 	f.getCalls++
-	f.lastID = id
+	f.lastID = in.SignalID
 	return f.signal, f.getErr
 }
 

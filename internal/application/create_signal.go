@@ -16,21 +16,44 @@ const (
 	EventTypeSignalCreated = "signal.created"
 	// AuditAggregateRiskSignal is the aggregate type of signal audit rows.
 	AuditAggregateRiskSignal = "risk_signal"
-	// ActorTypeSystem is the I1b audit actor type (ARCH-001 §1
-	// audit_events.actor_type); user principals arrive with I5a.
+	// ActorTypeSystem is the audit actor type of an internal system
+	// principal (the trusted worker/CLI process; ARCH-001 §1
+	// audit_events.actor_type, ARCH-005 §6).
 	ActorTypeSystem = "system"
+	// ActorTypeUser is the audit actor type of an authenticated user
+	// principal (ARCH-005 §1/§6): actor_id = users.id. A user actor is
+	// authorised at the concrete use case (authz.go).
+	ActorTypeUser = "user"
+	// ActorTypeService is the audit actor type of an automation principal
+	// (ARCH-005 §2/§6): actor_id = client_id. Service permissions come from
+	// the config-scoped client map (not the role model).
+	ActorTypeService = "service"
 	// outboxDedupePrefix prefixes the command-level dedupe key (ARCH-001 §2:
 	// dedupe_key = "signal.created:" + signal_id).
 	outboxDedupePrefix = "signal.created:"
 )
 
+// validActorType reports whether t is one of the three audit actor types
+// (ARCH-005 §6): system, user or service. Any other value — including the
+// empty string — is refused by the commands that validate their actor.
+func validActorType(t string) bool {
+	switch t {
+	case ActorTypeSystem, ActorTypeUser, ActorTypeService:
+		return true
+	}
+	return false
+}
+
 // Actor is the audit principal of a command (ARCH-001 §1 audit_events:
 // actor_type system in I1b, actor_id 'synthetic-source' | 'demo-seed').
 type Actor struct {
-	// Type must be ActorTypeSystem in I1b; user actors arrive with I5a.
+	// Type is the audit actor type (ARCH-005 §6): ActorTypeSystem for the
+	// trusted worker/CLI principal, ActorTypeUser for an authenticated user
+	// (ID = users.id), ActorTypeService for automation (ID = client_id).
 	Type string
-	// ID identifies the acting principal, e.g. "synthetic-source" or
-	// "demo-seed".
+	// ID identifies the acting principal: users.id for a user actor, the
+	// client_id for a service actor, a free string (e.g. "synthetic-source",
+	// "demo-seed") for a system actor.
 	ID          string
 	DisplayName string
 }
@@ -126,8 +149,8 @@ func (s *Service) CreateSignal(ctx context.Context, in CreateSignalInput) (Creat
 	if in.CveID == "" {
 		return CreateSignalResult{}, Validationf(op, "cve_id must not be empty")
 	}
-	if in.Actor.Type != ActorTypeSystem {
-		return CreateSignalResult{}, Validationf(op, "actor type %q not allowed in I1b (only %q)", in.Actor.Type, ActorTypeSystem)
+	if !validActorType(in.Actor.Type) {
+		return CreateSignalResult{}, Validationf(op, "actor type %q not allowed (want one of %q, %q, %q)", in.Actor.Type, ActorTypeSystem, ActorTypeUser, ActorTypeService)
 	}
 	if in.Actor.ID == "" {
 		return CreateSignalResult{}, Validationf(op, "actor id must not be empty")

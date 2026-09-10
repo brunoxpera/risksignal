@@ -25,6 +25,11 @@ const (
 	// KindNotFound: the requested row does not exist (getSignal of an
 	// unknown id).
 	KindNotFound ErrorKind = "not_found"
+	// KindForbidden: the principal is authenticated but may not exercise
+	// the operation (ARCH-005 §5, deny-by-default authorisation). The
+	// caller maps it onto HTTP 403; a forbidden command wrote nothing — no
+	// transaction, no audit row, no state change.
+	KindForbidden ErrorKind = "forbidden"
 	// KindInfra: persistence or infrastructure failure; the operation may
 	// succeed when retried.
 	KindInfra ErrorKind = "infrastructure"
@@ -70,6 +75,18 @@ func ConflictError(op string, err error) error {
 // NotFoundError returns a not-found-class error wrapping err.
 func NotFoundError(op string, err error) error {
 	return &Error{Kind: KindNotFound, Op: op, Err: err}
+}
+
+// ForbiddenError returns a forbidden-class error wrapping err (ARCH-005 §5):
+// the principal may not exercise the operation. A forbidden command opens no
+// transaction and writes no audit row.
+func ForbiddenError(op string, err error) error {
+	return &Error{Kind: KindForbidden, Op: op, Err: err}
+}
+
+// Forbiddenf returns a forbidden-class error with a formatted message.
+func Forbiddenf(op, format string, args ...any) error {
+	return &Error{Kind: KindForbidden, Op: op, Err: fmt.Errorf(format, args...)}
 }
 
 // InfraError returns an infrastructure-class error wrapping err.

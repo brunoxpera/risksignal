@@ -600,6 +600,9 @@ func (f *fakeSignalRepo) List(ctx context.Context, filter application.SignalFilt
 		if filter.Status != nil && s.Status != *filter.Status {
 			continue
 		}
+		if filter.OwnerID != nil && s.Owner != *filter.OwnerID {
+			continue
+		}
 		rows = append(rows, s)
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -625,6 +628,50 @@ func (f *fakeSignalRepo) List(ctx context.Context, filter application.SignalFilt
 func (f *fakeSignalRepo) ExistsByMatchID(ctx context.Context, matchID string) (bool, error) {
 	return f.db.hasSignalForMatch(matchID), nil
 }
+
+// fakeUserRepo is the in-memory application.UserRepo of the I5a authorizer
+// tests (WP-5a.06): users.id → UserIdentity plus users.id → roles. An id
+// absent from the user map is a not-found error (resolvePrincipal denies it).
+type fakeUserRepo struct {
+	byID  map[string]application.UserIdentity
+	roles map[string][]domain.Role
+}
+
+func newFakeUserRepo() *fakeUserRepo {
+	return &fakeUserRepo{
+		byID:  map[string]application.UserIdentity{},
+		roles: map[string][]domain.Role{},
+	}
+}
+
+// add registers one user with the given roles (an empty role list is a
+// role-less user — deny-by-default on everything).
+func (f *fakeUserRepo) add(id, displayName string, roles ...domain.Role) {
+	f.byID[id] = application.UserIdentity{ID: id, DisplayName: displayName}
+	f.roles[id] = roles
+}
+
+// deactivate marks a registered user deactivated at instant (the authorizer
+// denies it while it still resolves in the audit trail).
+func (f *fakeUserRepo) deactivate(id string, at time.Time) {
+	u := f.byID[id]
+	u.DeactivatedAt = at
+	f.byID[id] = u
+}
+
+func (f *fakeUserRepo) GetUserByID(ctx context.Context, id string) (application.UserIdentity, error) {
+	u, ok := f.byID[id]
+	if !ok {
+		return application.UserIdentity{}, application.NotFoundError("user.get_by_id", fmt.Errorf("user %s not found", id))
+	}
+	return u, nil
+}
+
+func (f *fakeUserRepo) RolesByUserID(ctx context.Context, userID string) ([]domain.Role, error) {
+	return f.roles[userID], nil
+}
+
+var _ application.UserRepo = (*fakeUserRepo)(nil)
 
 type fakeAuditRepo struct {
 	db *fakeDB
@@ -1467,6 +1514,8 @@ type harness struct {
 	priorityRules *fakePriorityRuleRepo
 	factorSource  *fakePriorityFactorRepo
 
+	users *fakeUserRepo
+
 	svc *application.Service
 }
 
@@ -1497,6 +1546,7 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 	h.slaClocks = &fakeSlaClockRepo{db: h.db, clk: h.clock}
 	h.priorityRules = &fakePriorityRuleRepo{db: h.db}
 	h.factorSource = &fakePriorityFactorRepo{rebuilds: map[string]application.PriorityFactorRebuild{}}
+	h.users = newFakeUserRepo()
 	deps := application.ServiceDeps{
 		Signals:         h.signals,
 		Audit:           h.audit,
@@ -1514,6 +1564,7 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 		SlaClocks:       h.slaClocks,
 		PriorityRules:   h.priorityRules,
 		FactorSource:    h.factorSource,
+		Users:           h.users,
 		Clock:           h.clock,
 		RunTx:           h.runner.Run,
 	}

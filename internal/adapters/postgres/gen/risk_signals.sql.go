@@ -448,13 +448,15 @@ JOIN components c      ON c.id = m.component_id
 JOIN assets a          ON a.id = c.asset_id
 WHERE ($1::text IS NULL OR rs.priority = $1)
   AND ($2::text IS NULL OR rs.status = $2)
+  AND ($3::text IS NULL OR rs.owner = $3)
 ORDER BY rs.priority, rs.created_at, rs.id
-LIMIT $3
+LIMIT $4
 `
 
 type ListSignalsParams struct {
 	Priority pgtype.Text
 	Status   pgtype.Text
+	OwnerID  pgtype.Text
 	MaxRows  int32
 }
 
@@ -488,10 +490,18 @@ type ListSignalsRow struct {
 
 // ListSignals is the working-list read (ARCH-001 §4 listSignals): priority
 // ascending P1→P4, then created_at with id as the stable tiebreak (ch. 10.4;
-// the SLA-deadline part of the ordering arrives with I4). priority and
-// status filter optionally — pass NULL to keep a filter open.
+// the SLA-deadline part of the ordering arrives with I4). priority, status
+// and owner_id filter optionally — pass NULL to keep a filter open. owner_id
+// is the object-scope filter an `assigned`/`own` signals.read grant injects
+// (ARCH-005 §5): a Systemverantwortliche sees only the signals they own
+// (rs.owner = owner_id).
 func (q *Queries) ListSignals(ctx context.Context, arg ListSignalsParams) ([]ListSignalsRow, error) {
-	rows, err := q.db.Query(ctx, listSignals, arg.Priority, arg.Status, arg.MaxRows)
+	rows, err := q.db.Query(ctx, listSignals,
+		arg.Priority,
+		arg.Status,
+		arg.OwnerID,
+		arg.MaxRows,
+	)
 	if err != nil {
 		return nil, err
 	}

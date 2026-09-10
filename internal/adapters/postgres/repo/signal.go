@@ -95,6 +95,7 @@ func (r *SignalRepo) List(ctx context.Context, filter application.SignalFilter, 
 	rows, err := r.q.ListSignals(ctx, gen.ListSignalsParams{
 		Priority: toTextOptPtr(filter.Priority),
 		Status:   toTextOptPtr(filter.Status),
+		OwnerID:  toTextOptPtr(filter.OwnerID),
 		MaxRows:  int32(maxRows),
 	})
 	if err != nil {
@@ -190,6 +191,7 @@ func toSignalView(j signalJoin) application.Signal {
 			Version: j.ComponentVersion,
 		},
 		Summary:   j.Summary,
+		Owner:     textValue(j.Owner),
 		CreatedAt: j.CreatedAt.Time,
 		Version:   int(j.Version),
 	}
