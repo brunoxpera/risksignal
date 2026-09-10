@@ -64,15 +64,29 @@ import (
 // directory (go test runs with the package directory as working directory).
 const openapiDocPath = "../../api/openapi/openapi.yaml"
 
-// knownSignalCVEs is the deterministic outcome of one `demo seed` (the
-// WP-1b.05 reference cases C1–C4 of ARCH-001 §3): four signals in the sort
-// order of the working-list read — priority ascending P1→P4, then
-// created_at. The P2 pair (C2, C3) is ordered by created_at, which the
-// seed produces in case order; the suite pins the priority sequence and the
-// first element, not the microseconds of the P2 tiebreak.
-var knownSignalCVEs = []string{"CVE-2024-0001", "CVE-2024-0002", "CVE-2024-0003", "CVE-2024-0004"}
+// knownSignalCVEs is the deterministic outcome of one `demo seed`: the
+// WP-1b.05 reference cases C1–C4 of ARCH-001 §3 plus the WP-4.08 / DEV-083 I4
+// fixture (ARCH-004 §8), in the sort order of the working-list read —
+// priority ascending P1→P4, then created_at, then id. Within a priority the
+// fixture signals are created three minutes before the synthetic run, so
+// they sort first, ordered by their fixed ids; the synthetic P2 pair
+// (C2, C3) is ordered by created_at, which the seed produces in case order.
+var knownSignalCVEs = []string{
+	"CVE-2026-9001", "CVE-2026-9002", // P1 fixture
+	"CVE-2024-0001",                  // P1 synthetic C1
+	"CVE-2026-9003", "CVE-2026-9004", // P2 fixture
+	"CVE-2024-0002", "CVE-2024-0003", // P2 synthetic C2, C3
+	"CVE-2026-9005", "CVE-2026-9006", // P3 fixture
+	"CVE-2024-0004",                  // P3 synthetic C4
+	"CVE-2026-9007", "CVE-2026-9008", // P4 fixture
+}
 
-var knownSignalPriorities = []gen.Priority{gen.P1, gen.P2, gen.P2, gen.P3}
+var knownSignalPriorities = []gen.Priority{
+	gen.P1, gen.P1, gen.P1,
+	gen.P2, gen.P2, gen.P2, gen.P2,
+	gen.P3, gen.P3, gen.P3,
+	gen.P4, gen.P4,
+}
 
 // TestSignalContractAgainstSeededServer is the ADR-011 gate 3 contract
 // suite. One seeded server serves every subtest — the seed is the expensive
@@ -306,9 +320,10 @@ func TestSignalContractAgainstSeededServer(t *testing.T) {
 
 	// Cursor pagination: page through the whole list with limit 2 and
 	// reassemble it — the envelope, the opaque cursor and the sort survive
-	// the walk. The seed leaves exactly four rows, so the walk takes two
-	// full pages (2+2); the second page is final because the use case's
-	// limit+1 probe finds no further row (next_cursor null terminates).
+	// the walk. The seed leaves exactly twelve rows (four synthetic C1–C4
+	// plus the eight-signal I4 fixture), so the walk takes six full pages
+	// (6×2); the last page is final because the use case's limit+1 probe
+	// finds no further row (next_cursor null terminates).
 	t.Run("cursor pagination walks the whole list", func(t *testing.T) {
 		var (
 			got        []gen.Signal
@@ -316,7 +331,7 @@ func TestSignalContractAgainstSeededServer(t *testing.T) {
 			pages      int
 			wantCursor = true
 		)
-		for pages = 0; pages < 10 && wantCursor; pages++ {
+		for pages = 0; pages < 20 && wantCursor; pages++ {
 			resp, err := client.ListSignalsWithResponse(ctx, &gen.ListSignalsParams{
 				Limit:  ptrTo(2),
 				Cursor: cursor,
@@ -337,11 +352,11 @@ func TestSignalContractAgainstSeededServer(t *testing.T) {
 				t.Fatalf("first page is empty, want the seeded signals")
 			}
 		}
-		if pages == 10 {
-			t.Fatalf("pagination did not terminate after 10 pages (cursor walk is stuck)")
+		if pages == 20 {
+			t.Fatalf("pagination did not terminate after 20 pages (cursor walk is stuck)")
 		}
-		if pages != 2 {
-			t.Errorf("walk took %d pages, want 2 (2+2 with limit 2 over 4 signals)", pages)
+		if pages != 6 {
+			t.Errorf("walk took %d pages, want 6 (6×2 with limit 2 over 12 signals)", pages)
 		}
 		if wantCursor {
 			t.Errorf("last page still carries a next_cursor, want null termination")
@@ -573,8 +588,11 @@ func seedDemo(t *testing.T, dbURL string) {
 	if len(result.Run.Errors) != 1 {
 		t.Fatalf("demo seed run errors = %v, want exactly the one E1 case error", result.Run.Errors)
 	}
-	if result.Run.Counters.Signals != len(knownSignalCVEs) {
-		t.Fatalf("demo seed run counters = %+v, want %d signals", result.Run.Counters, len(knownSignalCVEs))
+	// The synthetic run creates exactly the four reference signals (C1–C4);
+	// the eight-signal I4 fixture is seeded separately (ARCH-004 §8) and is
+	// not part of the run's counters.
+	if result.Run.Counters.Signals != 4 {
+		t.Fatalf("demo seed run counters = %+v, want 4 synthetic signals", result.Run.Counters)
 	}
 }
 
@@ -654,8 +672,8 @@ func assertSignalComplete(t *testing.T, what string, s *gen.Signal) {
 	if !s.Priority.Valid() {
 		t.Errorf("%s: priority = %q, not in the vocabulary", what, s.Priority)
 	}
-	if !s.Status.Valid() || s.Status != gen.New {
-		t.Errorf("%s: status = %q, want %q (I1b signals are always new)", what, s.Status, gen.New)
+	if !s.Status.Valid() {
+		t.Errorf("%s: status = %q, not in the vocabulary", what, s.Status)
 	}
 	if !s.Confidence.Valid() {
 		t.Errorf("%s: confidence = %q, not in the vocabulary", what, s.Confidence)

@@ -12,6 +12,24 @@ INSERT INTO risk_signals (match_id, priority, owner, due_at, closed_at, rule_ver
 VALUES (@match_id, @priority, @owner, @due_at, @closed_at, @rule_version, @factors, @created_at)
 RETURNING *;
 
+-- InsertDemoRiskSignal writes one fully-specified signal row of the I4 demo
+-- fixture (WP-4.08 / DEV-083, ARCH-004 §8): unlike InsertRiskSignal it
+-- supplies the id, status, version and closed_at explicitly, so the
+-- fixture owns stable, reproducible identities and statuses across runs
+-- (the demo seed is deterministic by construction). It is operator tooling
+-- of the demo command only — the production create path is InsertRiskSignal
+-- behind CreateSignal (the id/status/version column defaults stay the
+-- production contract, ARCH-001 §2). factors carries the contributing
+-- factor set; created_at/occurred instants come from the injected clock.
+-- name: InsertDemoRiskSignal :one
+INSERT INTO risk_signals (
+    id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at
+)
+VALUES (
+    @id, @match_id, @priority, @status, @owner, @due_at, @closed_at, @version, @rule_version, @factors, @created_at
+)
+RETURNING *;
+
 -- GetSignalByMatchID returns the id of the signal of one match, if any — the
 -- existence check of ARCH-001 §3 step 5 (per match without a signal: run the
 -- CreateSignal command).

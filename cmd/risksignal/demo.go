@@ -1,11 +1,12 @@
-// demo subcommands (WP-1b.05 / DEV-019, ARCH-001 §3 "Trigger"): `demo seed`
-// registers the synthetic source row, seeds the demo inventory (assets and
-// components) and runs the synthetic source once; `demo run` re-runs the
-// source (an idempotent no-op on re-run); `demo reset` truncates the demo
-// tables (the I1b chain plus quarantine since I2; dev-only, requires --yes
-// per concept ch. 11.3). Production of the
-// signal is a CLI/operator action — the API only reads the result
-// (ARCH-001 §3).
+// demo subcommands (WP-1b.05 / DEV-019, ARCH-001 §3 "Trigger"; extended by
+// WP-4.08 / DEV-083, ARCH-004 §8, UC-08): `demo seed` registers the
+// synthetic source row, seeds the demo inventory (assets and components),
+// runs the synthetic source once and writes the deterministic I4 P1–P4
+// fixture (demo_i4.go); `demo run` drives the accelerated UC-08 SLA scenario
+// through the real use cases and worker pieces (demo_i4.go); `demo reset`
+// truncates the demo tables (the I1b chain plus quarantine since I2; dev-
+// only, requires --yes per concept ch. 11.3). Production of the signal is a
+// CLI/operator action — the API only reads the result (ARCH-001 §3).
 //
 // Composition: cmd/risksignal is the composition root of the demo path. It
 // wires the postgres repositories behind the application ports
@@ -150,7 +151,8 @@ func (e *cmdEnv) cmdDemoSeed(args []string) outcome {
 	}
 	defer pool.Close()
 
-	sourceID, counts, err := seedDemoInventory(ctx, pool, fix, clock.RealClock{}.Now())
+	seedNow := clock.RealClock{}.Now()
+	sourceID, counts, err := seedDemoInventory(ctx, pool, fix, seedNow)
 	if err != nil {
 		return demoErrorOutcome(err)
 	}
@@ -161,10 +163,20 @@ func (e *cmdEnv) cmdDemoSeed(args []string) outcome {
 	}
 	run := demoRunPayloadFromResult(res)
 
+	// The deterministic I4 fixture (WP-4.08): the P1–P4 signals across every
+	// ch. 6.3 status with their SLA clocks and audit rows.
+	fixtureWritten, err := seedDemoFixture(ctx, pool, seedNow)
+	if err != nil {
+		return demoErrorOutcome(err)
+	}
+	fixture := demoFixtureCensus(fixtureWritten)
+
 	if e.format == formatText {
 		fmt.Fprintf(e.stdout, "registered source type %s, name %s\n", synthetic.SourceType, synthetic.SourceName)
 		fmt.Fprintf(e.stdout, "seeded inventory: %d asset(s), %d component(s)\n", counts.assets, counts.components)
 		printDemoRun(e.stdout, run)
+		fmt.Fprintf(e.stdout, "seeded I4 fixture: %d signal(s) (P1-P4 across all statuses), %d SLA clock(s), %d audit event(s)\n",
+			fixture.Signals, fixture.Clocks, fixture.Audits)
 	}
 	return e.ok(demoSeedResult{
 		SourceType: synthetic.SourceType,
@@ -172,12 +184,14 @@ func (e *cmdEnv) cmdDemoSeed(args []string) outcome {
 		Assets:     counts.assets,
 		Components: counts.components,
 		Run:        run,
+		Fixture:    fixture,
 	})
 }
 
-// cmdDemoRun re-runs the synthetic source against the seeded inventory
-// (idempotent: re-runs create no duplicate rows and no new signals). A
-// missing source row means the demo was never seeded.
+// cmdDemoRun drives the accelerated UC-08 SLA scenario (WP-4.08 /
+// DEV-083, ARCH-004 §8) through the real application use cases and worker
+// pieces on a scaled SLA profile and an injected clock. A missing source row
+// means the demo was never seeded.
 func (e *cmdEnv) cmdDemoRun(args []string) outcome {
 	fs := newFlagSet(e, "usage: risksignal demo run")
 	if err := fs.Parse(args); err != nil {
@@ -194,25 +208,20 @@ func (e *cmdEnv) cmdDemoRun(args []string) outcome {
 	if !out.ok() {
 		return out
 	}
-	fix, err := synthetic.Load()
-	if err != nil {
-		return e.fail(exitGeneric, classGeneric, "%v", err)
-	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), demoRunTimeout)
 	defer cancel()
 
-	pool, svc, out := e.dbService(ctx, cfg)
+	pool, _, out := e.dbService(ctx, cfg)
 	if !out.ok() {
 		return out
 	}
 	defer pool.Close()
 
-	source, err := gen.New(pool).GetSourceByTypeAndName(ctx, gen.GetSourceByTypeAndNameParams{
+	if _, err := gen.New(pool).GetSourceByTypeAndName(ctx, gen.GetSourceByTypeAndNameParams{
 		Type: synthetic.SourceType,
 		Name: synthetic.SourceName,
-	})
-	if err != nil {
+	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return e.fail(exitGeneric, classGeneric,
 				"demo is not seeded yet — run 'risksignal demo seed' first")
@@ -220,16 +229,15 @@ func (e *cmdEnv) cmdDemoRun(args []string) outcome {
 		return e.fail(exitInfrastructure, classInfrastructure, "%v", err)
 	}
 
-	res, err := svc.RunSyntheticSource(ctx, syntheticRunInput(demoUUID(source.ID), fix))
+	scenario, err := runDemoScenario(ctx, pool)
 	if err != nil {
 		return demoErrorOutcome(err)
 	}
-	run := demoRunPayloadFromResult(res)
 
 	if e.format == formatText {
-		printDemoRun(e.stdout, run)
+		printDemoScenario(e.stdout, scenario)
 	}
-	return e.ok(demoRunResult{Run: run})
+	return e.ok(demoRunResult{Scenario: scenario})
 }
 
 // cmdDemoReset truncates the demo tables (the I1b chain plus the I2
@@ -469,21 +477,43 @@ func demoRunPayloadFromResult(res application.RunSyntheticSourceResult) demoRunP
 
 // demoSeedResult is the machine-readable payload of demo seed.
 type demoSeedResult struct {
-	SourceType string         `json:"source_type"`
-	SourceName string         `json:"source_name"`
-	Assets     int            `json:"assets"`
-	Components int            `json:"components"`
-	Run        demoRunPayload `json:"run"`
+	SourceType string             `json:"source_type"`
+	SourceName string             `json:"source_name"`
+	Assets     int                `json:"assets"`
+	Components int                `json:"components"`
+	Run        demoRunPayload     `json:"run"`
+	Fixture    demoFixtureSummary `json:"fixture"`
 }
 
-// demoRunResult is the machine-readable payload of demo run.
+// demoRunResult is the machine-readable payload of demo run: the UC-08
+// accelerated SLA scenario (WP-4.08).
 type demoRunResult struct {
-	Run demoRunPayload `json:"run"`
+	Scenario demoScenarioResult `json:"scenario"`
 }
 
 // demoResetResult is the machine-readable payload of demo reset.
 type demoResetResult struct {
 	Tables []string `json:"tables"`
+}
+
+// printDemoScenario renders the outcome of the accelerated UC-08 scenario as
+// text (the --output text surface of `demo run`).
+func printDemoScenario(w io.Writer, s demoScenarioResult) {
+	fmt.Fprintf(w, "UC-08 accelerated SLA scenario %s\n", s.Scenario)
+	fmt.Fprintf(w, "  lifecycle:  %s %s statuses %v closed_at %v notification delivered %t\n",
+		s.Lifecycle.SignalID, s.Lifecycle.Priority, s.Lifecycle.StatusHistory, fmtTimePtr(s.Lifecycle.ClosedAt), s.Lifecycle.NotificationDelivered)
+	fmt.Fprintf(w, "  upgrade:    %s %s->%s created %v tightened %d clock(s), audits created %d tightened %d\n",
+		s.Upgrade.SignalID, s.Upgrade.FromPriority, s.Upgrade.ToPriority, s.Upgrade.ClocksCreated, len(s.Upgrade.ClocksTightened), s.Upgrade.CreatedAudits, s.Upgrade.TightenedAudits)
+	fmt.Fprintf(w, "  escalation: %s escalated_at %v escalations %d reminders %d\n",
+		s.Escalation.SignalID, fmtTimePtr(s.Escalation.EscalatedAt), s.Escalation.Escalations, s.Escalation.Reminders)
+}
+
+// fmtTimePtr renders an optional instant for the text output.
+func fmtTimePtr(t *time.Time) string {
+	if t == nil {
+		return "<none>"
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // printDemoRun renders the outcome of one synthetic run as text.

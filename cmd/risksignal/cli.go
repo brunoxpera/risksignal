@@ -273,10 +273,13 @@ commands:
   diagnose connectivity             probe TCP reachability of the database host
   diagnose health                   report process and database connectivity
   demo seed                         register the synthetic source, seed the
-                                    demo inventory and run the source once
-                                    (deterministic reference fixture, WP-1b.05)
-  demo run                          re-run the synthetic source (idempotent
-                                    no-op on re-run)
+                                    demo inventory, run the source once and
+                                    write the deterministic P1-P4 I4 fixture
+                                    (statuses + SLA clocks + audits, WP-4.08)
+  demo run                          drive the accelerated UC-08 SLA
+                                    lifecycle (create -> deliver -> ack ->
+                                    action_planned -> resolve, a P3->P1
+                                    upgrade and a P1 escalation, WP-4.08)
   demo reset --yes                  truncate the demo tables (dev-only, I1b chain + quarantine)
   source run <type|id>              enqueue one manual source.fetch job for the
                                     named source (the worker runs it, bypassing

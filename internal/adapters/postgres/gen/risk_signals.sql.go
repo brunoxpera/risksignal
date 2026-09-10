@@ -207,6 +207,75 @@ func (q *Queries) GetSignalByMatchID(ctx context.Context, matchID pgtype.UUID) (
 	return id, err
 }
 
+const insertDemoRiskSignal = `-- name: InsertDemoRiskSignal :one
+INSERT INTO risk_signals (
+    id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at
+)
+VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+)
+RETURNING id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at, auto_priority, override_reason, override_actor_id, override_at, escalated_at
+`
+
+type InsertDemoRiskSignalParams struct {
+	ID          pgtype.UUID
+	MatchID     pgtype.UUID
+	Priority    string
+	Status      string
+	Owner       pgtype.Text
+	DueAt       pgtype.Timestamptz
+	ClosedAt    pgtype.Timestamptz
+	Version     int32
+	RuleVersion string
+	Factors     []byte
+	CreatedAt   pgtype.Timestamptz
+}
+
+// InsertDemoRiskSignal writes one fully-specified signal row of the I4 demo
+// fixture (WP-4.08 / DEV-083, ARCH-004 §8): unlike InsertRiskSignal it
+// supplies the id, status, version and closed_at explicitly, so the
+// fixture owns stable, reproducible identities and statuses across runs
+// (the demo seed is deterministic by construction). It is operator tooling
+// of the demo command only — the production create path is InsertRiskSignal
+// behind CreateSignal (the id/status/version column defaults stay the
+// production contract, ARCH-001 §2). factors carries the contributing
+// factor set; created_at/occurred instants come from the injected clock.
+func (q *Queries) InsertDemoRiskSignal(ctx context.Context, arg InsertDemoRiskSignalParams) (RiskSignal, error) {
+	row := q.db.QueryRow(ctx, insertDemoRiskSignal,
+		arg.ID,
+		arg.MatchID,
+		arg.Priority,
+		arg.Status,
+		arg.Owner,
+		arg.DueAt,
+		arg.ClosedAt,
+		arg.Version,
+		arg.RuleVersion,
+		arg.Factors,
+		arg.CreatedAt,
+	)
+	var i RiskSignal
+	err := row.Scan(
+		&i.ID,
+		&i.MatchID,
+		&i.Priority,
+		&i.Status,
+		&i.Owner,
+		&i.DueAt,
+		&i.ClosedAt,
+		&i.Version,
+		&i.RuleVersion,
+		&i.Factors,
+		&i.CreatedAt,
+		&i.AutoPriority,
+		&i.OverrideReason,
+		&i.OverrideActorID,
+		&i.OverrideAt,
+		&i.EscalatedAt,
+	)
+	return i, err
+}
+
 const insertRiskSignal = `-- name: InsertRiskSignal :one
 
 INSERT INTO risk_signals (match_id, priority, owner, due_at, closed_at, rule_version, factors, created_at)
