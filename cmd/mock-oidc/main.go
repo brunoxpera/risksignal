@@ -18,8 +18,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-
-	"github.com/oauth2-proxy/mockoidc"
 )
 
 // listenAddr is the container-internal contract; compose maps it to the
@@ -33,9 +31,10 @@ func main() {
 }
 
 func run() error {
-	m, err := mockoidc.NewServer(nil)
+	cfg := mockConfigFromEnv()
+	m, err := newServer(cfg)
 	if err != nil {
-		return fmt.Errorf("create mock OIDC server: %w", err)
+		return err
 	}
 
 	// #nosec G102 — deliberate container-internal contract (see file header):
@@ -54,6 +53,7 @@ func run() error {
 	log.Printf("issuer: %s", m.Issuer())
 	log.Printf("discovery: %s", m.DiscoveryEndpoint())
 	log.Printf("generated client id %q, client secret %q", m.ClientID, m.ClientSecret)
+	log.Printf("test user subject %q, roles claim \"roles\" = %v", cfg.Subject, cfg.Roles)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
