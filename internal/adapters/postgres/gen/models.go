@@ -420,6 +420,38 @@ type SourceRun struct {
 	CursorAfter []byte
 }
 
+// Minimal internal identity record (ARCH-005 §1, ch. 12, FR-028): OIDC subject + display name + optional e-mail + roles; deactivated, never deleted (ADR-014), so the audit actor_id stays resolvable
+type User struct {
+	// Stable internal id — the value audit_events.actor_id stores for user actors and the key audit.reveal_identity resolves on (ADR-014)
+	ID pgtype.UUID
+	// External OIDC subject (issuer-qualified "<issuer>::<sub>", UQ users_subject_id_key); the login key — a provider migration can never collide two subjects
+	SubjectID string
+	// Display name, denormalised into audit rows at event time (the field ADR-014 later clears)
+	DisplayName string
+	// Optional e-mail (notification recipient only); never the login key (ch. 12 data minimisation)
+	Email pgtype.Text
+	// Deactivation instant from the injected clock; NULL = active — a deactivated user still resolves in audit but holds no rights (ADR-014)
+	DeactivatedAt pgtype.Timestamptz
+	// Last successful login/session/token resolution from the injected clock; NULL = never logged in
+	LastLoginAt pgtype.Timestamptz
+	// Insert instant from the injected clock
+	CreatedAt pgtype.Timestamptz
+	// Last mutation instant from the injected clock
+	UpdatedAt pgtype.Timestamptz
+}
+
+// Internal role grants (ARCH-005 §1, ch. 3 / §12.2): the five-role controlled vocabulary as a DB CHECK; a user holds zero or more roles — zero roles means deny-by-default on everything
+type UserRole struct {
+	// The user holding the role; ON DELETE CASCADE (dormant — users are deactivated, never deleted, ADR-014)
+	UserID pgtype.UUID
+	// Role machine key, one of the five-role vocabulary (user_roles_role_check): security_analyst | system_responsible | administrator | auditor | product_owner
+	Role string
+	// Grant instant from the injected clock (auditable)
+	GrantedAt pgtype.Timestamptz
+	// Grant origin: the admin's internal user id, or 'claim' for a claim-synced first-login grant, or 'seed' for the migration seed; NULL allowed
+	GrantedBy pgtype.Text
+}
+
 // Normalized vulnerabilities; I1b identity + summary only (ARCH-001 §1), full NVD fields arrive with I2
 type Vulnerability struct {
 	ID          pgtype.UUID
