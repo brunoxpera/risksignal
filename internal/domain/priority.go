@@ -4,9 +4,11 @@ import "fmt"
 
 // Priority is the urgency class of a risk signal (ch. 6.2, ch. 9.3). P1 is
 // the most urgent. The priority of a signal is computed by the deterministic
-// ch. 9.3 rules (priority_rules.go, tagged PriorityRuleVersion) from the
-// stored factors; the rule version and the contributing factors are stored
-// with the signal (ARCH-001 §1 risk_signals.rule_version/factors, ch. 9.5).
+// ch. 9.3 seed ruleset (priority_rules.go, SeedPriorityRules, evaluated by
+// the bounded predicate of predicate.go) from the stored factors; the
+// effective rule version (PriorityRuleVersion(n)) and the contributing
+// factors are stored with the signal (ARCH-001 §1
+// risk_signals.rule_version/factors, ch. 9.5).
 type Priority string
 
 // Allowed Priority values (ch. 6.2).

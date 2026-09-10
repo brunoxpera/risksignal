@@ -144,7 +144,7 @@ func (s *Service) CreateSignal(ctx context.Context, in CreateSignalInput) (Creat
 	record := SignalRecord{
 		MatchID:     in.MatchID,
 		Priority:    domain.ComputePriority(in.Factors),
-		RuleVersion: domain.PriorityRuleVersion,
+		RuleVersion: domain.PriorityRuleVersionI1b,
 		Factors:     in.Factors,
 	}
 

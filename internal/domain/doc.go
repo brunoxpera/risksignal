@@ -26,12 +26,21 @@
 //     with the "a<n>d<m>" ruleset-version derivation;
 //   - the ADR-015 method→confidence/score mapping (MatchMethod.Derive), the
 //     deterministic candidate similarity of ARCH-003 §3 (similarity.go,
-//     scaled into the 1–54 candidate band) and the ch. 9.3
-//     "Deterministische Prioritätsregeln" priority function. All are pure
-//     and hard-coded behind the rule-version constants MatchRuleVersion and
-//     PriorityRuleVersion ("i1b-1") plus the composite RulesetVersion — the
-//     seams the I4 priority_rules table and the I3 rule tables replace
-//     without touching the pipeline (ADR-015, ARCH-001 §3, ARCH-003 §3).
+//     scaled into the 1–54 candidate band) and the I4 priority model of
+//     ARCH-004 §1: the versioned PriorityRule snapshot with its bounded
+//     predicate evaluator (predicate.go, EvaluateRule), the seeded ch. 9.3
+//     ruleset (SeedPriorityRules, version PriorityRuleVersion(1)) and the
+//     I1b compatibility entry point ComputePriority. The ADR-015 mapping
+//     stays hard-coded behind MatchRuleVersion ("i1b-1"); the priority
+//     rules no longer are — they are versioned data, with the legacy
+//     PriorityRuleVersionI1b ("i1b-1") kept only as history (ADR-015,
+//     ARCH-001 §3, ARCH-003 §3, ARCH-004 §1);
+//   - the I4 signal state machine and SLA/override value objects (ARCH-004
+//     §2–§4): the ch. 6.3 transition matrix (status.go: IsClosed,
+//     CanTransition, Transition, IsReopen), the override-survival fields on
+//     RiskSignal (Override/Revert, the ADR-015 auto_* mirror), the Comment
+//     value object and the SLA value objects SLATarget/SLATimeProfile/
+//     SlaClock (pause/resume/fulfil/tighten/reset + effective deadline).
 //
 // The package is pure by construction: it imports only the Go standard
 // library, never an adapter or a generated API package (go-arch-lint gate,
