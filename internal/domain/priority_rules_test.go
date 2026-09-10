@@ -98,7 +98,7 @@ func TestPriorityRuleVersion(t *testing.T) {
 	// boundary: "p...10" sorts above "p...2".
 	two, _ := PriorityRuleVersion(2)
 	ten, _ := PriorityRuleVersion(10)
-	if !(ten > two) {
+	if ten <= two {
 		t.Errorf("padded versions out of order: %q must sort above %q", ten, two)
 	}
 	for _, n := range []int{0, -1, -42} {
