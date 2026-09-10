@@ -109,12 +109,24 @@ func (v *Verifier) DeviceAuthorize(ctx context.Context) (DeviceAuthorization, er
 // ErrAuthorizationPending / ErrSlowDown / ErrAccessDenied / ErrExpiredToken
 // for the pollable states.
 func (v *Verifier) DevicePoll(ctx context.Context, dev DeviceAuthorization) (Identity, error) {
+	tokens, err := v.devicePollTokens(ctx, dev)
+	if err != nil {
+		return Identity{}, err
+	}
+	return tokens.Identity, nil
+}
+
+// devicePollTokens performs one poll of the token endpoint for the device
+// grant and returns the whole verified token set (the CLI login persists it;
+// DevicePoll exposes only the identity). The pollable state errors are
+// identical to DevicePoll's.
+func (v *Verifier) devicePollTokens(ctx context.Context, dev DeviceAuthorization) (Tokens, error) {
 	doc, err := v.discover(ctx)
 	if err != nil {
-		return Identity{}, fmt.Errorf("%w: %v", ErrInvalidToken, err)
+		return Tokens{}, fmt.Errorf("%w: %v", ErrInvalidToken, err)
 	}
 	if doc.TokenEndpoint == "" {
-		return Identity{}, fmt.Errorf("%w: discovery document has no token_endpoint", ErrInvalidToken)
+		return Tokens{}, fmt.Errorf("%w: discovery document has no token_endpoint", ErrInvalidToken)
 	}
 
 	form := url.Values{
@@ -128,35 +140,35 @@ func (v *Verifier) DevicePoll(ctx context.Context, dev DeviceAuthorization) (Ide
 
 	body, status, err := v.postForm(ctx, doc.TokenEndpoint, form)
 	if err != nil {
-		return Identity{}, err
+		return Tokens{}, err
 	}
 	var tr tokenResponse
 	if err := json.Unmarshal(body, &tr); err != nil {
-		return Identity{}, fmt.Errorf("oidc: parse token response: %w", err)
+		return Tokens{}, fmt.Errorf("oidc: parse token response: %w", err)
 	}
 	if tr.Error != "" {
 		switch tr.Error {
 		case "authorization_pending":
-			return Identity{}, ErrAuthorizationPending
+			return Tokens{}, ErrAuthorizationPending
 		case "slow_down":
-			return Identity{}, ErrSlowDown
+			return Tokens{}, ErrSlowDown
 		case "access_denied":
-			return Identity{}, ErrAccessDenied
+			return Tokens{}, ErrAccessDenied
 		case "expired_token":
-			return Identity{}, ErrExpiredToken
+			return Tokens{}, ErrExpiredToken
 		default:
-			return Identity{}, fmt.Errorf("%w: device grant rejected", ErrInvalidToken)
+			return Tokens{}, fmt.Errorf("%w: device grant rejected", ErrInvalidToken)
 		}
 	}
 	if status != http.StatusOK || tr.IDToken == "" {
-		return Identity{}, fmt.Errorf("%w: device grant rejected", ErrInvalidToken)
+		return Tokens{}, fmt.Errorf("%w: device grant rejected", ErrInvalidToken)
 	}
 
 	claims, err := v.verify(ctx, tr.IDToken, "")
 	if err != nil {
-		return Identity{}, err
+		return Tokens{}, err
 	}
-	return v.identityFrom(claims), nil
+	return v.tokensFrom(tr, v.identityFrom(claims)), nil
 }
 
 // DeviceLogin runs the whole Device Authorization Flow: DeviceAuthorize, then
@@ -164,9 +176,20 @@ func (v *Verifier) DevicePoll(ctx context.Context, dev DeviceAuthorization) (Ide
 // cancelled. report is called once with the kickoff so the CLI can show the
 // verification URI and user code; it may be nil.
 func (v *Verifier) DeviceLogin(ctx context.Context, report func(DeviceAuthorization)) (Identity, error) {
-	dev, err := v.DeviceAuthorize(ctx)
+	tokens, err := v.DeviceLoginWithTokens(ctx, report)
 	if err != nil {
 		return Identity{}, err
+	}
+	return tokens.Identity, nil
+}
+
+// DeviceLoginWithTokens runs the whole Device Authorization Flow and returns
+// the verified token set (the CLI's login plumbing persists it). It behaves
+// exactly like DeviceLogin; report is called once with the kickoff.
+func (v *Verifier) DeviceLoginWithTokens(ctx context.Context, report func(DeviceAuthorization)) (Tokens, error) {
+	dev, err := v.DeviceAuthorize(ctx)
+	if err != nil {
+		return Tokens{}, err
 	}
 	if report != nil {
 		report(dev)
@@ -182,23 +205,23 @@ func (v *Verifier) DeviceLogin(ctx context.Context, report func(DeviceAuthorizat
 	}
 
 	for {
-		ident, err := v.DevicePoll(ctx, dev)
+		tokens, err := v.devicePollTokens(ctx, dev)
 		switch {
 		case err == nil:
-			return ident, nil
+			return tokens, nil
 		case errors.Is(err, ErrAuthorizationPending):
 			// The user has not approved yet — keep polling.
 		case errors.Is(err, ErrSlowDown):
 			interval += deviceSlowDownStep
 		default:
-			return Identity{}, err
+			return Tokens{}, err
 		}
 
 		if !deadline.IsZero() && v.clk.Now().After(deadline) {
-			return Identity{}, ErrExpiredToken
+			return Tokens{}, ErrExpiredToken
 		}
 		if err := v.sleep(ctx, interval); err != nil {
-			return Identity{}, err
+			return Tokens{}, err
 		}
 	}
 }

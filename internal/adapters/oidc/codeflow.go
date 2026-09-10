@@ -101,11 +101,22 @@ func (v *Verifier) AuthorizationURL(ctx context.Context, req AuthRequest) (strin
 // equal req.Nonce, and the token endpoint re-checks the PKCE verifier (the
 // adapter sends it). A mismatch is ErrInvalidToken.
 func (v *Verifier) Exchange(ctx context.Context, code, returnedState string, req AuthRequest) (Identity, error) {
+	tokens, err := v.exchangeTokens(ctx, code, returnedState, req)
+	if err != nil {
+		return Identity{}, err
+	}
+	return tokens.Identity, nil
+}
+
+// exchangeTokens redeems an authorization code and returns the verified token
+// set (the CLI's login plumbing persists it). It enforces the same callback
+// checks as Exchange.
+func (v *Verifier) exchangeTokens(ctx context.Context, code, returnedState string, req AuthRequest) (Tokens, error) {
 	if req.State == "" || subtle.ConstantTimeCompare([]byte(returnedState), []byte(req.State)) != 1 {
-		return Identity{}, fmt.Errorf("%w: state mismatch", ErrInvalidToken)
+		return Tokens{}, fmt.Errorf("%w: state mismatch", ErrInvalidToken)
 	}
 	if strings.TrimSpace(code) == "" {
-		return Identity{}, fmt.Errorf("%w: empty authorization code", ErrInvalidToken)
+		return Tokens{}, fmt.Errorf("%w: empty authorization code", ErrInvalidToken)
 	}
 
 	tr, err := v.tokenRequest(ctx, url.Values{
@@ -115,14 +126,14 @@ func (v *Verifier) Exchange(ctx context.Context, code, returnedState string, req
 		"code_verifier": {req.CodeVerifier},
 	})
 	if err != nil {
-		return Identity{}, err
+		return Tokens{}, err
 	}
 
 	claims, err := v.verify(ctx, tr.IDToken, req.Nonce)
 	if err != nil {
-		return Identity{}, err
+		return Tokens{}, err
 	}
-	return v.identityFrom(claims), nil
+	return v.tokensFrom(tr, v.identityFrom(claims)), nil
 }
 
 // WaitForCallback serves exactly one loopback callback request on ln (the CLI
@@ -178,14 +189,25 @@ func (v *Verifier) WaitForCallback(ctx context.Context, ln net.Listener, req Aut
 // exchanges the code. It returns when the login completes or when ctx is
 // cancelled.
 func (v *Verifier) LoopbackLogin(ctx context.Context, ln net.Listener, open func(string) error) (Identity, error) {
-	redirectURL := "http://" + ln.Addr().String() + callbackPath
-	req, err := v.NewAuthRequest(redirectURL)
+	tokens, err := v.LoopbackLoginWithTokens(ctx, ln, open)
 	if err != nil {
 		return Identity{}, err
 	}
+	return tokens.Identity, nil
+}
+
+// LoopbackLoginWithTokens runs the Authorization Code + PKCE loopback flow and
+// returns the verified token set (the CLI's login plumbing persists it). It
+// behaves exactly like LoopbackLogin.
+func (v *Verifier) LoopbackLoginWithTokens(ctx context.Context, ln net.Listener, open func(string) error) (Tokens, error) {
+	redirectURL := "http://" + ln.Addr().String() + callbackPath
+	req, err := v.NewAuthRequest(redirectURL)
+	if err != nil {
+		return Tokens{}, err
+	}
 	authURL, err := v.AuthorizationURL(ctx, req)
 	if err != nil {
-		return Identity{}, err
+		return Tokens{}, err
 	}
 
 	type outcome struct {
@@ -200,18 +222,18 @@ func (v *Verifier) LoopbackLogin(ctx context.Context, ln net.Listener, open func
 
 	if open != nil {
 		if err := open(authURL); err != nil {
-			return Identity{}, fmt.Errorf("oidc: open browser: %w", err)
+			return Tokens{}, fmt.Errorf("oidc: open browser: %w", err)
 		}
 	}
 
 	select {
 	case <-ctx.Done():
-		return Identity{}, ctx.Err()
+		return Tokens{}, ctx.Err()
 	case res := <-result:
 		if res.err != nil {
-			return Identity{}, res.err
+			return Tokens{}, res.err
 		}
-		return v.Exchange(ctx, res.code, req.State, req)
+		return v.exchangeTokens(ctx, res.code, req.State, req)
 	}
 }
 

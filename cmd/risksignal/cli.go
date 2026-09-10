@@ -180,6 +180,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runQuarantine(e, commandArgs[1:])
 	case "signal":
 		return runSignal(e, commandArgs[1:])
+	case "user":
+		return runUser(e, commandArgs[1:])
+	case "auth":
+		return runAuth(e, commandArgs[1:])
 	default:
 		return e.emit(commandArgs[0], e.fail(exitValidation, classValidation,
 			"unknown command (run 'risksignal help' for usage)"))
@@ -332,6 +336,19 @@ commands:
         --priority <P1..P4>          only): stores the computed value,
         --reason <text>              stamps reason + actor; the CLI twin of
         --version <n> [--as <subj>]  the same endpoint's override command
+  signal list|show                  the signals.read working list and detail
+        [--limit/--cursor/--filter]  views (cursor-paged, filters in the URL)
+  signal assign|transition|comment  the remaining triage commands, 1:1 with
+  signal revert|pause|resume        the API command vocabulary (assign --owner
+                                    |--clear, transition --to, comment
+                                    --comment, pause/resume --target --reason)
+  user list|grant|revoke|deactivate user/role administration
+        --user <id> --role <role>    (users.roles.manage, deny-by-default);
+                                    deactivate is destructive and takes --yes
+  auth login|status|logout          OIDC device/loopback login; the tokens are
+        [--issuer <url>]             stored in the OS credential store and are
+        [--flow device|loopback]     never logged (login stores, status reads,
+                                    logout removes)
   help                              show this help
 
 The CLI is strictly non-interactive: it never prompts and never reads hidden
