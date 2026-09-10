@@ -84,6 +84,32 @@ func Validate(c *Config) []error {
 		errs = append(errs, errors.New("worker.sla_reminder_cadence: must be a positive duration (set it via a config file or RISKSIGNAL_WORKER_SLA_REMINDER_CADENCE)"))
 	}
 
+	// The notify channels (ARCH-004 §6.1): an enabled SMTP channel needs a
+	// host:port relay, a sender and a recipient; an enabled webhook needs a
+	// parseable URL and a signing secret. A disabled channel is inert, so
+	// its empty target is fine. Errors reference the key only.
+	if c.Notify.SMTP.Enabled {
+		if strings.TrimSpace(c.Notify.SMTP.Addr) == "" {
+			errs = append(errs, errors.New("notify.smtp.addr: mandatory when notify.smtp.enabled is true (a host:port relay)"))
+		} else if _, _, err := net.SplitHostPort(strings.TrimSpace(c.Notify.SMTP.Addr)); err != nil {
+			errs = append(errs, errors.New("notify.smtp.addr: must be a host:port pair (for example 127.0.0.1:1025)"))
+		}
+		if strings.TrimSpace(c.Notify.SMTP.From) == "" {
+			errs = append(errs, errors.New("notify.smtp.from: mandatory when notify.smtp.enabled is true"))
+		}
+		if strings.TrimSpace(c.Notify.SMTP.To) == "" {
+			errs = append(errs, errors.New("notify.smtp.to: mandatory when notify.smtp.enabled is true"))
+		}
+	}
+	if c.Notify.Webhook.Enabled {
+		if !isValidURL(c.Notify.Webhook.URL) {
+			errs = append(errs, errors.New("notify.webhook.url: mandatory and must be a valid URL when notify.webhook.enabled is true"))
+		}
+		if strings.TrimSpace(c.Notify.Webhook.Secret) == "" {
+			errs = append(errs, errors.New("notify.webhook.secret: mandatory when notify.webhook.enabled is true"))
+		}
+	}
+
 	return errs
 }
 

@@ -67,6 +67,7 @@ type Config struct {
 	OIDC          OIDC     `json:"oidc"`
 	Auth          Auth     `json:"auth"`
 	Worker        Worker   `json:"worker"`
+	Notify        Notify   `json:"notify"`
 
 	// sources records the provenance of every leaf key; populated by Load.
 	sources map[string]Source
@@ -113,6 +114,40 @@ type Worker struct {
 	SLAReminderCadence time.Duration `json:"sla_reminder_cadence"`
 }
 
+// Notify carries the I4 notification-channel configuration (ARCH-004 §6.1,
+// WP-4.06). It selects which channels an active notification uses and holds
+// the local SMTP and webhook targets. There is no production mail/webhook
+// target in I4: the channels stay disabled until an operator configures a
+// target (the local environment points SMTP at the Compose Mailpit).
+type Notify struct {
+	// P2Active activates outbound notifications for new P2 signals
+	// (FR-023). P1 is always active; P3/P4 are in-app only.
+	P2Active bool `json:"p2_active"`
+	// SMTP is the SMTP relay target of the active-notification e-mail.
+	SMTP NotifySMTP `json:"smtp"`
+	// Webhook is the signed outbound webhook target.
+	Webhook NotifyWebhook `json:"webhook"`
+}
+
+// NotifySMTP is the SMTP relay configuration (Mailpit in the local
+// environment, D-004). Enabled turns the channel on; addr/from/to are
+// mandatory once it is enabled.
+type NotifySMTP struct {
+	Enabled bool   `json:"enabled"`
+	Addr    string `json:"addr"` // host:port of the SMTP relay
+	From    string `json:"from"` // envelope sender
+	To      string `json:"to"`   // recipient (recorded on the notification row)
+}
+
+// NotifyWebhook is the signed webhook configuration. Enabled turns the
+// channel on; url and secret are mandatory once it is enabled. secret is
+// never rendered (Summary/JSONSummary report presence only).
+type NotifyWebhook struct {
+	Enabled bool   `json:"enabled"`
+	URL     string `json:"url"`
+	Secret  string `json:"secret"`
+}
+
 // Defaults returns the built-in schema-v1 defaults.
 //
 // The defaults are deliberately development-shaped but fail-secure: local
@@ -145,6 +180,15 @@ func Defaults() Config {
 			// escalated P1 once per hour without configuration.
 			SLAEvaluateInterval: time.Minute,
 			SLAReminderCadence:  time.Hour,
+		},
+		Notify: Notify{
+			// P2 notifications are configurable (FR-023); the active default
+			// notifies them. The SMTP and webhook channels stay disabled
+			// until an operator configures a target (no production
+			// mail/webhook target in I4).
+			P2Active: true,
+			SMTP:     NotifySMTP{Enabled: false},
+			Webhook:  NotifyWebhook{Enabled: false},
 		},
 	}
 }
@@ -194,6 +238,35 @@ var envBindings = []struct {
 		c.Worker.SLAReminderCadence = d
 		return nil
 	}},
+	{"notify.p2_active", func(c *Config, v string) error {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("notify.p2_active: %s: must be a boolean (true or false)", envName("notify.p2_active"))
+		}
+		c.Notify.P2Active = b
+		return nil
+	}},
+	{"notify.smtp.enabled", func(c *Config, v string) error {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("notify.smtp.enabled: %s: must be a boolean (true or false)", envName("notify.smtp.enabled"))
+		}
+		c.Notify.SMTP.Enabled = b
+		return nil
+	}},
+	{"notify.smtp.addr", func(c *Config, v string) error { c.Notify.SMTP.Addr = strings.TrimSpace(v); return nil }},
+	{"notify.smtp.from", func(c *Config, v string) error { c.Notify.SMTP.From = strings.TrimSpace(v); return nil }},
+	{"notify.smtp.to", func(c *Config, v string) error { c.Notify.SMTP.To = strings.TrimSpace(v); return nil }},
+	{"notify.webhook.enabled", func(c *Config, v string) error {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("notify.webhook.enabled: %s: must be a boolean (true or false)", envName("notify.webhook.enabled"))
+		}
+		c.Notify.Webhook.Enabled = b
+		return nil
+	}},
+	{"notify.webhook.url", func(c *Config, v string) error { c.Notify.Webhook.URL = strings.TrimSpace(v); return nil }},
+	{"notify.webhook.secret", func(c *Config, v string) error { c.Notify.Webhook.Secret = strings.TrimSpace(v); return nil }},
 }
 
 // envName derives the environment variable name for a leaf key:
@@ -209,12 +282,20 @@ func envName(key string) string {
 func Load() (*Config, error) {
 	cfg := Defaults()
 	prov := map[string]Source{
-		"schema_version":      SourceDefault,
-		"env":                 SourceDefault,
-		"http.addr":           SourceDefault,
-		"database.url":        SourceDefault,
-		"oidc.issuer":         SourceDefault,
-		"auth.bypass_enabled": SourceDefault,
+		"schema_version":         SourceDefault,
+		"env":                    SourceDefault,
+		"http.addr":              SourceDefault,
+		"database.url":           SourceDefault,
+		"oidc.issuer":            SourceDefault,
+		"auth.bypass_enabled":    SourceDefault,
+		"notify.p2_active":       SourceDefault,
+		"notify.smtp.enabled":    SourceDefault,
+		"notify.smtp.addr":       SourceDefault,
+		"notify.smtp.from":       SourceDefault,
+		"notify.smtp.to":         SourceDefault,
+		"notify.webhook.enabled": SourceDefault,
+		"notify.webhook.url":     SourceDefault,
+		"notify.webhook.secret":  SourceDefault,
 	}
 
 	if path := os.Getenv(envVarConfigFile); path != "" {
@@ -259,6 +340,7 @@ type configFile struct {
 	OIDC          *fileOIDC     `json:"oidc"`
 	Auth          *fileAuth     `json:"auth"`
 	Worker        *fileWorker   `json:"worker"`
+	Notify        *fileNotify   `json:"notify"`
 }
 
 type fileHTTP struct {
@@ -281,6 +363,25 @@ type fileWorker struct {
 	Interval            *string `json:"interval"`              // Go duration, e.g. "30s"
 	SLAEvaluateInterval *string `json:"sla_evaluate_interval"` // Go duration, e.g. "1m"
 	SLAReminderCadence  *string `json:"sla_reminder_cadence"`  // Go duration, e.g. "1h"
+}
+
+type fileNotify struct {
+	P2Active *bool              `json:"p2_active"`
+	SMTP     *fileNotifySMTP    `json:"smtp"`
+	Webhook  *fileNotifyWebhook `json:"webhook"`
+}
+
+type fileNotifySMTP struct {
+	Enabled *bool   `json:"enabled"`
+	Addr    *string `json:"addr"`
+	From    *string `json:"from"`
+	To      *string `json:"to"`
+}
+
+type fileNotifyWebhook struct {
+	Enabled *bool   `json:"enabled"`
+	URL     *string `json:"url"`
+	Secret  *string `json:"secret"`
 }
 
 // applyConfigFile reads the JSON config file at path and overrides cfg with
@@ -361,6 +462,44 @@ func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
 		}
 		cfg.Worker.SLAReminderCadence = d
 		prov["worker.sla_reminder_cadence"] = SourceFile
+	}
+	if fc.Notify != nil {
+		if fc.Notify.P2Active != nil {
+			cfg.Notify.P2Active = *fc.Notify.P2Active
+			prov["notify.p2_active"] = SourceFile
+		}
+		if fc.Notify.SMTP != nil {
+			if fc.Notify.SMTP.Enabled != nil {
+				cfg.Notify.SMTP.Enabled = *fc.Notify.SMTP.Enabled
+				prov["notify.smtp.enabled"] = SourceFile
+			}
+			if fc.Notify.SMTP.Addr != nil {
+				cfg.Notify.SMTP.Addr = strings.TrimSpace(*fc.Notify.SMTP.Addr)
+				prov["notify.smtp.addr"] = SourceFile
+			}
+			if fc.Notify.SMTP.From != nil {
+				cfg.Notify.SMTP.From = strings.TrimSpace(*fc.Notify.SMTP.From)
+				prov["notify.smtp.from"] = SourceFile
+			}
+			if fc.Notify.SMTP.To != nil {
+				cfg.Notify.SMTP.To = strings.TrimSpace(*fc.Notify.SMTP.To)
+				prov["notify.smtp.to"] = SourceFile
+			}
+		}
+		if fc.Notify.Webhook != nil {
+			if fc.Notify.Webhook.Enabled != nil {
+				cfg.Notify.Webhook.Enabled = *fc.Notify.Webhook.Enabled
+				prov["notify.webhook.enabled"] = SourceFile
+			}
+			if fc.Notify.Webhook.URL != nil {
+				cfg.Notify.Webhook.URL = strings.TrimSpace(*fc.Notify.Webhook.URL)
+				prov["notify.webhook.url"] = SourceFile
+			}
+			if fc.Notify.Webhook.Secret != nil {
+				cfg.Notify.Webhook.Secret = strings.TrimSpace(*fc.Notify.Webhook.Secret)
+				prov["notify.webhook.secret"] = SourceFile
+			}
+		}
 	}
 	return nil
 }

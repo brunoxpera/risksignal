@@ -52,6 +52,14 @@ func (c *Config) summaryRows() []summaryRow {
 		{key: "worker.interval", state: c.Worker.Interval.String(), source: src("worker.interval")},
 		{key: "worker.sla_evaluate_interval", state: c.Worker.SLAEvaluateInterval.String(), source: src("worker.sla_evaluate_interval")},
 		{key: "worker.sla_reminder_cadence", state: c.Worker.SLAReminderCadence.String(), source: src("worker.sla_reminder_cadence")},
+		{key: "notify.p2_active", state: strconv.FormatBool(c.Notify.P2Active), source: src("notify.p2_active")},
+		{key: "notify.smtp.enabled", state: strconv.FormatBool(c.Notify.SMTP.Enabled), source: src("notify.smtp.enabled")},
+		{key: "notify.smtp.addr", state: "set", source: src("notify.smtp.addr")},
+		{key: "notify.smtp.from", state: "set", source: src("notify.smtp.from")},
+		{key: "notify.smtp.to", state: "set", source: src("notify.smtp.to")},
+		{key: "notify.webhook.enabled", state: strconv.FormatBool(c.Notify.Webhook.Enabled), source: src("notify.webhook.enabled")},
+		{key: "notify.webhook.url", state: "set", source: src("notify.webhook.url")},
+		{key: "notify.webhook.secret", state: "set", source: src("notify.webhook.secret")},
 	}
 }
 
@@ -70,6 +78,15 @@ type JSONSummary struct {
 	WorkerInterval    ScalarSummary[string] `json:"worker.interval"`
 	WorkerSLAEval     ScalarSummary[string] `json:"worker.sla_evaluate_interval"`
 	WorkerSLAReminder ScalarSummary[string] `json:"worker.sla_reminder_cadence"`
+
+	NotifyP2Active    ScalarSummary[bool] `json:"notify.p2_active"`
+	NotifySMTPEnabled ScalarSummary[bool] `json:"notify.smtp.enabled"`
+	NotifySMTPAddr    PresenceSummary     `json:"notify.smtp.addr"`
+	NotifySMTPFrom    PresenceSummary     `json:"notify.smtp.from"`
+	NotifySMTPTo      PresenceSummary     `json:"notify.smtp.to"`
+	NotifyWebhookOn   ScalarSummary[bool] `json:"notify.webhook.enabled"`
+	NotifyWebhookURL  PresenceSummary     `json:"notify.webhook.url"`
+	NotifyWebhookSec  PresenceSummary     `json:"notify.webhook.secret"`
 }
 
 // ScalarSummary reports the value and provenance of a leaf that cannot carry
@@ -99,5 +116,13 @@ func (c *Config) JSONSummary() JSONSummary {
 		WorkerInterval:    ScalarSummary[string]{Value: c.Worker.Interval.String(), Source: c.sourceOf("worker.interval")},
 		WorkerSLAEval:     ScalarSummary[string]{Value: c.Worker.SLAEvaluateInterval.String(), Source: c.sourceOf("worker.sla_evaluate_interval")},
 		WorkerSLAReminder: ScalarSummary[string]{Value: c.Worker.SLAReminderCadence.String(), Source: c.sourceOf("worker.sla_reminder_cadence")},
+		NotifyP2Active:    ScalarSummary[bool]{Value: c.Notify.P2Active, Source: c.sourceOf("notify.p2_active")},
+		NotifySMTPEnabled: ScalarSummary[bool]{Value: c.Notify.SMTP.Enabled, Source: c.sourceOf("notify.smtp.enabled")},
+		NotifySMTPAddr:    PresenceSummary{Set: true, Source: c.sourceOf("notify.smtp.addr")},
+		NotifySMTPFrom:    PresenceSummary{Set: true, Source: c.sourceOf("notify.smtp.from")},
+		NotifySMTPTo:      PresenceSummary{Set: true, Source: c.sourceOf("notify.smtp.to")},
+		NotifyWebhookOn:   ScalarSummary[bool]{Value: c.Notify.Webhook.Enabled, Source: c.sourceOf("notify.webhook.enabled")},
+		NotifyWebhookURL:  PresenceSummary{Set: true, Source: c.sourceOf("notify.webhook.url")},
+		NotifyWebhookSec:  PresenceSummary{Set: true, Source: c.sourceOf("notify.webhook.secret")},
 	}
 }

@@ -490,6 +490,38 @@ const goldenDiagnoseConfigJSON = `{
     "worker.sla_reminder_cadence": {
       "value": "1h0m0s",
       "source": "default"
+    },
+    "notify.p2_active": {
+      "value": true,
+      "source": "default"
+    },
+    "notify.smtp.enabled": {
+      "value": false,
+      "source": "default"
+    },
+    "notify.smtp.addr": {
+      "set": true,
+      "source": "default"
+    },
+    "notify.smtp.from": {
+      "set": true,
+      "source": "default"
+    },
+    "notify.smtp.to": {
+      "set": true,
+      "source": "default"
+    },
+    "notify.webhook.enabled": {
+      "value": false,
+      "source": "default"
+    },
+    "notify.webhook.url": {
+      "set": true,
+      "source": "default"
+    },
+    "notify.webhook.secret": {
+      "set": true,
+      "source": "default"
     }
   },
   "error": null

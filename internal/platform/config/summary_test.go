@@ -72,7 +72,8 @@ func TestJSONSummaryIsDeterministic(t *testing.T) {
 	}
 
 	// encoding/json renders struct fields in declaration order, so the key
-	// set can be pinned exactly: nine fixed keys, no drift.
+	// set can be pinned exactly: the fixed key set (schema, mode, the I4
+	// notify channels), no drift.
 	want := `{"schema_version":{"value":1,"source":"default"},` +
 		`"env":{"value":"local","source":"default"},` +
 		`"http.addr":{"set":true,"source":"default"},` +
@@ -81,7 +82,15 @@ func TestJSONSummaryIsDeterministic(t *testing.T) {
 		`"auth.bypass_enabled":{"value":false,"source":"default"},` +
 		`"worker.interval":{"value":"30s","source":"default"},` +
 		`"worker.sla_evaluate_interval":{"value":"1m0s","source":"default"},` +
-		`"worker.sla_reminder_cadence":{"value":"1h0m0s","source":"default"}}`
+		`"worker.sla_reminder_cadence":{"value":"1h0m0s","source":"default"},` +
+		`"notify.p2_active":{"value":true,"source":"default"},` +
+		`"notify.smtp.enabled":{"value":false,"source":"default"},` +
+		`"notify.smtp.addr":{"set":true,"source":"default"},` +
+		`"notify.smtp.from":{"set":true,"source":"default"},` +
+		`"notify.smtp.to":{"set":true,"source":"default"},` +
+		`"notify.webhook.enabled":{"value":false,"source":"default"},` +
+		`"notify.webhook.url":{"set":true,"source":"default"},` +
+		`"notify.webhook.secret":{"set":true,"source":"default"}}`
 	if string(first) != want {
 		t.Fatalf("JSONSummary rendered %s, want %s", first, want)
 	}
