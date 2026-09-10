@@ -208,6 +208,53 @@ func TestOverrideDowngradeDoesNotLengthen(t *testing.T) {
 	}
 }
 
+// TestOverrideNeverTightensFulfilledClock proves a fulfilled clock is left
+// untouched by a priority upgrade (ARCH-004 §4.3): its target is already met,
+// so its deadline is neither shortened nor re-opened, while the signal's
+// other unfulfilled clocks are tightened and its missing clocks created.
+func TestOverrideNeverTightensFulfilledClock(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	sig := seedSignalWithFactors(t, h, p3Factors()) // ack 24h, assessment 72h at fixedNow
+
+	// Acknowledge half an hour in: the acknowledgement clock is fulfilled and
+	// the signal moves to in_review.
+	const delta = 30 * time.Minute
+	h.clock.Advance(delta)
+	ackAt := fixedNow.Add(delta)
+	acked, err := h.svc.AcknowledgeSignal(ctx, application.AcknowledgeSignalInput{
+		SignalID: sig.ID, ExpectedVersion: sig.Version, Actor: systemActor("analyst"),
+	})
+	if err != nil {
+		t.Fatalf("AcknowledgeSignal: %v", err)
+	}
+
+	// Upgrade to P1: it must not touch the fulfilled acknowledgement clock.
+	if _, err := h.svc.OverridePriority(ctx, application.OverridePriorityInput{
+		SignalID: sig.ID, Priority: domain.PriorityP1, Reason: "KEV added", ExpectedVersion: acked.Version, Actor: systemActor("analyst"),
+	}); err != nil {
+		t.Fatalf("OverridePriority: %v", err)
+	}
+
+	// The fulfilled acknowledgement clock kept its deadline and started_at.
+	ack, ok := h.db.slaClockByKey(sig.ID, domain.SLATargetAcknowledgement)
+	if !ok || !ack.Fulfilled() || !ack.FulfilledAt.Equal(ackAt) {
+		t.Fatalf("acknowledgement clock = %+v (ok=%v), want fulfilled at %v", ack, ok, ackAt)
+	}
+	if !ack.StartedAt.Equal(fixedNow) || !ack.DeadlineAt.Equal(fixedNow.Add(24*time.Hour)) {
+		t.Fatalf("fulfilled acknowledgement clock = started %v deadline %v, want the untouched %v / %v",
+			ack.StartedAt, ack.DeadlineAt, fixedNow, fixedNow.Add(24*time.Hour))
+	}
+	// The unfulfilled assessment clock is tightened to the P1 deadline.
+	assess, _ := h.db.slaClockByKey(sig.ID, domain.SLATargetAssessment)
+	if !assess.StartedAt.Equal(fixedNow) || !assess.DeadlineAt.Equal(ackAt.Add(60*time.Minute)) {
+		t.Fatalf("assessment clock = %+v, want started %v tightened to %v", assess, fixedNow, ackAt.Add(60*time.Minute))
+	}
+	// The missing P1 clocks are created; exactly one tighten (assessment) and
+	// two creates (notification, decision) are audited.
+	assertClockAudits(t, h, 2, 1)
+}
+
 // TestUpgradeOutboxFaultRollsBackClockTreatment arms the outbox fault seam of
 // the override: the failing append rolls the override — and the clock creates
 // and tightens it staged — back with it. No half-state (TR-004).
