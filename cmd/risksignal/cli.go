@@ -25,8 +25,8 @@ const (
 	exitOK             = 0 // success
 	exitGeneric        = 1 // generic/unknown runtime failure
 	exitValidation     = 2 // unknown command, invalid arguments, invalid configuration
-	exitAuthentication = 3 // authentication failed (reserved: OIDC lands in a later iteration)
-	exitAuthorisation  = 4 // authorisation denied (reserved: permission checks land later)
+	exitAuthentication = 3 // authentication failed (no/expired login, provider denial)
+	exitAuthorisation  = 4 // authorisation denied (a permission gate rejected the command)
 	exitConflict       = 5 // state conflict (e.g. an applied migration was modified, ADR-010)
 	exitInfrastructure = 6 // infrastructure failure (database host unreachable, ...)
 )
@@ -359,8 +359,8 @@ exit codes:
   0  success
   1  generic/unknown failure
   2  validation (unknown command, invalid arguments, invalid configuration)
-  3  authentication (reserved, OIDC lands in a later iteration)
-  4  authorisation (reserved)
+  3  authentication (missing/expired login, or the provider denied it)
+  4  authorisation (a permission gate denied the command)
   5  conflict (for example an applied migration was modified, ADR-010)
   6  infrastructure (database host unreachable)
 

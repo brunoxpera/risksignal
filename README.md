@@ -305,6 +305,52 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
       RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
         bin/risksignal signal acknowledge --signal <id> --version 1 \
           --as local::security-analyst --output json
+- `signal list [--limit <n>] [--cursor <c>] [--priority <P1..P4>]
+  [--status <status>]` and `signal show --signal <id>` — the `signals.read`
+  working list and detail views (WP-5b.08 / DEV-103, ARCH-001 §4, ARCH-006 §5):
+  1:1 with `GET /api/v1/signals` and `GET /api/v1/signals/{id}`, driving the
+  same application use cases behind the same `signals.read` gate. The list is
+  cursor-paged (`--limit`/`--cursor`, the opaque `next_cursor` from the
+  previous page) and filterable by `--priority` and `--status`; `show` renders
+  one signal's detail view. Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal signal list --limit 20 --status new --output json
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal signal show --signal <id> --output json
+- `signal assign --signal <id> (--owner <id>|--clear) --version <n>`,
+  `signal transition --signal <id> --to <status> [--reason <text>] --version <n>`,
+  `signal comment --signal <id> --comment <text>`,
+  `signal revert --signal <id> --version <n>`,
+  `signal pause --signal <id> --target <t> --reason <text>` and
+  `signal resume --signal <id> --target <t> --reason <text>` — the remaining
+  I5b triage commands (WP-5b.08 / DEV-103, ARCH-006 §1.1/§5): 1:1 with the API
+  `POST /api/v1/signals/{signal_id}/commands` vocabulary (`assign_owner`,
+  `change_status`, `add_comment`, `revert_priority`, `pause_sla`, `resume_sla`),
+  driving the same use cases with the same in-command permission gates and the
+  same audit — the application layer is the single gate of record, so no
+  channel bypasses it (NFR-013 channel parity). `--owner` and `--clear` are
+  mutually exclusive; `transition` needs the target `--to` status
+  (`new`, `in_review`, `action_planned`, `resolved`, `accepted`,
+  `not_affected`) plus a `--reason` on the closed-entry/reopen edges; `comment`
+  is append-only and not version-guarded; `pause`/`resume` are
+  clock-state-guarded and name one SLA target
+  (`notification|acknowledgement|assessment|decision`) with a mandatory
+  `--reason`. The version-guarded commands (`assign`, `transition`, `revert`)
+  take the optimistic-lock `--version`. Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal signal assign --signal <id> --owner local::security-analyst --version 1
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal signal transition --signal <id> --to in_review --version 1
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal signal comment --signal <id> --comment "triaged: not affected"
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal signal revert --signal <id> --version 2
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal signal pause --signal <id> --target acknowledgement --reason "vendor outage"
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal signal resume --signal <id> --target acknowledgement --reason "vendor back"
 - `maintenance retention`, `maintenance recompute` — recognised but not yet
   implemented; they print "not yet implemented" and exit 1.
 - `diagnose config` — the WP-1a.02 provenance report: source of every
@@ -486,6 +532,47 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
 
       RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
         bin/risksignal quarantine reprocess <id> --output json
+- `user list [--limit <n>] [--cursor <c>]`,
+  `user grant --user <id> --role <role>`,
+  `user revoke --user <id> --role <role>` and
+  `user deactivate --user <id> --yes` — the user/role administration surface
+  (WP-5b.08 / DEV-103, ARCH-006 §3.3/§5): 1:1 with the API endpoints
+  `GET /api/v1/users`, `PATCH /api/v1/users/{id}/roles` and
+  `POST /api/v1/users/{id}/deactivate`, driving the same use cases behind the
+  same `users.roles.manage` gate (deny-by-default) and the same audit. The
+  list is cursor-paged; `--role` is one of `security_analyst`,
+  `system_responsible`, `administrator`, `auditor`, `product_owner`.
+  `user deactivate` is destructive (deactivate-never-delete, ADR-014) and
+  requires the explicit `--yes` confirmation — the CLI never prompts. Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal user list --output json
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal user grant --user <id> --role auditor
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal user revoke --user <id> --role auditor
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal user deactivate --user <id> --yes
+- `auth login [--issuer <url>] [--flow device|loopback]`,
+  `auth status [--issuer <url>]` and `auth logout [--issuer <url>]` — the OIDC
+  login plumbing for remote/API automation (WP-5b.08 / DEV-103, concept
+  ch. 11.3/12.1, ARCH-005 §2, ARCH-006 §5): `auth login` obtains a token set
+  through the provider's Device Authorization Flow (RFC 8628, the default) or
+  the loopback Authorization Code + PKCE flow and persists it in the
+  OS-user-scoped credential store; the tokens are never logged or rendered —
+  only the non-secret identity (issuer, subject, display name, expiry) is
+  printed. `auth status` reports the stored login and exits 3 when no login is
+  stored or the stored token has expired, so automation can branch without
+  parsing output; `auth logout` removes the stored credential (the whole store
+  when no issuer is named) and is idempotent — a missing credential is a
+  success with `removed: 0`, never a prompt. `auth login` is the one command
+  that runs a provider interaction (the provider's approval page is the
+  interaction; the CLI itself prompts for nothing). Example:
+
+      RISKSIGNAL_OIDC_ISSUER=... RISKSIGNAL_OIDC_CLIENT_ID=... \
+        bin/risksignal auth login --flow device
+      bin/risksignal auth status --output json
+      bin/risksignal auth logout
 - `help` — usage text.
 
 Exit codes are part of the automation contract — branch on them, never on
@@ -496,8 +583,8 @@ parsed output:
 | 0 | success | command completed |
 | 1 | generic/unknown | runtime failure without a more specific class; not-yet-implemented commands |
 | 2 | validation | unknown command/subcommand, invalid or missing arguments, invalid configuration |
-| 3 | authentication | reserved — OIDC authentication lands in a later iteration and is not exercised yet |
-| 4 | authorisation | reserved — permission checks land later |
+| 3 | authentication | no valid login — a missing/expired stored `auth` credential (`auth status`) or a provider denial/expired token on `auth login` |
+| 4 | authorisation | denied by a permission gate — the in-command `signals.*` / `users.roles.manage` checks rejected the acting identity |
 | 5 | conflict | state conflict, e.g. an applied migration was modified (ADR-010) |
 | 6 | infrastructure | database host unreachable, connection failures |
 
@@ -539,6 +626,20 @@ remains the default output; help output is always human-oriented. Examples:
       bin/risksignal quarantine ack <id> --note "reviewed"
     RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
       bin/risksignal quarantine reprocess <id> --output json
+
+    RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+      bin/risksignal signal list --status new   # the signals.read working list
+    RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+      bin/risksignal signal transition --signal <id> --to in_review --version 1
+
+    RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+      bin/risksignal user list                   # users and their roles
+    RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+      bin/risksignal user grant --user <id> --role auditor
+
+    RISKSIGNAL_OIDC_ISSUER=... RISKSIGNAL_OIDC_CLIENT_ID=... \
+      bin/risksignal auth login --flow device    # tokens -> OS credential store
+    bin/risksignal auth status; echo $?          # 3 (authentication) when logged out
 
     RISKSIGNAL_DATABASE_URL=postgres://u:p@127.0.0.1:1/rs \
       bin/risksignal diagnose connectivity; echo $?   # 6 (infrastructure)
