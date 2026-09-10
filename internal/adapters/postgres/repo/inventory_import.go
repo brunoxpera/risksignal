@@ -26,6 +26,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -56,12 +57,24 @@ var _ application.InventoryImportRepo = (*InventoryImportRepo)(nil)
 func (r *InventoryImportRepo) Insert(ctx context.Context, tx application.Tx, rec application.InventoryImportRecord) (application.InventoryImportRecord, error) {
 	const op = "inventory_import.insert"
 
+	rows, err := inventoryCounterToInt32(op, "rows", rec.Rows)
+	if err != nil {
+		return application.InventoryImportRecord{}, err
+	}
+	errorCount, err := inventoryCounterToInt32(op, "error_count", rec.ErrorCount)
+	if err != nil {
+		return application.InventoryImportRecord{}, err
+	}
+	warningCount, err := inventoryCounterToInt32(op, "warning_count", rec.WarningCount)
+	if err != nil {
+		return application.InventoryImportRecord{}, err
+	}
 	row, err := r.q.WithTx(tx).InsertInventoryImport(ctx, gen.InsertInventoryImportParams{
 		Status:        string(rec.Status),
 		File:          rec.File,
-		Rows:          int32(rec.Rows),
-		ErrorCount:    int32(rec.ErrorCount),
-		WarningCount:  int32(rec.WarningCount),
+		Rows:          rows,
+		ErrorCount:    errorCount,
+		WarningCount:  warningCount,
 		ActorID:       rec.ActorID,
 		CorrelationID: toTextOpt(rec.CorrelationID),
 		CreatedAt:     toTS(rec.CreatedAt),
@@ -102,12 +115,28 @@ func (r *InventoryImportRepo) MarkCommitted(ctx context.Context, tx application.
 	if err != nil {
 		return application.InventoryImportRecord{}, false, application.ValidationError(op, err)
 	}
+	assetsCreated, err := inventoryCounterToInt32(op, "assets_created", counts.AssetsCreated)
+	if err != nil {
+		return application.InventoryImportRecord{}, false, err
+	}
+	assetsUpdated, err := inventoryCounterToInt32(op, "assets_updated", counts.AssetsUpdated)
+	if err != nil {
+		return application.InventoryImportRecord{}, false, err
+	}
+	componentsCreated, err := inventoryCounterToInt32(op, "components_created", counts.ComponentsCreated)
+	if err != nil {
+		return application.InventoryImportRecord{}, false, err
+	}
+	componentsUpdated, err := inventoryCounterToInt32(op, "components_updated", counts.ComponentsUpdated)
+	if err != nil {
+		return application.InventoryImportRecord{}, false, err
+	}
 	row, err := r.q.WithTx(tx).MarkInventoryImportCommitted(ctx, gen.MarkInventoryImportCommittedParams{
 		Now:               toTS(now),
-		AssetsCreated:     int32(counts.AssetsCreated),
-		AssetsUpdated:     int32(counts.AssetsUpdated),
-		ComponentsCreated: int32(counts.ComponentsCreated),
-		ComponentsUpdated: int32(counts.ComponentsUpdated),
+		AssetsCreated:     assetsCreated,
+		AssetsUpdated:     assetsUpdated,
+		ComponentsCreated: componentsCreated,
+		ComponentsUpdated: componentsUpdated,
 		ID:                uid,
 	})
 	if err != nil {
@@ -136,6 +165,17 @@ func (r *InventoryImportRepo) List(ctx context.Context) ([]application.Inventory
 		out = append(out, inventoryImportRecordFrom(row))
 	}
 	return out, nil
+}
+
+// inventoryCounterToInt32 narrows one non-negative inventory-import counter to
+// the int32 range of its column; a value the column cannot hold is a
+// validation error (never a silent truncation), the same guard the other
+// narrowings use (signaltriage.versionInt32, component.ListComponentsPage).
+func inventoryCounterToInt32(op, name string, v int) (int32, error) {
+	if v < 0 || v > math.MaxInt32 {
+		return 0, application.Validationf(op, "%s %d outside the int32 range", name, v)
+	}
+	return int32(v), nil
 }
 
 // inventoryImportRecordFrom maps a stored inventory_imports row onto the
