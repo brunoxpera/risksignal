@@ -30,10 +30,19 @@ const (
 	titleInvalidRequest     = "Invalid request"
 	titleSignalNotFound     = "Signal not found"
 	titleAuditEventNotFound = "Audit event not found"
-	titleConflict           = "Conflict"
-	titleUnauthorized       = "Unauthorized"
-	titleForbidden          = "Forbidden"
-	titleInternalError      = "Internal server error"
+	// titleAssetNotFound is the 404 of an unknown asset id (the I5b asset
+	// reads). titleInventoryImportNotFound is the 404 of an unknown staged
+	// import id; titleUserNotFound the 404 of an unknown user id in the admin
+	// writes; titlePayloadTooLarge the 413 of an inventory upload beyond
+	// InventoryMaxBytes.
+	titleAssetNotFound           = "Asset not found"
+	titleInventoryImportNotFound = "Inventory import not found"
+	titleUserNotFound            = "User not found"
+	titlePayloadTooLarge         = "Payload too large"
+	titleConflict                = "Conflict"
+	titleUnauthorized            = "Unauthorized"
+	titleForbidden               = "Forbidden"
+	titleInternalError           = "Internal server error"
 )
 
 // newProblem assembles one RFC 9457 problem detail (ARCH-001 §4

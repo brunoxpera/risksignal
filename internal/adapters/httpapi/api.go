@@ -17,13 +17,16 @@ import (
 
 // apiHandlers composes the per-domain strict-server implementations into the
 // single gen.StrictServerInterface the generated registration mounts. The
-// embedded method sets are disjoint (the signal reads and the audit reveal),
-// so embedding yields the full interface without forwarding boilerplate.
+// embedded method sets are disjoint (the signal reads, the audit reveal, the
+// signal command and the I5b inventory/assets/admin operations), so embedding
+// yields the full interface without forwarding boilerplate.
 type apiHandlers struct {
 	*signalsHandler
 	auditRevealHandler
 	signalCommandHandler
-	i5bContractHandlers
+	*inventoryImportHandler
+	*assetsHandler
+	*userAdminHandler
 }
 
 // Compile-time proof that the composed handler implements every generated
@@ -40,18 +43,28 @@ var _ gen.StrictServerInterface = (*apiHandlers)(nil)
 // is a programming error and panics here, at construction time, like
 // application.NewService does; a nil reveal leaves the reveal route answering
 // a 500 (a composition root that does not serve it).
-func NewAPIHandler(query SignalsQuery, reveal AuditReveal, commands SignalCommands, logger *slog.Logger) gen.ServerInterface {
+//
+// The optional i5b argument carries the staged-import, asset-read and
+// user/role-admin surfaces (at most one value); when absent (or a field of it
+// nil) that group answers the generic 500, like a nil reveal.
+func NewAPIHandler(query SignalsQuery, reveal AuditReveal, commands SignalCommands, logger *slog.Logger, i5b ...I5BAPI) gen.ServerInterface {
 	if query == nil {
 		panic("httpapi: NewAPIHandler: query must not be nil")
 	}
 	if logger == nil {
 		panic("httpapi: NewAPIHandler: logger must not be nil")
 	}
+	var surfaces I5BAPI
+	if len(i5b) > 0 {
+		surfaces = i5b[0]
+	}
 	h := &apiHandlers{
-		signalsHandler:       &signalsHandler{query: query, logger: logger},
-		auditRevealHandler:   auditRevealHandler{reveal: reveal, logger: logger},
-		signalCommandHandler: signalCommandHandler{commands: commands, logger: logger},
-		i5bContractHandlers:  i5bContractHandlers{logger: logger},
+		signalsHandler:         &signalsHandler{query: query, logger: logger},
+		auditRevealHandler:     auditRevealHandler{reveal: reveal, logger: logger},
+		signalCommandHandler:   signalCommandHandler{commands: commands, logger: logger},
+		inventoryImportHandler: &inventoryImportHandler{imports: surfaces.Inventory, logger: logger},
+		assetsHandler:          &assetsHandler{assets: surfaces.Assets, logger: logger},
+		userAdminHandler:       &userAdminHandler{admin: surfaces.Users, logger: logger},
 	}
 	return gen.NewStrictHandlerWithOptions(h, []gen.StrictMiddlewareFunc{recordRequestPath},
 		gen.StrictHTTPServerOptions{

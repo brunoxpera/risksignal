@@ -17,13 +17,26 @@ import (
 // keeps endpoints that never read a body protected too, and makes the 413
 // visible on the live server before any route exists.
 func LimitBody(maxBytes int64) Middleware {
+	return LimitBodyFor(maxBytes, nil)
+}
+
+// LimitBodyFor is LimitBody with a per-path override: a request whose path
+// exactly matches an override key is capped at the override instead of
+// maxBytes. It exists for bulk upload routes (the inventory-import CSV,
+// bounded by the larger application.InventoryMaxBytes) mounted on the same mux
+// as the default JSON endpoints. A nil/empty overrides map is LimitBody.
+func LimitBodyFor(maxBytes int64, overrides map[string]int64) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.ContentLength > maxBytes {
+			limit := maxBytes
+			if o, ok := overrides[r.URL.Path]; ok {
+				limit = o
+			}
+			if r.ContentLength > limit {
 				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 			next.ServeHTTP(w, r)
 		})
 	}

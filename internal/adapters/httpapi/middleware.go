@@ -37,16 +37,41 @@ func Chain(middlewares ...Middleware) Middleware {
 
 // MaxBodyBytes caps request bodies accepted by NewHandler (concept ch. 12.3:
 // strict input limits). One MiB covers the JSON payloads of the planned API;
-// bulk uploads, if any later work package defines them, get their own
-// documented limit.
+// the bulk-upload routes (the inventory-import CSV) raise their own limit
+// through BodyLimitOverride.
 const MaxBodyBytes int64 = 1 << 20 // 1 MiB
+
+// HandlerOption customises the WP-1a.06 chain built by NewHandler and
+// NewHandlerWithAuth.
+type HandlerOption func(*handlerConfig)
+
+// handlerConfig accumulates the optional chain overrides.
+type handlerConfig struct {
+	// bodyLimitOverrides raises (or lowers) the request-body cap of an exact
+	// request path above the chain default (MaxBodyBytes).
+	bodyLimitOverrides map[string]int64
+}
+
+// BodyLimitOverride raises the request-body cap of one exact request path
+// above the chain default MaxBodyBytes. It exists for the inventory-import
+// upload, whose CSV is bounded by application.InventoryMaxBytes (16 MiB)
+// rather than by the JSON default; every other path keeps the default limit.
+func BodyLimitOverride(path string, maxBytes int64) HandlerOption {
+	return func(c *handlerConfig) {
+		if c.bodyLimitOverrides == nil {
+			c.bodyLimitOverrides = make(map[string]int64)
+		}
+		c.bodyLimitOverrides[path] = maxBytes
+	}
+}
 
 // NewHandler wraps h with the complete WP-1a.06 middleware chain, outermost
 // first. Every request — matched or not — passes through the whole chain, so
 // a 404 from an as-yet empty ServeMux still carries a correlation ID, the
 // security headers and a structured access log record (WP-1a.08: the logger
 // is a *log/slog.Logger from internal/platform/logging).
-func NewHandler(h http.Handler, logger *slog.Logger) http.Handler {
+func NewHandler(h http.Handler, logger *slog.Logger, opts ...HandlerOption) http.Handler {
+	cfg := newHandlerConfig(opts)
 	return Chain(
 		CorrelationID,
 		AccessLog(logger),
@@ -54,15 +79,27 @@ func NewHandler(h http.Handler, logger *slog.Logger) http.Handler {
 		SecurityHeaders,
 		ContentSecurityPolicy,
 		CORSDisabled,
-		LimitBody(MaxBodyBytes),
+		LimitBodyFor(MaxBodyBytes, cfg.bodyLimitOverrides),
 	)(h)
+}
+
+// newHandlerConfig folds the options into the chain configuration.
+func newHandlerConfig(opts []HandlerOption) handlerConfig {
+	var cfg handlerConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	return cfg
 }
 
 // NewHandlerWithAuth wraps h with the complete WP-1a.06 middleware chain plus
 // the given authentication middleware (WP-5a.05) as the innermost layer, so
 // an authentication failure (401) still carries the correlation id, the
 // security headers and the access-log record of the chain.
-func NewHandlerWithAuth(h http.Handler, logger *slog.Logger, auth Middleware) http.Handler {
+func NewHandlerWithAuth(h http.Handler, logger *slog.Logger, auth Middleware, opts ...HandlerOption) http.Handler {
+	cfg := newHandlerConfig(opts)
 	return Chain(
 		CorrelationID,
 		AccessLog(logger),
@@ -70,7 +107,7 @@ func NewHandlerWithAuth(h http.Handler, logger *slog.Logger, auth Middleware) ht
 		SecurityHeaders,
 		ContentSecurityPolicy,
 		CORSDisabled,
-		LimitBody(MaxBodyBytes),
+		LimitBodyFor(MaxBodyBytes, cfg.bodyLimitOverrides),
 		auth,
 	)(h)
 }

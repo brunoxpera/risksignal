@@ -180,9 +180,27 @@ func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (ht
 	// declaration documents the triage permission, the finer override gate
 	// lives inside the use case (the gate of record).
 	gate.Declare("POST /api/v1/signals/{signal_id}/commands", domain.PermissionSignalsTriage)
-	httpapi.RegisterAPIRoutes(gate.Decorate(mux), httpapi.NewAPIHandler(svc, svc, svc, logger))
+	// The I5b operations (ARCH-006 §2/§3.3) declare their per-route permission
+	// here; the use case remains the gate of record. The staged inventory
+	// import and the asset reads carry inventory.manage / inventory.read; the
+	// user/role administration carries users.roles.manage.
+	gate.Declare("POST /api/v1/inventory/imports", domain.PermissionInventoryManage)
+	gate.Declare("GET /api/v1/inventory/imports/{id}", domain.PermissionInventoryManage)
+	gate.Declare("POST /api/v1/inventory/imports/{id}/commit", domain.PermissionInventoryManage)
+	gate.Declare("GET /api/v1/assets", domain.PermissionInventoryRead)
+	gate.Declare("GET /api/v1/assets/{id}/components", domain.PermissionInventoryRead)
+	gate.Declare("GET /api/v1/users", domain.PermissionUsersRolesManage)
+	gate.Declare("GET /api/v1/roles", domain.PermissionUsersRolesManage)
+	gate.Declare("PATCH /api/v1/users/{id}/roles", domain.PermissionUsersRolesManage)
+	gate.Declare("POST /api/v1/users/{id}/deactivate", domain.PermissionUsersRolesManage)
 
-	return httpapi.NewHandlerWithAuth(mux, logger, auth), nil
+	i5b := httpapi.I5BAPI{Inventory: svc, Assets: svc, Users: svc}
+	httpapi.RegisterAPIRoutes(gate.Decorate(mux), httpapi.NewAPIHandler(svc, svc, svc, logger, i5b))
+
+	// The inventory-import upload is bounded by InventoryMaxBytes (the I5b
+	// staged CSV), not by the 1 MiB JSON default of the chain.
+	return httpapi.NewHandlerWithAuth(mux, logger, auth,
+		httpapi.BodyLimitOverride("POST /api/v1/inventory/imports", application.InventoryMaxBytes)), nil
 }
 
 // buildAuthMiddleware assembles the I5a authentication middleware from the
@@ -268,6 +286,13 @@ func newSignalService(pool *pgxpool.Pool) *application.Service {
 		Components:      repo.NewComponentRepo(q),
 		Inventory:       repo.NewInventoryRepo(q),
 		Users:           repo.NewUserRepo(q),
+		// The I5b read/admin ports (ARCH-006 §2/§3.3, WP-5b.03/DEV-101): the
+		// asset reads, the staged-import persistence (the DEV-099 review
+		// follow-up adapter) and the user/role administration read models.
+		Assets:           repo.NewAssetRepo(q),
+		InventoryReader:  repo.NewInventoryRepo(q),
+		InventoryImports: repo.NewInventoryImportRepo(q),
+		UserAdmin:        repo.NewUserRepo(q),
 		// The I5a reference command endpoint (ARCH-005 §8) drives the I4
 		// triage commands, so the server composition root wires the triage/
 		// SLA/priority ports the use cases author and persist through.
