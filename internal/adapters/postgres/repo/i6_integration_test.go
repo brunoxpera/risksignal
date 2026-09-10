@@ -445,6 +445,60 @@ func TestI6PersistenceIntegration(t *testing.T) {
 	if got := exportRowIDs(byNoClock); !slices.Equal(got, []string{s1, s2, s4}) {
 		t.Fatalf("sla_state none export = %v, want [%s %s %s]", got, s1, s2, s4)
 	}
+
+	// 6. Paused clock (DEV-113 corrective): while a clock is paused its
+	// effective deadline shifts FORWARD by the elapsed pause
+	// (deadline_at + paused_seconds + (now − paused_at)), mirroring
+	// ScanDueSlaClocks and domain.SlaClock.EffectiveDeadline — a paused clock
+	// is never pulled backward. Two P4 signals sharing product "sprocket":
+	// s5 has a paused clock whose raw deadline_at (03-19) is earlier than
+	// s6's unpaused clock (03-20), but the accumulated pause pushes s5's
+	// effective deadline to 03-21 — so s6 must sort first.
+	s5 := i6Seed(t, ctx, pool, "i6-a5", i6SignalSeed{assetType: "server", product: "sprocket", cve: "CVE-2026-1005", priority: "P4", status: "new", owner: "dave", createdAt: mustTime("2026-03-02T00:00:00Z")})
+	s6 := i6Seed(t, ctx, pool, "i6-a6", i6SignalSeed{assetType: "server", product: "sprocket", cve: "CVE-2026-1006", priority: "P4", status: "new", owner: "dave", createdAt: mustTime("2026-03-03T00:00:00Z")})
+	// s5: paused since 03-18 with the past deadline 03-19 plus 1h accumulated
+	// pause → effective 03-19 + 1h + (03-20 − 03-18) = 03-21T01:00, still
+	// open; the inverted sign would give 03-17T01:00, breached.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO sla_clocks (signal_id, target, started_at, deadline_at, paused_seconds, paused_at)
+		VALUES ($1, 'assessment', $2, $3, 3600, $4)`,
+		s5, mustTime("2026-03-01T00:00:00Z"), mustTime("2026-03-19T00:00:00Z"), mustTime("2026-03-18T00:00:00Z")); err != nil {
+		t.Fatalf("seed paused sla clock: %v", err)
+	}
+	// s6: the unpaused comparison clock with the later raw deadline 03-20.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO sla_clocks (signal_id, target, started_at, deadline_at)
+		VALUES ($1, 'assessment', $2, $3)`,
+		s6, mustTime("2026-03-01T00:00:00Z"), mustTime("2026-03-20T00:00:00Z")); err != nil {
+		t.Fatalf("seed comparison sla clock: %v", err)
+	}
+
+	// s5's effective deadline (03-21) is later than s6's (03-20), so s6 sorts
+	// first despite s5's earlier raw deadline — the deadline moved forward.
+	sprockets, err := q.SignalExportSource(ctx, gen.SignalExportSourceParams{Now: now, Product: toTextOpt("sprocket")})
+	if err != nil {
+		t.Fatalf("signal export source (sprocket): %v", err)
+	}
+	if got := exportRowIDs(sprockets); !slices.Equal(got, []string{s6, s5}) {
+		t.Fatalf("paused-clock export order = %v, want [%s %s] (effective deadline shifts forward)", got, s6, s5)
+	}
+
+	// The paused clock is open, not breached: the inverted sign would place
+	// its effective deadline (03-17) in the past and surface it as breached.
+	pausedOpen, err := q.SignalExportSource(ctx, gen.SignalExportSourceParams{Now: now, Cve: toTextOpt("CVE-2026-1005"), SlaState: toTextOpt("open")})
+	if err != nil {
+		t.Fatalf("filter paused clock sla_state open: %v", err)
+	}
+	if got := exportRowIDs(pausedOpen); !slices.Equal(got, []string{s5}) {
+		t.Fatalf("paused clock sla_state open = %v, want [%s]", got, s5)
+	}
+	pausedBreached, err := q.SignalExportSource(ctx, gen.SignalExportSourceParams{Now: now, Cve: toTextOpt("CVE-2026-1005"), SlaState: toTextOpt("breached")})
+	if err != nil {
+		t.Fatalf("filter paused clock sla_state breached: %v", err)
+	}
+	if got := exportRowIDs(pausedBreached); len(got) != 0 {
+		t.Fatalf("paused clock sla_state breached = %v, want none", got)
+	}
 }
 
 // retentionCandidateIDs projects the retention candidate rows onto their id strings.
