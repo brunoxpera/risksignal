@@ -6,11 +6,18 @@ import (
 	"testing"
 )
 
-// §4 row 1 — priority is never conveyed by colour alone: text, a symbol and a
-// machine-readable data-priority attribute are all present, and they survive
-// CSS removal (they are plain text/attributes).
-func TestPriorityBadgeNotColourOnly(t *testing.T) {
-	h := newTestWeb(t, sampleFake(), allRoles())
+// The §11.2 UX-guardrail assertions (ARCH-006 §4). Each guardrail is one
+// helper so both the DEV-102 view tests below and the I5b exit-criteria
+// umbrella (i5b_exit_criteria_guardrails_test.go) run the exact same gate —
+// the exit criterion "UX guardrails from ch. 11.2 met" is satisfied by these
+// automated checks.
+
+// assertGuardrailPriorityColourIndependent — §4 row 1: priority is never
+// conveyed by colour alone. Text, a symbol and a machine-readable
+// data-priority attribute are all present, and they survive CSS removal (they
+// are plain text/attributes).
+func assertGuardrailPriorityColourIndependent(t *testing.T, h http.Handler) {
+	t.Helper()
 	body := get(t, h, "/signals").Body.String()
 
 	if !strings.Contains(body, `data-priority="P1"`) {
@@ -24,10 +31,10 @@ func TestPriorityBadgeNotColourOnly(t *testing.T) {
 	}
 }
 
-// §4 row 2 — confidence uses the explicit vocabulary, never an unqualified
-// "affected".
-func TestConfidenceVocabulary(t *testing.T) {
-	h := newTestWeb(t, sampleFake(), allRoles())
+// assertGuardrailConfidenceVocabulary — §4 row 2: confidence uses the explicit
+// vocabulary, never an unqualified "affected".
+func assertGuardrailConfidenceVocabulary(t *testing.T, h http.Handler) {
+	t.Helper()
 	body := get(t, h, "/signals/s1").Body.String()
 	if !strings.Contains(body, "confirmed") {
 		t.Errorf("high confidence must render as %q", "confirmed")
@@ -48,10 +55,11 @@ func TestConfidenceVocabulary(t *testing.T) {
 	}
 }
 
-// §4 row 3 — destructive forms render target scope + a confirmation token, and
-// the server rejects the POST without it.
-func TestDestructiveConfirmation(t *testing.T) {
-	h := newTestWeb(t, sampleFake(), allRoles())
+// assertGuardrailDestructiveConfirmation — §4 row 3: destructive forms render
+// target scope + a confirmation token, and the server rejects the POST without
+// it.
+func assertGuardrailDestructiveConfirmation(t *testing.T, h http.Handler) {
+	t.Helper()
 	rec := get(t, h, "/signals/s1")
 	csrf := csrfFrom(t, rec)
 	page := rec.Body.String()
@@ -84,9 +92,10 @@ func TestDestructiveConfirmation(t *testing.T) {
 	}
 }
 
-// §4 row 4 — filters round-trip through the URL and are re-stated.
-func TestFiltersRoundTrip(t *testing.T) {
-	h := newTestWeb(t, sampleFake(), allRoles())
+// assertGuardrailFiltersInURL — §4 row 4: filters round-trip through the URL
+// and are re-stated.
+func assertGuardrailFiltersInURL(t *testing.T, h http.Handler) {
+	t.Helper()
 	body := get(t, h, "/signals?priority=P1&status=new").Body.String()
 
 	if !strings.Contains(body, `<option value="P1" selected>`) {
@@ -97,9 +106,10 @@ func TestFiltersRoundTrip(t *testing.T) {
 	}
 }
 
-// §4 row 5 — semantic landmarks, labelled inputs and a visible-focus rule.
-func TestAccessibilityLandmarks(t *testing.T) {
-	h := newTestWeb(t, sampleFake(), allRoles())
+// assertGuardrailAccessibility — §4 row 5: semantic landmarks, labelled inputs
+// and a visible-focus rule.
+func assertGuardrailAccessibility(t *testing.T, h http.Handler) {
+	t.Helper()
 	body := get(t, h, "/signals").Body.String()
 	for _, want := range []string{"<main", "<nav", "<table", "<caption", "<label", "<button"} {
 		if !strings.Contains(body, want) {
@@ -112,10 +122,10 @@ func TestAccessibilityLandmarks(t *testing.T) {
 	}
 }
 
-// §4 row 6 — the P1/P2 SLA countdown updates via a fragment endpoint, not a
-// full page reload.
-func TestSLACountdownFragment(t *testing.T) {
-	h := newTestWeb(t, sampleFake(), allRoles())
+// assertGuardrailSLACountdownFragment — §4 row 6: the P1/P2 SLA countdown
+// updates via a fragment endpoint, not a full page reload.
+func assertGuardrailSLACountdownFragment(t *testing.T, h http.Handler) {
+	t.Helper()
 
 	// The fragment endpoint returns the partial.
 	rec := get(t, h, "/signals/_sla")
@@ -135,4 +145,30 @@ func TestSLACountdownFragment(t *testing.T) {
 	if !strings.Contains(page, "/assets/app.js") {
 		t.Errorf("triage page must load the progressive script")
 	}
+}
+
+// --- DEV-102 view tests (the §11.2 gate, ARCH-006 §4) ----------------------
+
+func TestPriorityBadgeNotColourOnly(t *testing.T) {
+	assertGuardrailPriorityColourIndependent(t, newTestWeb(t, sampleFake(), allRoles()))
+}
+
+func TestConfidenceVocabulary(t *testing.T) {
+	assertGuardrailConfidenceVocabulary(t, newTestWeb(t, sampleFake(), allRoles()))
+}
+
+func TestDestructiveConfirmation(t *testing.T) {
+	assertGuardrailDestructiveConfirmation(t, newTestWeb(t, sampleFake(), allRoles()))
+}
+
+func TestFiltersRoundTrip(t *testing.T) {
+	assertGuardrailFiltersInURL(t, newTestWeb(t, sampleFake(), allRoles()))
+}
+
+func TestAccessibilityLandmarks(t *testing.T) {
+	assertGuardrailAccessibility(t, newTestWeb(t, sampleFake(), allRoles()))
+}
+
+func TestSLACountdownFragment(t *testing.T) {
+	assertGuardrailSLACountdownFragment(t, newTestWeb(t, sampleFake(), allRoles()))
 }
