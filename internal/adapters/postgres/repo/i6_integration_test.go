@@ -3,7 +3,7 @@ package repo
 // Integration test for the I6 operations schema and queries (ARCH-007
 // §1.2/§2.1/§2.2/§2.3, WP-6.02 / DEV-112, migration 00011/00012): the export
 // CRUD (insert → read → mark completed / failed → sweep), the retention
-// candidate scan (closed + expired signals in, held/open/recent out), the
+// candidate scan (closed + expired signals in, held SIGNALLED, open/recent out), the
 // legal-hold CRUD (create → active check → release, set-once), the retention
 // run lifecycle (dry_run → approved → executing → completed / failed with the
 // status gate), and the streaming SignalExportSource read (filtered + ordered
@@ -270,7 +270,7 @@ func TestI6PersistenceIntegration(t *testing.T) {
 	s1 := i6Seed(t, ctx, pool, "i6-a1", i6SignalSeed{assetType: "server", product: "widget", cve: "CVE-2026-1001", priority: "P1", status: "new", owner: "alice", createdAt: mustTime("2026-01-01T00:00:00Z"), sourceID: src})
 	s2 := i6Seed(t, ctx, pool, "i6-a2", i6SignalSeed{assetType: "database", product: "gizmo", cve: "CVE-2026-1002", priority: "P2", status: "resolved", owner: "bob", createdAt: mustTime("2026-02-01T00:00:00Z"), closedAt: mustTime("2026-02-10T00:00:00Z"), sourceID: src})
 	s3 := i6Seed(t, ctx, pool, "i6-a3", i6SignalSeed{assetType: "server", product: "gizmo", cve: "CVE-2026-1003", priority: "P2", status: "accepted", owner: "alice", createdAt: mustTime("2026-03-01T00:00:00Z"), closedAt: mustTime("2026-03-05T00:00:00Z")})
-	s4 := i6Seed(t, ctx, pool, "i6-a4", i6SignalSeed{assetType: "server", product: "widget", cve: "CVE-2026-1004", priority: "P3", status: "resolved", owner: "carol", createdAt: mustTime("2026-04-01T00:00:00Z"), closedAt: mustTime("2026-04-05T00:00:00Z")})
+	s4 := i6Seed(t, ctx, pool, "i6-a4", i6SignalSeed{assetType: "server", product: "widget", cve: "CVE-2026-1004", priority: "P3", status: "resolved", owner: "carol", createdAt: mustTime("2026-01-20T00:00:00Z"), closedAt: mustTime("2026-03-10T00:00:00Z")})
 
 	// Give s3 an open SLA clock with a past deadline so the deadline ordering
 	// and the sla_state filter are exercised.
@@ -279,7 +279,8 @@ func TestI6PersistenceIntegration(t *testing.T) {
 		VALUES ($1, 'assessment', $2, $3)`, s3, mustTime("2026-03-01T00:00:00Z"), mustTime("2026-03-10T00:00:00Z")); err != nil {
 		t.Fatalf("seed sla clock: %v", err)
 	}
-	// Hold s4 so it is excluded from the candidate scan.
+	// s4 is closed before the cutoff, so it is a genuine candidate; hold it so
+	// the scan must SURFACE it as held (DEV-117) rather than exclude it.
 	if _, err := q.CreateLegalHold(ctx, gen.CreateLegalHoldParams{
 		AggregateType: "risk_signal", AggregateID: mustUUID(t, s4), Reason: "hold s4", ActorID: "admin",
 		CreatedAt: toTS(mustTime("2026-05-01T00:00:00Z")),
@@ -291,8 +292,16 @@ func TestI6PersistenceIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list retention candidates: %v", err)
 	}
-	if got := retentionCandidateIDs(candidates); !slices.Equal(got, []string{s2, s3}) {
-		t.Fatalf("retention candidates = %v, want [%s %s] (closed+expired in; held/open/recent out)", got, s2, s3)
+	// DEV-117: held candidates are surfaced (not excluded), so s2/s3 are the
+	// actionable due signals and s4 is reported as held with its reason.
+	if got := retentionCandidateIDs(candidates); !slices.Equal(got, []string{s2, s3, s4}) {
+		t.Fatalf("retention candidates = %v, want [%s %s %s] (closed+expired in; held surfaced, open/recent out)", got, s2, s3, s4)
+	}
+	if len(candidates) != 3 || candidates[2].Held != true || candidates[2].HoldReason != "hold s4" {
+		t.Fatalf("held candidate = %+v, want held with reason \"hold s4\"", candidates)
+	}
+	if candidates[0].Held || candidates[1].Held {
+		t.Fatalf("due candidates wrongly reported held: %+v", candidates)
 	}
 
 	// 4. Retention runs: dry_run → approved → executing → completed; a second
@@ -502,10 +511,10 @@ func TestI6PersistenceIntegration(t *testing.T) {
 }
 
 // retentionCandidateIDs projects the retention candidate rows onto their id strings.
-func retentionCandidateIDs(rows []gen.RiskSignal) []string {
+func retentionCandidateIDs(rows []gen.ListRetentionCandidatesRow) []string {
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, uuidString(r.ID))
+		out = append(out, uuidString(r.SignalID))
 	}
 	return out
 }
