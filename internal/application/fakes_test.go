@@ -180,6 +180,9 @@ type fakeDB struct {
 	// sourceStatus is the committed source-monitor store of the DEV-110 read
 	// (the fake SourceMonitorRepo returns it verbatim).
 	sourceStatus []application.SourceStatusRecord
+	// exports is the committed export-job store of the DEV-115 read/write
+	// paths (the fake ExportRepo stages inserts into it and reads it back).
+	exports []application.Export
 }
 
 func (d *fakeDB) hasSignalForMatch(matchID string) bool {
@@ -403,6 +406,9 @@ type fakeStaged struct {
 	// (WP-5b.03), applied to the committed import store on commit.
 	importInserts []application.InventoryImportRecord
 	importMarks   []storedImportMark
+	// exports is the staged export-row inserts of the DEV-115 CreateExport
+	// command, published on commit (discarded on rollback).
+	exports []application.Export
 }
 
 // storedImportMark is one staged staged-import commit-mark (WP-5b.03).
@@ -476,6 +482,7 @@ func (t *fakeTx) commit() {
 		t.db.priorityRulesets[s.version] = s.rules
 	}
 	t.db.imports = append(t.db.imports, t.staged.importInserts...)
+	t.db.exports = append(t.db.exports, t.staged.exports...)
 	for _, m := range t.staged.importMarks {
 		for i := range t.db.imports {
 			if t.db.imports[i].ID != m.id {
@@ -1617,6 +1624,9 @@ type harness struct {
 	imports         *fakeInventoryImportRepo
 	sourceMonitor   *fakeSourceMonitorRepo
 
+	exports     *fakeExportRepo
+	exportStore *fakeExportStore
+
 	svc *application.Service
 }
 
@@ -1652,6 +1662,8 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 	h.inventoryReader = &fakeInventoryReader{db: h.db}
 	h.imports = &fakeInventoryImportRepo{db: h.db}
 	h.sourceMonitor = &fakeSourceMonitorRepo{db: h.db}
+	h.exports = &fakeExportRepo{db: h.db}
+	h.exportStore = &fakeExportStore{artifacts: map[string][]byte{}}
 	deps := application.ServiceDeps{
 		Signals:          h.signals,
 		Audit:            h.audit,
@@ -1675,6 +1687,8 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 		InventoryImports: h.imports,
 		UserAdmin:        h.users,
 		SourceMonitor:    h.sourceMonitor,
+		Exports:          h.exports,
+		ExportStore:      h.exportStore,
 		Clock:            h.clock,
 		RunTx:            h.runner.Run,
 	}

@@ -79,6 +79,16 @@ type Service struct {
 	// a composition root that does not serve the source-monitor view leaves it
 	// nil; the I5b server root wires the DEV-110 postgres *repo.SourceMonitorRepo.
 	sourceMonitor SourceMonitorRepo
+	// exports and exportStore are the I6 export ports (ARCH-007 §1.2,
+	// WP-6.04 / DEV-115): the export CRUD repository and the spool artifact
+	// store the CreateExport/GetExport/DownloadExport use cases program
+	// against. They are optional at construction like the other I6/I5b ports —
+	// a composition root that never drives the export use cases leaves them
+	// nil; the I6 root wires the postgres *repo.ExportRepo and the
+	// export.Spool. A use case invoked without its port returns an
+	// infrastructure error rather than panicking.
+	exports     ExportRepo
+	exportStore ExportArtifactStore
 	// slaProfile is the injected (priority, target) → reaction-time duration
 	// profile (ARCH-004 §4.2/§4.3). The triage commands read it to decide
 	// which SLA clocks a transition fulfils or resets; it defaults to the
@@ -152,6 +162,14 @@ type ServiceDeps struct {
 	// other I5b ports; a Service whose ListSourceStatus use case runs must
 	// carry it (the I5b server root wires the postgres *repo.SourceMonitorRepo).
 	SourceMonitor SourceMonitorRepo
+	// Exports/ExportStore are the I6 export ports (ARCH-007 §1.2, WP-6.04 /
+	// DEV-115): the export CRUD repository and the spool artifact store the
+	// CreateExport/GetExport/DownloadExport use cases program against. They
+	// are optional at construction like the other I6/I5b ports; a Service
+	// whose export use cases run must carry them (the I6 root wires the
+	// postgres *repo.ExportRepo and the export.Spool).
+	Exports     ExportRepo
+	ExportStore ExportArtifactStore
 	// SlaTimeProfile is the injectable (priority, target) → reaction-time
 	// duration profile the I4 triage commands read to decide which SLA
 	// clocks a status change fulfils or resets (ARCH-004 §4.2/§4.3,
@@ -250,6 +268,8 @@ func NewService(deps ServiceDeps) *Service {
 		imports:            deps.InventoryImports,
 		userAdmin:          deps.UserAdmin,
 		sourceMonitor:      deps.SourceMonitor,
+		exports:            deps.Exports,
+		exportStore:        deps.ExportStore,
 		slaProfile:         slaProfile,
 		slaReminderCadence: slaReminderCadence,
 		clock:              deps.Clock,

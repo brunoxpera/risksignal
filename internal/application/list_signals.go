@@ -77,6 +77,20 @@ func decodeCursor(op, s string) (int, error) {
 	return pc.Offset, nil
 }
 
+// validateSignalFilterEnums checks the signal enum filters shared by the
+// working-list read and the frozen export filter (ARCH-001 §4, ARCH-007
+// §1.2): an unset filter is open, a set one must be a vocabulary value.
+// op names the calling use case so the error is reported against it.
+func validateSignalFilterEnums(op string, priority *domain.Priority, status *domain.SignalStatus) error {
+	if priority != nil && !priority.Valid() {
+		return Validationf(op, "invalid priority filter %q", *priority)
+	}
+	if status != nil && !status.Valid() {
+		return Validationf(op, "invalid status filter %q", *status)
+	}
+	return nil
+}
+
 // ListSignals returns one cursor-paginated page of the working list, sorted
 // by priority ascending P1→P4 and then created_at (stable tiebreak id). The
 // repository contract returns at most limit+1 rows so the page boundary is
@@ -104,11 +118,8 @@ func (s *Service) ListSignals(ctx context.Context, in ListSignalsInput) (ListSig
 	if limit < 0 || limit > maxListLimit {
 		return ListSignalsResult{}, Validationf(op, "limit %d outside [1,%d] (0 means the default %d)", in.Limit, maxListLimit, defaultListLimit)
 	}
-	if in.Priority != nil && !in.Priority.Valid() {
-		return ListSignalsResult{}, Validationf(op, "invalid priority filter %q", *in.Priority)
-	}
-	if in.Status != nil && !in.Status.Valid() {
-		return ListSignalsResult{}, Validationf(op, "invalid status filter %q", *in.Status)
+	if err := validateSignalFilterEnums(op, in.Priority, in.Status); err != nil {
+		return ListSignalsResult{}, err
 	}
 	offset, err := decodeCursor(op, in.Cursor)
 	if err != nil {
