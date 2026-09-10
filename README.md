@@ -42,8 +42,16 @@ Each binary loads and validates its configuration at startup (WP-1a.02):
 built-in defaults, an optional JSON config file (`RISKSIGNAL_CONFIG_FILE`)
 and `RISKSIGNAL_*` environment variables, with environment variables taking
 precedence. `database.url` and `oidc.issuer` are mandatory; the local
-authentication bypass (`RISKSIGNAL_AUTH_BYPASS_ENABLED`) is accepted in
-`local` mode only (TR-010). On invalid configuration the binary prints the
+authentication bypass (`RISKSIGNAL_AUTH_BYPASS_ENABLED`) is accepted only
+with `env=local` and a loopback `http.addr` — `127.0.0.0/8`, `::1` or
+`localhost`; an all-interfaces or non-loopback bind is rejected at startup
+(the ARCH-005 §4.1 loopback lock that keeps the bypass off the network,
+TR-010 / FR-029). The `oidc.*` keys configure the OIDC client:
+`oidc.client_id`, `oidc.client_secret_ref` (a secret reference, never an
+inline secret), `oidc.redirect_url`, `oidc.scopes`, `oidc.roles_claim`,
+`oidc.role_mappings` (an external roles-claim value → internal role, as a
+JSON object), `oidc.audience`, `oidc.session_cookie_name` and
+`oidc.session_ttl`. On invalid configuration the binary prints the
 problem and exits 1 (the CLI classifies it as validation and exits 2, see
 "CLI commands and exit codes"); on success it prints a provenance summary
 (sources, no secret values) and starts its process role.
@@ -258,6 +266,26 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
   through the checksum-guarded runner (WP-1a.04, ADR-010); `--dry-run`
   verifies checksums and reports what would change without touching the
   database.
+- `maintenance identity-lookup --event <id> --reason <text> [--as <subject>]`
+  — the governed reveal of one audit event's user actor (WP-5a.07 / DEV-094,
+  ADR-014, ARCH-005 §7): the CLI form of the `audit.reveal_identity` act,
+  driving the same use case, permission gate and self-audit as the API
+  endpoint `POST /api/v1/audit-events/{id}/reveal-actor` — the application
+  layer is the single gate of record, so no channel bypasses it (NFR-013
+  channel parity). `--event` is the audit event id whose user actor is
+  revealed and `--reason` is the mandatory, non-blank justification
+  (ADR-014); `--as` names the acting identity's issuer-qualified subject and
+  defaults to `local::<auth.bypass_principal>` — the local dev subject a
+  verified token would carry; in production the subject comes from the CLI's
+  OIDC login (I5b). The command is strictly non-interactive and maps the
+  use-case error classes onto the exit-code contract: a missing or blank
+  `--event`/`--reason` (and any other validation mistake) exits 2, a denied
+  permission exits 4 (authorisation) and infrastructure trouble exits 6.
+  Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal maintenance identity-lookup --event <id> \
+          --reason "support ticket 4711" --as local::auditor --output json
 - `maintenance retention`, `maintenance recompute` — recognised but not yet
   implemented; they print "not yet implemented" and exit 1.
 - `diagnose config` — the WP-1a.02 provenance report: source of every
