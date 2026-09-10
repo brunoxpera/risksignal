@@ -100,14 +100,25 @@ func (f *fakeNotifyRepo) snapshot() []application.Notification {
 	return append([]application.Notification(nil), f.rows...)
 }
 
+// restore replaces the stored rows with a snapshot — the tx runner's rollback.
+func (f *fakeNotifyRepo) restore(rows []application.Notification) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rows = rows
+}
+
 // fakeSlaClocks is an in-memory application.SlaClockRepo implementing only the
 // Fulfil path the notify handler uses; the embedded interface satisfies the
-// rest of the port (the handler never calls the others).
+// rest of the port (the handler never calls the others). A one-shot scripted
+// err (consumed on the first Fulfil) lets a test fault-inject the fulfil step
+// of the delivery transaction; snapshot/restore back the tx-rollback semantics
+// of txFaultRunner.
 type fakeSlaClocks struct {
 	application.SlaClockRepo
 	mu       sync.Mutex
 	fulfiled map[string]bool
 	calls    int
+	err      error
 }
 
 func newFakeSlaClocks() *fakeSlaClocks {
@@ -118,6 +129,11 @@ func (f *fakeSlaClocks) Fulfil(_ context.Context, _ application.Tx, signalID str
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
+	if f.err != nil {
+		err := f.err
+		f.err = nil // one-shot: a redelivery sees the fault cleared
+		return domain.SlaClock{}, false, err
+	}
 	key := signalID + "/" + string(target)
 	if f.fulfiled[key] {
 		return domain.SlaClock{}, false, nil
@@ -126,6 +142,25 @@ func (f *fakeSlaClocks) Fulfil(_ context.Context, _ application.Tx, signalID str
 	return domain.SlaClock{
 		SignalID: signalID, Target: target, StartedAt: at, DeadlineAt: at.Add(time.Minute), FulfilledAt: at,
 	}, true, nil
+}
+
+// snapshot returns a copy of the fulfilled set (and the call count) for the
+// tx runner to restore on rollback.
+func (f *fakeSlaClocks) snapshot() (map[string]bool, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cp := make(map[string]bool, len(f.fulfiled))
+	for k, v := range f.fulfiled {
+		cp[k] = v
+	}
+	return cp, f.calls
+}
+
+func (f *fakeSlaClocks) restore(fulfiled map[string]bool, calls int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fulfiled = fulfiled
+	f.calls = calls
 }
 
 // scriptedPort is a NotifyPort whose per-channel outcome the test fixes. A
@@ -162,6 +197,26 @@ func (p *scriptedPort) callCount(ch notify.NotifyChannel) int {
 // integration test).
 func txNoop(_ context.Context, fn func(tx application.Tx) error) error { return fn(nil) }
 
+// txFaultRunner plays postgres.WithTx for the notify tests: it runs fn against
+// a nil handle and, when fn fails, rolls the in-memory fakes back to their
+// pre-transaction snapshot — the rollback semantics C-3 asserts on (the
+// delivered receipt and the clock fulfil commit or roll back together).
+type txFaultRunner struct {
+	repo   *fakeNotifyRepo
+	clocks *fakeSlaClocks
+}
+
+func (r *txFaultRunner) Run(_ context.Context, fn func(tx application.Tx) error) error {
+	rowsBefore := r.repo.snapshot()
+	fulfilledBefore, callsBefore := r.clocks.snapshot()
+	if err := fn(nil); err != nil {
+		r.repo.restore(rowsBefore)
+		r.clocks.restore(fulfilledBefore, callsBefore)
+		return err
+	}
+	return nil
+}
+
 // notifyHarness bundles the fakes a notify test asserts on.
 type notifyHarness struct {
 	jobs   *NotifyJobs
@@ -172,6 +227,13 @@ type notifyHarness struct {
 
 func newNotifyHarness(t *testing.T, policy NotifyPolicy) *notifyHarness {
 	t.Helper()
+	return newNotifyHarnessWithRunner(t, policy, txNoop)
+}
+
+// newNotifyHarnessWithRunner is newNotifyHarness with an explicit transaction
+// runner, so a test can supply the fault-injecting txFaultRunner.
+func newNotifyHarnessWithRunner(t *testing.T, policy NotifyPolicy, runTx application.TxRunner) *notifyHarness {
+	t.Helper()
 	repo := &fakeNotifyRepo{}
 	clocks := newFakeSlaClocks()
 	port := newScriptedPort()
@@ -180,7 +242,7 @@ func newNotifyHarness(t *testing.T, policy NotifyPolicy) *notifyHarness {
 		SlaClocks:     clocks,
 		Port:          port,
 		Policy:        policy,
-		RunTx:         txNoop,
+		RunTx:         runTx,
 		Clock:         clock.NewFakeClock(notifyFixedNow),
 		Logger:        discardLogger(),
 	})
@@ -304,6 +366,82 @@ func TestNotifyHandlerP1CreateDeliversOnePerChannelAndFulfilsClock(t *testing.T)
 	}
 	if !h.clocks.fulfiled["sig-1/notification"] {
 		t.Error("notification clock of sig-1 was not fulfilled on delivered P1")
+	}
+}
+
+// TestNotifyHandlerDeliveredAndFulfilCommitAtomically is the C-3 regression:
+// the delivery receipt (status/attempts/delivered_at) and the notification
+// clock fulfil commit in one transaction. The fulfil step is fault-injected to
+// fail, which rolls the whole tx back — the row stays pending (attempts still
+// 0) and the clock stays unfulfilled — and the redelivery then re-delivers and
+// re-fulfils, so a transient fulfil failure can never strand a terminal row
+// with an unfulfilled clock.
+func TestNotifyHandlerDeliveredAndFulfilCommitAtomically(t *testing.T) {
+	// in_app-only policy: a single channel keeps the atomicity proof tight.
+	clocks := newFakeSlaClocks()
+	repo := &fakeNotifyRepo{}
+	port := newScriptedPort()
+	runner := &txFaultRunner{repo: repo, clocks: clocks}
+	jobs, err := NewNotifyJobs(NotifyJobsDeps{
+		Notifications: repo,
+		SlaClocks:     clocks,
+		Port:          port,
+		Policy:        NotifyPolicy{},
+		RunTx:         runner.Run,
+		Clock:         clock.NewFakeClock(notifyFixedNow),
+		Logger:        discardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewNotifyJobs: %v", err)
+	}
+
+	// Fault-inject the fulfil step of the delivery tx: the whole tx rolls back.
+	clocks.err = fmt.Errorf("boom: fulfil write failed")
+	event := notificationEvent("evt-1", application.EventTypeSignalCreated, "sig-1", "P1")
+	store := &fakeStore{events: []ClaimedEvent{event}}
+	relay := newRelay(t, store)
+	if err := jobs.RegisterHandlers(relay); err != nil {
+		t.Fatalf("RegisterHandlers: %v", err)
+	}
+
+	if err := relay.Drain(context.Background()); err != nil {
+		t.Fatalf("faulted drain: %v", err)
+	}
+	// Temporary failure: the event is neither acked nor dead-lettered.
+	if len(store.acked) != 0 || len(store.dead) != 0 {
+		t.Fatalf("acked=%v dead=%v, want the faulted delivery left claimed for redelivery", store.acked, store.dead)
+	}
+	// Both writes rolled back: the row is still pending with no attempt
+	// recorded and the clock is unfulfilled.
+	rows := repo.snapshot()
+	if len(rows) != 1 {
+		t.Fatalf("notification rows = %d (%+v), want 1", len(rows), rows)
+	}
+	if rows[0].Status != notificationStatusPending || rows[0].Attempts != 0 || rows[0].DeliveredAt != nil {
+		t.Fatalf("row after rollback = %+v, want pending/attempts 0/undelivered (UpdateDelivery rolled back with the fulfil)", rows[0])
+	}
+	if clocks.fulfiled["sig-1/notification"] {
+		t.Fatal("clock fulfilled despite the tx rollback, want unfulfilled")
+	}
+
+	// Redelivery: the fault is cleared, so the row is re-delivered AND the
+	// clock is re-fulfilled — no lost fulfil behind a terminal row.
+	store.events = []ClaimedEvent{event}
+	if err := relay.Drain(context.Background()); err != nil {
+		t.Fatalf("redelivery drain: %v", err)
+	}
+	if len(store.acked) != 1 || store.acked[0] != "evt-1" {
+		t.Fatalf("acked = %v, want evt-1 acked after the redelivery", store.acked)
+	}
+	rows = repo.snapshot()
+	if rows[0].Status != notificationStatusDelivered || rows[0].Attempts != 1 || rows[0].DeliveredAt == nil {
+		t.Fatalf("row after redelivery = %+v, want delivered/attempts 1/with delivered_at", rows[0])
+	}
+	if !clocks.fulfiled["sig-1/notification"] {
+		t.Fatal("clock not fulfilled after the redelivery, want fulfilled")
+	}
+	if got := port.callCount(notify.ChannelInApp); got != 2 {
+		t.Fatalf("in_app deliveries = %d, want 2 (the rolled-back delivery is re-delivered)", got)
 	}
 }
 

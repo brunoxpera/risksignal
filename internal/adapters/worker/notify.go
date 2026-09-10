@@ -272,8 +272,11 @@ func (j *NotifyJobs) handle(ctx context.Context, event ClaimedEvent) error {
 // deliverChannel stores the notification row of one channel (idempotent on
 // the outbox event id + channel), delivers it when it is still open and
 // records the receipt. A terminal stored row (delivered/failed) is a no-op —
-// the redelivery path. On a delivered signal.created/signal.escalated P1 it
-// fulfils the notification clock.
+// the redelivery path. On a delivered signal.created/signal.escalated P1 the
+// notification clock is fulfilled in the same transaction as the delivery
+// receipt (ARCH-004 §4.3; adversarial review C-3): the terminal delivery
+// state and the fulfil commit atomically, so a transient failure of that tx
+// rolls both back and the redelivery re-delivers and re-fulfils the clock.
 func (j *NotifyJobs) deliverChannel(ctx context.Context, event ClaimedEvent, p notifyPayload, tgt notifyTarget) error {
 	now := j.clk.Now()
 
@@ -343,8 +346,18 @@ func (j *NotifyJobs) deliverChannel(ctx context.Context, event ClaimedEvent, p n
 	}
 
 	if err := j.runTx(ctx, func(tx application.Tx) error {
-		_, err := j.notifications.UpdateDelivery(ctx, tx, stored.ID, status, stored.Attempts+1, lastError, deliveredAt)
-		return err
+		if _, err := j.notifications.UpdateDelivery(ctx, tx, stored.ID, status, stored.Attempts+1, lastError, deliveredAt); err != nil {
+			return err
+		}
+		// A delivered signal.created/signal.escalated P1 fulfils the signal's
+		// `notification` clock in this same transaction (ARCH-004 §4.3): the
+		// receipt and the fulfil commit or roll back together (C-3). The
+		// helper is a no-op for every other kind/priority and is idempotent,
+		// so a second delivered channel cannot re-open the clock.
+		if status == notificationStatusDelivered {
+			return j.fulfilNotificationClock(ctx, tx, event.Type, p, now)
+		}
+		return nil
 	}); err != nil {
 		return classifyApplicationError(err)
 	}
@@ -370,30 +383,29 @@ func (j *NotifyJobs) deliverChannel(ctx context.Context, event ClaimedEvent, p n
 		slog.String("channel", string(tgt.channel)),
 		slog.String("priority", p.Priority))
 
-	return j.fulfilNotificationClock(ctx, event.Type, p, now)
+	return nil
 }
 
 // fulfilNotificationClock fulfils the signal's `notification` SLA clock when
 // a signal.created/signal.escalated P1 notification was delivered (ARCH-004
-// §4.3: "notification on technical delivery"). Fulfil is idempotent — an
-// already-fulfilled clock is a no-op — so a second delivered channel cannot
-// re-open it.
-func (j *NotifyJobs) fulfilNotificationClock(ctx context.Context, kind string, p notifyPayload, at time.Time) error {
+// §4.3: "notification on technical delivery"). It runs on the caller's
+// transaction — the delivery-receipt tx of deliverChannel — so the terminal
+// delivery state and the fulfil commit atomically (adversarial review C-3).
+// The kind/P1 guard is applied here, so it is a no-op for every other
+// event/priority; Fulfil is idempotent, so a second delivered channel cannot
+// re-open an already-fulfilled clock.
+func (j *NotifyJobs) fulfilNotificationClock(ctx context.Context, tx application.Tx, kind string, p notifyPayload, at time.Time) error {
 	if kind != application.EventTypeSignalCreated && kind != application.EventTypeSignalEscalated {
 		return nil
 	}
 	if !strings.EqualFold(strings.TrimSpace(p.Priority), string(domain.PriorityP1)) {
 		return nil
 	}
-	var changed bool
-	if err := j.runTx(ctx, func(tx application.Tx) error {
-		_, fulfilled, err := j.slaClocks.Fulfil(ctx, tx, p.SignalID, domain.SLATargetNotification, at)
-		changed = fulfilled
+	_, fulfilled, err := j.slaClocks.Fulfil(ctx, tx, p.SignalID, domain.SLATargetNotification, at)
+	if err != nil {
 		return err
-	}); err != nil {
-		return classifyApplicationError(err)
 	}
-	if changed {
+	if fulfilled {
 		j.logger.Info("notification SLA clock fulfilled",
 			slog.String("signal_id", p.SignalID),
 			slog.String("kind", kind))
