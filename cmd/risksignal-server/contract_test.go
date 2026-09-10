@@ -483,6 +483,234 @@ func validateOpenAPIContract(t *testing.T) {
 			t.Errorf("ProblemDetails required = %v, missing %q", pd.Value.Required, required)
 		}
 	}
+
+	// The I5b contract surface (WP-5b.01): the eight-command vocabulary and
+	// the inventory/assets/users/roles resources.
+	validateI5bContract(t, doc)
+}
+
+// i5bCommandRequired is the per-command required-field set of the generalised
+// SignalCommandRequest (ARCH-006 §1.2): the five version-guarded commands
+// carry expected_version; the three non-guarded ones do not.
+var i5bCommandRequired = map[string][]string{
+	"acknowledge":       {"expected_version"},
+	"change_status":     {"expected_version", "status"},
+	"assign_owner":      {"expected_version", "owner_id"},
+	"add_comment":       {"comment"},
+	"override_priority": {"expected_version", "priority", "reason"},
+	"revert_priority":   {"expected_version"},
+	"pause_sla":         {"target", "reason"},
+	"resume_sla":        {"target", "reason"},
+}
+
+// validateI5bContract pins the I5b statements of the document: the
+// eight-command discriminated SignalCommandRequest with its per-command
+// required fields, the extended SignalCommandResult with its nullable detail
+// fields, and the inventory-import, assets and user/role resources with their
+// declared responses. It runs inside the contract suite (gate 3) and in the
+// standalone gate-1 hook, so `make lint-openapi-validate` exercises it too.
+func validateI5bContract(t *testing.T, doc *openapi3.T) {
+	t.Helper()
+	i5bClientSurface()
+
+	// --- The eight-command vocabulary -----------------------------------
+	cmd := doc.Components.Schemas["SignalCommandRequest"]
+	if cmd == nil || cmd.Value == nil {
+		t.Fatal("components.schemas.SignalCommandRequest is missing from the document")
+	}
+	commandProp := cmd.Value.Properties["command"]
+	if commandProp == nil || commandProp.Value == nil {
+		t.Fatal("SignalCommandRequest.command is missing")
+	}
+	gotCommands := map[string]bool{}
+	for _, v := range commandProp.Value.Enum {
+		if s, ok := v.(string); ok {
+			gotCommands[s] = true
+		}
+	}
+	if len(gotCommands) != len(i5bCommandRequired) {
+		t.Errorf("SignalCommandRequest.command enum = %v, want the eight I5b commands", gotCommands)
+	}
+	for want := range i5bCommandRequired {
+		if !gotCommands[want] {
+			t.Errorf("SignalCommandRequest.command enum is missing %q", want)
+		}
+	}
+	if !containsString(cmd.Value.Required, "command") {
+		t.Errorf("SignalCommandRequest required = %v, want it to include command", cmd.Value.Required)
+	}
+
+	// The per-command required fields declared by the if/then conditionals.
+	gotRequired := map[string][]string{}
+	for _, sub := range cmd.Value.AllOf {
+		if sub == nil || sub.Value == nil || sub.Value.If == nil || sub.Value.If.Value == nil || sub.Value.Then == nil || sub.Value.Then.Value == nil {
+			continue
+		}
+		cond := sub.Value.If.Value.Properties["command"]
+		if cond == nil || cond.Value == nil {
+			continue
+		}
+		name, _ := cond.Value.Const.(string)
+		if name == "" {
+			continue
+		}
+		gotRequired[name] = sub.Value.Then.Value.Required
+	}
+	for command, want := range i5bCommandRequired {
+		got, ok := gotRequired[command]
+		if !ok {
+			t.Errorf("SignalCommandRequest declares no required fields for command %q", command)
+			continue
+		}
+		if !sameStringSet(got, want) {
+			t.Errorf("SignalCommandRequest required for %q = %v, want %v", command, got, want)
+		}
+	}
+
+	// --- The extended result with its nullable detail fields -------------
+	result := doc.Components.Schemas["SignalCommandResult"]
+	if result == nil || result.Value == nil {
+		t.Fatal("components.schemas.SignalCommandResult is missing from the document")
+	}
+	for _, field := range []string{"owner_id", "target", "auto_priority"} {
+		if !containsString(result.Value.Required, field) {
+			t.Errorf("SignalCommandResult required = %v, want it to include the detail field %q", result.Value.Required, field)
+		}
+		prop := result.Value.Properties[field]
+		if prop == nil || prop.Value == nil || !nullableSchema(prop.Value) {
+			t.Errorf("SignalCommandResult.%s = %v, want a nullable detail field", field, prop)
+		}
+	}
+
+	// --- The I5b resources ----------------------------------------------
+	for _, tc := range []struct {
+		op       string
+		method   string
+		path     string
+		statuses []string
+	}{
+		{"createInventoryImport", "POST", "/api/v1/inventory/imports", []string{"200", "400", "403", "413", "500"}},
+		{"getInventoryImport", "GET", "/api/v1/inventory/imports/{id}", []string{"200", "400", "403", "404", "500"}},
+		{"commitInventoryImport", "POST", "/api/v1/inventory/imports/{id}/commit", []string{"200", "400", "403", "404", "409", "500"}},
+		{"listAssets", "GET", "/api/v1/assets", []string{"200", "400", "403", "500"}},
+		{"getAssetComponents", "GET", "/api/v1/assets/{id}/components", []string{"200", "400", "403", "404", "500"}},
+		{"listUsers", "GET", "/api/v1/users", []string{"200", "400", "403", "500"}},
+		{"listRoles", "GET", "/api/v1/roles", []string{"200", "403", "500"}},
+		{"updateUserRoles", "PATCH", "/api/v1/users/{id}/roles", []string{"200", "400", "403", "404", "409", "500"}},
+		{"deactivateUser", "POST", "/api/v1/users/{id}/deactivate", []string{"200", "400", "403", "404", "409", "500"}},
+	} {
+		pi := doc.Paths.Value(tc.path)
+		if pi == nil {
+			t.Errorf("%s %s: path not declared", tc.method, tc.path)
+			continue
+		}
+		var operation *openapi3.Operation
+		switch tc.method {
+		case "GET":
+			operation = pi.Get
+		case "POST":
+			operation = pi.Post
+		case "PATCH":
+			operation = pi.Patch
+		}
+		if operation == nil {
+			t.Errorf("%s %s: operation not declared", tc.method, tc.path)
+			continue
+		}
+		if operation.OperationID != tc.op {
+			t.Errorf("%s %s: operationId = %q, want %q", tc.method, tc.path, operation.OperationID, tc.op)
+		}
+		for _, status := range tc.statuses {
+			respRef := operation.Responses.Value(status)
+			if respRef == nil || respRef.Value == nil {
+				t.Errorf("%s %s: response %s is not declared", tc.op, tc.path, status)
+				continue
+			}
+			if status == "200" {
+				continue
+			}
+			jsonMedia := respRef.Value.Content.Get("application/json")
+			if jsonMedia == nil || jsonMedia.Schema == nil {
+				t.Errorf("%s %s: error response %s has no application/json schema", tc.op, tc.path, status)
+				continue
+			}
+			if ref := jsonMedia.Schema.Ref; ref != "#/components/schemas/ProblemDetails" {
+				t.Errorf("%s %s: error response %s schema ref = %q, want ProblemDetails", tc.op, tc.path, status, ref)
+			}
+		}
+	}
+
+	for _, name := range []string{
+		"InventoryImport", "InventoryImportPreview", "InventoryImportProblem",
+		"InventoryImportWarning", "InventoryImportStatus",
+		"Asset", "AssetList", "AssetComponents", "Component",
+		"AssetType", "Environment", "VersionScheme", "SLATarget",
+		"User", "UserList", "Role", "RoleList", "RoleDescriptor",
+		"PermissionGrant", "Scope", "UpdateUserRolesRequest",
+	} {
+		if s := doc.Components.Schemas[name]; s == nil || s.Value == nil {
+			t.Errorf("components.schemas.%s is missing from the document", name)
+		}
+	}
+}
+
+// nullableSchema reports whether s admits a JSON null: a [T, "null"] type
+// union or a oneOf/anyOf carrying a null branch.
+func nullableSchema(s *openapi3.Schema) bool {
+	if s.Type != nil && s.Type.IncludesNull() {
+		return true
+	}
+	for _, branches := range [][]*openapi3.SchemaRef{s.OneOf, s.AnyOf} {
+		for _, b := range branches {
+			if b != nil && b.Value != nil && b.Value.Type != nil && b.Value.Type.IncludesNull() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// containsString reports whether list holds want.
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// sameStringSet compares two string slices as sets.
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	seen := make(map[string]int, len(a))
+	for _, s := range a {
+		seen[s]++
+	}
+	for _, s := range b {
+		seen[s]--
+		if seen[s] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// i5bClientSurface pins the generated client of the I5b resources at compile
+// time (ADR-011: the generated client is the only client of the wire
+// contract, and a missing operation is a compile error).
+func i5bClientSurface() {
+	var _ = (*gen.ClientWithResponses).CreateInventoryImportWithBodyWithResponse
+	var _ = (*gen.ClientWithResponses).GetInventoryImportWithResponse
+	var _ = (*gen.ClientWithResponses).CommitInventoryImportWithResponse
+	var _ = (*gen.ClientWithResponses).ListAssetsWithResponse
+	var _ = (*gen.ClientWithResponses).GetAssetComponentsWithResponse
+	var _ = (*gen.ClientWithResponses).ListUsersWithResponse
+	var _ = (*gen.ClientWithResponses).ListRolesWithResponse
+	var _ = (*gen.ClientWithResponses).UpdateUserRolesWithResponse
+	var _ = (*gen.ClientWithResponses).DeactivateUserWithResponse
 }
 
 // ---------------------------------------------------------------------------
