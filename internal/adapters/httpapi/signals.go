@@ -27,9 +27,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/xpera/risksignal/internal/adapters/httpapi/gen"
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/adapters/httpapi/gen"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // SignalsQuery is the read surface of the application layer the signal

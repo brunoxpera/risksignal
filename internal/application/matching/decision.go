@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/xpera/risksignal/internal/application/normalise"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application/normalise"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // This file implements the decision_rules application of ARCH-003 §3

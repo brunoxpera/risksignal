@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // Config defaults and constants of the KEV adapter (ARCH-002 §1/§2.2).

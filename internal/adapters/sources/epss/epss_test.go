@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
 )
 
 // epssCSV is the daily-file fixture (shape of the real FIRST file:

@@ -45,7 +45,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate"
 )
 
 func TestMigration00006ContractsTheComponentWritePath(t *testing.T) {

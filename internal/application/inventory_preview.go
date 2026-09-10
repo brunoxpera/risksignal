@@ -42,7 +42,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // AssetDiffStatus classifies one parsed asset or component against the

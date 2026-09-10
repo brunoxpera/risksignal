@@ -31,11 +31,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/xpera/risksignal/db/migrations"
-	"github.com/xpera/risksignal/internal/adapters/postgres"
-	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
-	"github.com/xpera/risksignal/internal/platform/buildinfo"
-	"github.com/xpera/risksignal/internal/platform/config"
+	"github.com/brunoxpera/risksignal/db/migrations"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/brunoxpera/risksignal/internal/platform/buildinfo"
+	"github.com/brunoxpera/risksignal/internal/platform/config"
 )
 
 // embeddedVersions returns the versions of the embedded migration files in

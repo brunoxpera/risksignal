@@ -35,8 +35,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/xpera/risksignal/internal/adapters/postgres"
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
 )
 
 // epssNumeric scans a decimal string into the pgtype.Numeric the generated

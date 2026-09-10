@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/platform/config"
+	"github.com/brunoxpera/risksignal/internal/platform/config"
 )
 
 // workerTestConfig returns a valid local configuration for the worker

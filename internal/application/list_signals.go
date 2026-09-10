@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // Working-list pagination bounds (ARCH-001 §4 listSignals: limit default 20,

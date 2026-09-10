@@ -27,9 +27,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // RuleRepo implements the rule-state reads of the matching runs over one

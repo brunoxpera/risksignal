@@ -25,9 +25,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/application/matching"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application/matching"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // newRecomputeEnv wires the fakes plus the real application service core,

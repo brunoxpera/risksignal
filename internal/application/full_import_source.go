@@ -41,8 +41,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/xpera/risksignal/internal/domain"
-	"github.com/xpera/risksignal/internal/platform/uuid"
+	"github.com/brunoxpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/platform/uuid"
 )
 
 // Full-import chunk vocabulary of the driver (ARCH-003 §6, DEV-067). The

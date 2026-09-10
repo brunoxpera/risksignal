@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // TestMatchInsertRejectsOutOfRangeScore pins the int32 guard on the

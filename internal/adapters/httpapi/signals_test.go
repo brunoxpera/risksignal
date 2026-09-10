@@ -21,9 +21,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/adapters/httpapi/gen"
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/adapters/httpapi/gen"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // fixedCreated is the timestamp of every sample signal, so the tests pin

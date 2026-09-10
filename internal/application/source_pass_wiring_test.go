@@ -19,8 +19,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // epssSource seeds an EPSS-style full-set source and returns its adapter

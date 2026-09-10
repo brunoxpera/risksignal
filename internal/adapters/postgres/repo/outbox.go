@@ -3,8 +3,8 @@ package repo
 import (
 	"context"
 
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // OutboxRepo is the postgres implementation of application.OutboxRepo

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // fetchJobOf decodes the outbox payload of one source.fetch event.

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/platform/logging"
+	"github.com/brunoxpera/risksignal/internal/platform/logging"
 )
 
 // testLogger returns a structured local-mode logger writing to an in-memory

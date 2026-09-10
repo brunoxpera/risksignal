@@ -54,8 +54,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/platform/metrics"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/platform/metrics"
 )
 
 // Metric names of the source run-loop completion points (concept ch. 16.2,

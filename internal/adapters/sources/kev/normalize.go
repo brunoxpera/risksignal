@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // Stable RecordError reason codes of the normaliser (ch. 5.2: error_code +

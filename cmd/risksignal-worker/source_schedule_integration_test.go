@@ -29,11 +29,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/xpera/risksignal/internal/adapters/postgres"
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
-	"github.com/xpera/risksignal/internal/adapters/postgres/repo"
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
 )
 
 // newScheduleService wires the scheduler's application service at the worker

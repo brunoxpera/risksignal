@@ -55,8 +55,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/xpera/risksignal/internal/domain"
-	"github.com/xpera/risksignal/internal/platform/uuid"
+	"github.com/brunoxpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/platform/uuid"
 )
 
 // Audit and outbox vocabulary of the inventory commit (ch. 13.2

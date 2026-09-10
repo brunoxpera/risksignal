@@ -65,9 +65,9 @@ COMPOSE ?= docker compose
 VERSION ?= dev
 GIT_COMMIT := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)
 BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)
-GO_LDFLAGS := -X github.com/xpera/risksignal/internal/platform/buildinfo.Version=$(VERSION) \
-	-X github.com/xpera/risksignal/internal/platform/buildinfo.Commit=$(GIT_COMMIT) \
-	-X github.com/xpera/risksignal/internal/platform/buildinfo.BuildTime=$(BUILD_TIME)
+GO_LDFLAGS := -X github.com/brunoxpera/risksignal/internal/platform/buildinfo.Version=$(VERSION) \
+	-X github.com/brunoxpera/risksignal/internal/platform/buildinfo.Commit=$(GIT_COMMIT) \
+	-X github.com/brunoxpera/risksignal/internal/platform/buildinfo.BuildTime=$(BUILD_TIME)
 
 # Image names and artifact locations (WP-1a.13): the production images are
 # named risksignal/server and risksignal/worker — the names a future registry
@@ -284,7 +284,7 @@ lint-licenses:
 		echo "Install the pinned version: go install github.com/google/go-licenses@v1.6.0"; \
 		exit 2; \
 	fi
-	"$(GO_LICENSES_BIN)" check --ignore github.com/xpera/risksignal ./...
+	"$(GO_LICENSES_BIN)" check --ignore github.com/brunoxpera/risksignal ./...
 
 ## lint-secrets: secret scan with gitleaks (pinned 8.30.1; the only allowlist
 ##               entry is the synthetic redaction fixture, see .gitleaks.toml)

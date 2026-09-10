@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/platform/buildinfo"
+	"github.com/brunoxpera/risksignal/internal/platform/buildinfo"
 )
 
 func doGet(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {

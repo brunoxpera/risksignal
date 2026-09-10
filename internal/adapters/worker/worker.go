@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
 )
 
 // Health is the observable health state of the worker (concept ch. 16.3:

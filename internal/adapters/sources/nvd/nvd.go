@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // API path of the NVD Vulnerability API 2.0 (ARCH-002 §2.1). The sources

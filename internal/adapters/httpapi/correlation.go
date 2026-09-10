@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"net/http"
 
-	"github.com/xpera/risksignal/internal/platform/logging"
+	"github.com/brunoxpera/risksignal/internal/platform/logging"
 )
 
 // HeaderRequestID is the correlation header name. A request may carry its own

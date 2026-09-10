@@ -24,8 +24,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // Stable identities of the synthetic source and its document (ARCH-001 §1

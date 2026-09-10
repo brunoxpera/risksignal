@@ -39,14 +39,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/xpera/risksignal/internal/adapters/postgres"
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
-	"github.com/xpera/risksignal/internal/adapters/postgres/repo"
-	"github.com/xpera/risksignal/internal/adapters/sources/synthetic"
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
-	"github.com/xpera/risksignal/internal/platform/clock"
-	"github.com/xpera/risksignal/internal/platform/config"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
+	"github.com/brunoxpera/risksignal/internal/adapters/sources/synthetic"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/platform/config"
 )
 
 // demoRunTimeout bounds one demo command (seeding, a synthetic run or the

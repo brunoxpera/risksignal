@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/xpera/risksignal/internal/application/normalise"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application/normalise"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // This file implements the method computation of ARCH-003 §3 (ch. 9.2,

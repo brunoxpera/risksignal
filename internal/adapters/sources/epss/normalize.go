@@ -13,7 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // Stable RecordError reason codes of the normaliser (ch. 5.2: error_code +

@@ -38,8 +38,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/xpera/risksignal/internal/application/normalise"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application/normalise"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // EpssHistoryObservation is one row of the run's daily set as the history

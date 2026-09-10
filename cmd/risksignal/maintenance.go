@@ -16,8 +16,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/xpera/risksignal/db/migrations"
-	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/brunoxpera/risksignal/db/migrations"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate"
 )
 
 // runMaintenance dispatches `risksignal maintenance ...`.

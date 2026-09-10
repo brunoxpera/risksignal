@@ -39,9 +39,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application/matching"
-	"github.com/xpera/risksignal/internal/application/normalise"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application/matching"
+	"github.com/brunoxpera/risksignal/internal/application/normalise"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // Batch-size guides of the bulk matching runs (ARCH-003 §5: "guide 500").

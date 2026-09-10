@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // SourceType identifies a source adapter (ARCH-002 §1); the sources table

@@ -43,11 +43,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
-	"github.com/xpera/risksignal/internal/adapters/sources/kev"
-	"github.com/xpera/risksignal/internal/adapters/sources/nvd"
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/sources/kev"
+	"github.com/brunoxpera/risksignal/internal/adapters/sources/nvd"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
 )
 
 // twofoldNvdConfig fixes the overlap to 24 h (ARCH-002 §2.1 config key)

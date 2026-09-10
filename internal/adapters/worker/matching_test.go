@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
 )
 
 // scriptedMatchingRunner is a MatchingJobRunner whose outcomes the test

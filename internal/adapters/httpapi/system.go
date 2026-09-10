@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/xpera/risksignal/internal/platform/buildinfo"
+	"github.com/brunoxpera/risksignal/internal/platform/buildinfo"
 )
 
 // probeTimeout bounds one readiness probe. Readiness must never hang an

@@ -15,7 +15,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/xpera/risksignal/internal/platform/config"
+	"github.com/brunoxpera/risksignal/internal/platform/config"
 )
 
 // runDiagnose dispatches `risksignal diagnose ...`.

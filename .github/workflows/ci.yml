@@ -86,7 +86,7 @@ jobs:
           GO_LICENSES_VERSION: v1.6.0
         run: |
           go install github.com/google/go-licenses@${GO_LICENSES_VERSION}
-          "$(go env GOPATH)/bin/go-licenses" check --ignore github.com/xpera/risksignal ./...
+          "$(go env GOPATH)/bin/go-licenses" check --ignore github.com/brunoxpera/risksignal ./...
       - name: secret scan (gitleaks)
         env:
           GITLEAKS_VERSION: v8.30.1

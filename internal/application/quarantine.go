@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // Audit vocabulary of the quarantine commands (ARCH-002 §4, ch. 13.2

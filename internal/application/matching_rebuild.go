@@ -36,7 +36,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application/normalise"
+	"github.com/brunoxpera/risksignal/internal/application/normalise"
 )
 
 // rebuildPageResult is the assembled candidate batch of one component

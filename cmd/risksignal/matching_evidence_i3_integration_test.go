@@ -43,8 +43,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // TestMatchI3InsertCarriesDecisionRuleStateAndPairRead is the DEV-057

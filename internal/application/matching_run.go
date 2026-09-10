@@ -32,7 +32,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/xpera/risksignal/internal/application/matching"
+	"github.com/brunoxpera/risksignal/internal/application/matching"
 )
 
 // matchingBatchSize bounds the candidates of one RunMatching transaction

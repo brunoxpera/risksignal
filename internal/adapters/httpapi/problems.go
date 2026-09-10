@@ -12,8 +12,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/xpera/risksignal/internal/adapters/httpapi/gen"
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/adapters/httpapi/gen"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // problemType is the type URI of every I1b problem detail: "about:blank",

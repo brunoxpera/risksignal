@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // fixtureCaseIDs is the expected stable case set in document order: the

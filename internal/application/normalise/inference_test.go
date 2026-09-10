@@ -3,7 +3,7 @@ package normalise
 import (
 	"testing"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // Scheme-inference tests (ARCH-003 §2 item 6): the chain purl type → CPE

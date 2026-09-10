@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
 )
 
 // Config defaults and constants of the EPSS adapter (ARCH-002 §1/§2.3).

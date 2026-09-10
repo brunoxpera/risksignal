@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // Alias-closure tests (ARCH-003 §2 item 2): the match-time symmetric

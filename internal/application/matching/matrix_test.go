@@ -18,8 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/application/matching"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application/matching"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // methodCell is one reference-matrix cell: the fixture component (of the

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/platform/config"
+	"github.com/brunoxpera/risksignal/internal/platform/config"
 )
 
 // cliEnvKeys mirrors every loader input of the config package (config file

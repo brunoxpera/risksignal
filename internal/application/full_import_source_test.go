@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // windowSource is a scripted last-modified SourcePort for the driver

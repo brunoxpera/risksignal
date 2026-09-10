@@ -38,7 +38,7 @@ linters:
         - (*os.File).Close
         - (*database/sql.DB).Close
         - (*database/sql.Rows).Close
-        - (*github.com/xpera/risksignal/internal/adapters/postgres/migrate.Runner).Close
+        - (*github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate.Runner).Close
   exclusions:
     rules:
       # gosec G101 (hardcoded credentials) in test files: the flagged

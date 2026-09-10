@@ -64,8 +64,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/xpera/risksignal/internal/application/normalise"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application/normalise"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // Inventory limits (concept ch. 12.3 strict input limits; ARCH-003 §1.3

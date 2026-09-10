@@ -51,7 +51,7 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // MatchingJobRunner is the application surface the matching job handlers

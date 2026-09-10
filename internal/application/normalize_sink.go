@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // normalizeSink is the persistence half of a normalise pass (ARCH-002 §1,

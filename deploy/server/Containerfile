@@ -31,9 +31,9 @@ ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
 RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags="-s -w \
-        -X github.com/xpera/risksignal/internal/platform/buildinfo.Version=${VERSION} \
-        -X github.com/xpera/risksignal/internal/platform/buildinfo.Commit=${GIT_COMMIT} \
-        -X github.com/xpera/risksignal/internal/platform/buildinfo.BuildTime=${BUILD_TIME}" \
+        -X github.com/brunoxpera/risksignal/internal/platform/buildinfo.Version=${VERSION} \
+        -X github.com/brunoxpera/risksignal/internal/platform/buildinfo.Commit=${GIT_COMMIT} \
+        -X github.com/brunoxpera/risksignal/internal/platform/buildinfo.BuildTime=${BUILD_TIME}" \
     -o /out/risksignal-server ./cmd/risksignal-server
 
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
@@ -44,7 +44,7 @@ ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
 LABEL org.opencontainers.image.title="risksignal-server" \
       org.opencontainers.image.description="RiskSignal server: REST API, web UI and system endpoints" \
-      org.opencontainers.image.source="https://github.com/xpera/risksignal" \
+      org.opencontainers.image.source="https://github.com/brunoxpera/risksignal" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.created="${BUILD_TIME}"

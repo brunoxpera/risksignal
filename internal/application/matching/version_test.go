@@ -9,7 +9,7 @@ package matching
 import (
 	"testing"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // cpe23 renders a CPE 2.3 application binding with a concrete version

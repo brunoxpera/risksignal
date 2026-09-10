@@ -6,7 +6,7 @@
 // The values are injected at link time. The Makefile build target compiles
 // every binary with
 //
-//	go build -ldflags "-X github.com/xpera/risksignal/internal/platform/buildinfo.Version=... \
+//	go build -ldflags "-X github.com/brunoxpera/risksignal/internal/platform/buildinfo.Version=... \
 //	                  -X .../buildinfo.Commit=... -X .../buildinfo.BuildTime=..."
 //
 // so the version that answers requests is the version that was built. A

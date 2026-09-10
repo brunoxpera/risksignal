@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/xpera/risksignal/internal/domain"
-	"github.com/xpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
 )
 
 // Tx is the handle of one database transaction. It is an alias of pgx.Tx —

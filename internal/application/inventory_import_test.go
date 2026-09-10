@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // inventoryCSV joins the canonical header with the given data rows.

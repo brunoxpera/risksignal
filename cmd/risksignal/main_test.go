@@ -29,8 +29,8 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/xpera/risksignal/db/migrations"
-	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/brunoxpera/risksignal/db/migrations"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate"
 )
 
 // defaultTestDBURL points at the compose db service (compose.yaml, WP-1a.03).

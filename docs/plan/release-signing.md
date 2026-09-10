@@ -32,7 +32,7 @@ no long-lived private key to store, rotate or leak.
    The GitHub Actions OIDC token (job permission `id-token: write`) is the
    identity; no `COSIGN_*` secrets are involved.
 3. Consumers verify:
-   `cosign verify --certificate-identity-regexp '^https://github.com/xpera/risksignal/.github/workflows/release.yml@refs/tags/' \
+   `cosign verify --certificate-identity-regexp '^https://github.com/brunoxpera/risksignal/.github/workflows/release.yml@refs/tags/' \
    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
    ghcr.io/xpera/risksignal/server@sha256:<digest>`
 

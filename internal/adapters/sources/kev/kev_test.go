@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // Catalog fixtures (shape of the official KEV feed,

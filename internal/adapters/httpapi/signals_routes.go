@@ -10,7 +10,7 @@ package httpapi
 import (
 	"net/http"
 
-	"github.com/xpera/risksignal/internal/adapters/httpapi/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/httpapi/gen"
 )
 
 // RegisterSignalRoutes mounts the generated listSignals and getSignal

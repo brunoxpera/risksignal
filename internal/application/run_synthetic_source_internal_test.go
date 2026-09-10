@@ -3,7 +3,7 @@ package application
 import (
 	"testing"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // White-box tests of the run helpers (they exercise unexported code, so

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // Fixed window of the fetch tests: the injected clock's now (Window.To)

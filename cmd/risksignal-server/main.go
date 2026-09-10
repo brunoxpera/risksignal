@@ -34,17 +34,17 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/xpera/risksignal/db/migrations"
-	"github.com/xpera/risksignal/internal/adapters/httpapi"
-	"github.com/xpera/risksignal/internal/adapters/postgres"
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
-	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
-	"github.com/xpera/risksignal/internal/adapters/postgres/repo"
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/platform/buildinfo"
-	"github.com/xpera/risksignal/internal/platform/clock"
-	"github.com/xpera/risksignal/internal/platform/config"
-	"github.com/xpera/risksignal/internal/platform/logging"
+	"github.com/brunoxpera/risksignal/db/migrations"
+	"github.com/brunoxpera/risksignal/internal/adapters/httpapi"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/platform/buildinfo"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/platform/config"
+	"github.com/brunoxpera/risksignal/internal/platform/logging"
 )
 
 // shutdownGracePeriod is how long the server waits for in-flight requests

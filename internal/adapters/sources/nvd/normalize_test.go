@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // Realistic API 2.0 fixture pages (shape verified against the live API:

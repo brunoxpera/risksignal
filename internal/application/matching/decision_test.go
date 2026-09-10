@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application/matching"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application/matching"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // decisionFixture is one exclude/override test: a raw canonical-product

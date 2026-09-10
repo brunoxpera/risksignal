@@ -46,10 +46,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/xpera/risksignal/db/migrations"
-	"github.com/xpera/risksignal/internal/adapters/postgres"
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
-	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/brunoxpera/risksignal/db/migrations"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate"
 )
 
 // mustUUID scans a canonical uuid string into the pgtype.UUID the generated

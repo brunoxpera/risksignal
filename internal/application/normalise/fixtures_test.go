@@ -3,7 +3,7 @@ package normalise
 import (
 	"testing"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // Reference version fixture set (ARCH-003 §8a, WP-3.04 exit criterion):

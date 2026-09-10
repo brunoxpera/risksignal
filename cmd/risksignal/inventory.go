@@ -48,9 +48,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
-	"github.com/xpera/risksignal/internal/adapters/postgres/repo"
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // inventoryCommandTimeout bounds one database-backed inventory command

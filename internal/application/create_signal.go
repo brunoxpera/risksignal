@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/xpera/risksignal/internal/domain"
-	"github.com/xpera/risksignal/internal/platform/uuid"
+	"github.com/brunoxpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/platform/uuid"
 )
 
 // Event and audit vocabulary of the CreateSignal command (ARCH-001 §2).

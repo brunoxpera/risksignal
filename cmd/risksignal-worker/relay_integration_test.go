@@ -53,13 +53,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/xpera/risksignal/db/migrations"
-	"github.com/xpera/risksignal/internal/adapters/postgres"
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
-	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
-	"github.com/xpera/risksignal/internal/adapters/postgres/repo"
-	"github.com/xpera/risksignal/internal/adapters/worker"
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/db/migrations"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
+	"github.com/brunoxpera/risksignal/internal/adapters/worker"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // defaultTestDBURL points at the compose db service (compose.yaml, WP-1a.03).

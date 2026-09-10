@@ -3,7 +3,7 @@ package normalise
 import (
 	"strings"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // This file implements the version-scheme inference of ARCH-003 §2 item 6:

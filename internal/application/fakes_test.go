@@ -35,10 +35,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
-	"github.com/xpera/risksignal/internal/platform/clock"
-	"github.com/xpera/risksignal/internal/platform/uuid"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/platform/uuid"
 )
 
 // fixedNow is the single point in time every fake clock reads, so tests can

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // seedPortalComponent seeds the inventory the run matches against: one asset

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // AffectedProduct is the vulnerability side of one match evaluation

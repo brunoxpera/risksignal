@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // Terminal statuses of a source run (ARCH-001 §1 source_runs.status; the

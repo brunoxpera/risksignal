@@ -45,7 +45,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/xpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
 )
 
 // decodeJSON parses a jsonb round-trip value into plain Go structures so the

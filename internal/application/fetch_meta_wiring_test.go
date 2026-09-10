@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // TestFetchSourceFullSetStampsFetchedAtAndMaintainsContentHash is the

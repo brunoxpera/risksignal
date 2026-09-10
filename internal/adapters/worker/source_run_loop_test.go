@@ -29,10 +29,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/adapters/sources/kev"
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
-	"github.com/xpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/adapters/sources/kev"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
 )
 
 // loopSourceID is the fixed source id of the run-loop tests.

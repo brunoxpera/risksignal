@@ -22,7 +22,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 arch_file="$repo_root/.go-arch-lint.yml"
-module_path="github.com/xpera/risksignal" # mirror the real module path
+module_path="github.com/brunoxpera/risksignal" # mirror the real module path
 
 if [ ! -f "$arch_file" ]; then
   echo "verify-arch-gate: FAIL — $arch_file not found; cannot run the gate test." >&2

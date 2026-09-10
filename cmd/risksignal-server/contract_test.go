@@ -53,11 +53,11 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 
-	"github.com/xpera/risksignal/db/migrations"
-	"github.com/xpera/risksignal/internal/adapters/httpapi"
-	"github.com/xpera/risksignal/internal/adapters/httpapi/gen"
-	"github.com/xpera/risksignal/internal/adapters/postgres"
-	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/brunoxpera/risksignal/db/migrations"
+	"github.com/brunoxpera/risksignal/internal/adapters/httpapi"
+	"github.com/brunoxpera/risksignal/internal/adapters/httpapi/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate"
 )
 
 // openapiDocPath is the contract document, relative to this package's
@@ -507,7 +507,7 @@ func demoSeedBinary(t *testing.T) string {
 		//nolint:gosec // G204: the module path and build flags are constants;
 		// only the scratch output path varies (a MkdirTemp dir this test
 		// owns). No shell, no user input and no network reach the process.
-		cmd := exec.Command("go", "build", "-o", demoSeedBinaryPath, "github.com/xpera/risksignal/cmd/risksignal")
+		cmd := exec.Command("go", "build", "-o", demoSeedBinaryPath, "github.com/brunoxpera/risksignal/cmd/risksignal")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			demoSeedBinaryErr = fmt.Errorf("build demo CLI: %w (%s)", err, out)
 		}

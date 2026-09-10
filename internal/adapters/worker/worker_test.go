@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
 )
 
 // discardLogger keeps the scheduler quiet in tests that assert on health

@@ -15,8 +15,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // seedQuarantined fixtures one source, one raw record and one quarantined

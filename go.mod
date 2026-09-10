@@ -1,4 +1,4 @@
-module github.com/xpera/risksignal
+module github.com/brunoxpera/risksignal
 
 go 1.27
 

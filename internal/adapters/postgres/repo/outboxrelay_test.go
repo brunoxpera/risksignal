@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application"
 )
 
 // TestOutboxRelayClaimBatchRejectsInvalidLimit pins the batch-limit guard

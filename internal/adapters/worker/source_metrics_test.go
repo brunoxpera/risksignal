@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xpera/risksignal/internal/application"
-	"github.com/xpera/risksignal/internal/platform/metrics"
+	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/platform/metrics"
 )
 
 // metricSample finds the sample of one metric name and source id.

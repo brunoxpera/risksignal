@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xpera/risksignal/internal/platform/config"
+	"github.com/brunoxpera/risksignal/internal/platform/config"
 )
 
 // Exit codes (concept ch. 11.3, WP-1a.09). 0 is success; every other code

@@ -56,7 +56,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/xpera/risksignal/internal/adapters/postgres/migrate"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate"
 )
 
 // constraintDef returns the pg_get_constraintdef text of the named

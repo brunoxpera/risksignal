@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xpera/risksignal/internal/application/matching"
-	"github.com/xpera/risksignal/internal/domain"
+	"github.com/brunoxpera/risksignal/internal/application/matching"
+	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
 // run evaluates one statement against one component and fails the test on
