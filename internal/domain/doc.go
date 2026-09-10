@@ -40,7 +40,14 @@
 //     CanTransition, Transition, IsReopen), the override-survival fields on
 //     RiskSignal (Override/Revert, the ADR-015 auto_* mirror), the Comment
 //     value object and the SLA value objects SLATarget/SLATimeProfile/
-//     SlaClock (pause/resume/fulfil/tighten/reset + effective deadline).
+//     SlaClock (pause/resume/fulfil/tighten/reset + effective deadline);
+//   - the I5a authorisation vocabulary of ARCH-005 §3/§5 (role.go,
+//     permission.go, scope.go, authz.go, identity.go): the Role, Permission
+//     and Scope enums, the §12.2 permission matrix as pure data
+//     (Role.Permissions(), with the rules.manage extension and the
+//     audit.reveal_identity = {Auditor, Product Owner} rule), the pure
+//     deny-by-default Authorize decision with its object-scope check, and
+//     the Identity/Principal value types.
 //
 // The package is pure by construction: it imports only the Go standard
 // library, never an adapter or a generated API package (go-arch-lint gate,
