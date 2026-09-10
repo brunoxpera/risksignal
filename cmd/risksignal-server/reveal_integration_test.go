@@ -31,7 +31,8 @@ const revealAuditorUser = "e5a00000-0000-4000-8000-000000000005"
 const seedEventID = "00000000-0000-4000-8000-0000000000f1"
 
 func TestRevealActorEndpointAgainstRealDatabase(t *testing.T) {
-	t.Parallel()
+	// Not parallel: newServerTestDB owns a single fixed scratch database, so
+	// this test runs sequentially like the other newServerTestDB users.
 	dbURL := newServerTestDB(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
