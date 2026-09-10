@@ -224,6 +224,21 @@ change, without touching the database:
     RISKSIGNAL_OIDC_ISSUER='http://127.0.0.1:9000/oidc' \
     bin/risksignal maintenance migrate --dry-run
 
+The Compose `oidc` service is the mock OIDC test provider (`cmd/mock-oidc`,
+WP-5a.04, D-003). It issues id tokens for one configurable test user, so the
+role matrix is exercised by restarting the sidecar with a different user. Its
+user is read from the environment:
+
+- `MOCK_OIDC_ROLES` — comma/space-separated internal-role list seeded on first
+  login (default `security_analyst`).
+- `MOCK_OIDC_SUBJECT` — token subject (default `1234567890`).
+- `MOCK_OIDC_EMAIL` — user email (default `jane.doe@example.com`).
+- `MOCK_OIDC_NAME` — preferred username (default `jane.doe`).
+
+For example, run the provider as an administrator:
+
+    MOCK_OIDC_ROLES="security_analyst, administrator" go run ./cmd/mock-oidc
+
 ### Lint and generate
 
     make lint      # architecture gate (go-arch-lint check) plus gofmt check plus go vet
