@@ -3,6 +3,7 @@ package oidc
 import (
 	"context"
 	"crypto/rsa"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -203,7 +204,7 @@ func (v *Verifier) verify(ctx context.Context, rawToken, expectedNonce string) (
 	if claimString(claims, "sub") == "" {
 		return nil, fmt.Errorf("%w: subject claim is missing", ErrInvalidToken)
 	}
-	if expectedNonce != "" && claimString(claims, "nonce") != expectedNonce {
+	if expectedNonce != "" && subtle.ConstantTimeCompare([]byte(claimString(claims, "nonce")), []byte(expectedNonce)) != 1 {
 		return nil, fmt.Errorf("%w: nonce mismatch", ErrInvalidToken)
 	}
 	return claims, nil
