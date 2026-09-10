@@ -183,6 +183,15 @@ type fakeDB struct {
 	// exports is the committed export-job store of the DEV-115 read/write
 	// paths (the fake ExportRepo stages inserts into it and reads it back).
 	exports []application.Export
+	// retention is the committed retention state of the DEV-116 use cases: the
+	// retention-run store (the report rows), the legal holds and the candidate
+	// seed; notifications and priorityFactors model the dependent rows the
+	// retention deletion touches (they are not modelled by any earlier fake).
+	retentionRuns       []application.RetentionRun
+	legalHolds          []application.LegalHold
+	retentionCandidates []application.RetentionCandidate
+	notifications       []application.Notification
+	priorityFactors     []retentionPriorityFactor
 }
 
 func (d *fakeDB) hasSignalForMatch(matchID string) bool {
@@ -409,6 +418,16 @@ type fakeStaged struct {
 	// exports is the staged export-row inserts of the DEV-115 CreateExport
 	// command, published on commit (discarded on rollback).
 	exports []application.Export
+	// retention is the staged DEV-116 retention state: the run-row inserts and
+	// lifecycle updates, the legal-hold inserts/releases, the in-place
+	// redactions and the referentially-safe deletions. Commit applies them to
+	// the committed retention state, rollback discards them.
+	retentionRunInserts []application.RetentionRun
+	retentionRunUpdates []application.RetentionRun
+	holdInserts         []application.LegalHold
+	holdReleases        []retentionHoldRelease
+	redactions          []retentionRedaction
+	deletions           []retentionDeletion
 }
 
 // storedImportMark is one staged staged-import commit-mark (WP-5b.03).
@@ -483,6 +502,20 @@ func (t *fakeTx) commit() {
 	}
 	t.db.imports = append(t.db.imports, t.staged.importInserts...)
 	t.db.exports = append(t.db.exports, t.staged.exports...)
+	t.db.retentionRuns = append(t.db.retentionRuns, t.staged.retentionRunInserts...)
+	for _, r := range t.staged.retentionRunUpdates {
+		t.db.applyRetentionRun(r)
+	}
+	t.db.legalHolds = append(t.db.legalHolds, t.staged.holdInserts...)
+	for _, rel := range t.staged.holdReleases {
+		t.db.applyHoldRelease(rel)
+	}
+	for _, red := range t.staged.redactions {
+		t.db.applyRetentionRedaction(red)
+	}
+	for _, del := range t.staged.deletions {
+		t.db.applyRetentionDeletion(del)
+	}
 	for _, m := range t.staged.importMarks {
 		for i := range t.db.imports {
 			if t.db.imports[i].ID != m.id {
@@ -1627,6 +1660,8 @@ type harness struct {
 	exports     *fakeExportRepo
 	exportStore *fakeExportStore
 
+	retention *fakeRetentionRepo
+
 	svc *application.Service
 }
 
@@ -1664,6 +1699,7 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 	h.sourceMonitor = &fakeSourceMonitorRepo{db: h.db}
 	h.exports = &fakeExportRepo{db: h.db}
 	h.exportStore = &fakeExportStore{artifacts: map[string][]byte{}}
+	h.retention = &fakeRetentionRepo{db: h.db}
 	deps := application.ServiceDeps{
 		Signals:          h.signals,
 		Audit:            h.audit,
@@ -1689,6 +1725,7 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 		SourceMonitor:    h.sourceMonitor,
 		Exports:          h.exports,
 		ExportStore:      h.exportStore,
+		Retention:        h.retention,
 		Clock:            h.clock,
 		RunTx:            h.runner.Run,
 	}
