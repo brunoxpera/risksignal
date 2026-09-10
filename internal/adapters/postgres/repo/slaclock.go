@@ -60,6 +60,70 @@ func (r *SlaClockRepo) Upsert(ctx context.Context, tx application.Tx, clock doma
 	return slaClockFromRow(row), nil
 }
 
+// Get returns one clock by its natural key (signal_id, target) and whether it
+// exists — the read the priority-upgrade treatment takes before it decides
+// whether a target's clock is missing (create it) or present (tighten it if
+// the new deadline is earlier). A missing clock is (zero, false, nil), not an
+// error. The read runs on the caller's transaction so it sees the snapshot the
+// following write acts on.
+func (r *SlaClockRepo) Get(ctx context.Context, tx application.Tx, signalID string, target domain.SLATarget) (domain.SlaClock, bool, error) {
+	const op = "sla_clocks.get"
+
+	uid, err := toUUID(signalID)
+	if err != nil {
+		return domain.SlaClock{}, false, application.ValidationError(op, err)
+	}
+	if !target.Valid() {
+		return domain.SlaClock{}, false, application.Validationf(op, "invalid SLA target %q", target)
+	}
+	row, err := r.q.WithTx(tx).GetSlaClock(ctx, gen.GetSlaClockParams{
+		SignalID: uid,
+		Target:   string(target),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.SlaClock{}, false, nil
+		}
+		return domain.SlaClock{}, false, mapDBError(op, err)
+	}
+	return slaClockFromRow(row), true, nil
+}
+
+// Tighten shortens one open clock's deadline to deadlineAt (ARCH-004 §4.3),
+// reporting whether it changed the clock. The statement's
+// `deadline_at > $2 AND fulfilled_at IS NULL` guard is the whole rule: only a
+// clock whose stored deadline is later than deadlineAt — and that is not
+// fulfilled — matches, so an upgrade never lengthens a window and a re-run is
+// idempotent. A missing, fulfilled or already-earlier clock matches zero rows
+// and reports changed = false (not an error). The stored clock is returned
+// when a row changed.
+func (r *SlaClockRepo) Tighten(ctx context.Context, tx application.Tx, signalID string, target domain.SLATarget, deadlineAt time.Time) (domain.SlaClock, bool, error) {
+	const op = "sla_clocks.tighten"
+
+	uid, err := toUUID(signalID)
+	if err != nil {
+		return domain.SlaClock{}, false, application.ValidationError(op, err)
+	}
+	if !target.Valid() {
+		return domain.SlaClock{}, false, application.Validationf(op, "invalid SLA target %q", target)
+	}
+	if deadlineAt.IsZero() {
+		return domain.SlaClock{}, false, application.Validationf(op, "deadline instant must not be zero")
+	}
+	row, err := r.q.WithTx(tx).TightenSlaClock(ctx, gen.TightenSlaClockParams{
+		DeadlineAt: toTS(deadlineAt),
+		SignalID:   uid,
+		Target:     string(target),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.SlaClock{}, false, nil // missing / fulfilled / already at least as early
+		}
+		return domain.SlaClock{}, false, mapDBError(op, err)
+	}
+	return slaClockFromRow(row), true, nil
+}
+
 // Fulfil marks the target met at the instant (ARCH-004 §4.3), returning the
 // stored clock and whether the fulfil changed it. The statement's
 // fulfilled_at IS NULL guard makes it idempotent: an already-fulfilled clock

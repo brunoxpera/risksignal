@@ -27,6 +27,30 @@ ON CONFLICT (signal_id, target) DO UPDATE SET
     paused_at      = EXCLUDED.paused_at
 RETURNING *;
 
+-- GetSlaClock reads one clock by its natural key (signal_id, target) — the
+-- read the priority-upgrade treatment takes before it decides whether a
+-- target's clock is missing (create it) or present (tighten it if the new
+-- deadline is earlier). It runs on the caller's transaction so the read sees
+-- the same snapshot the following write acts on.
+-- name: GetSlaClock :one
+SELECT *
+FROM sla_clocks
+WHERE signal_id = @signal_id AND target = @target;
+
+-- TightenSlaClock shortens the deadline of an open clock on a priority
+-- upgrade (ARCH-004 §4.3): the deadline becomes the new value only when it
+-- is earlier than the stored one, so an upgrade never lengthens a clock and
+-- a re-run is idempotent. The fulfilled_at IS NULL guard leaves a fulfilled
+-- clock untouched (its target is met; there is no window to shorten). A
+-- clock that is missing, already fulfilled or already at least as early
+-- matches zero rows — the adapter reports "not tightened".
+-- name: TightenSlaClock :one
+UPDATE sla_clocks SET
+    deadline_at = @deadline_at
+WHERE signal_id = @signal_id AND target = @target
+  AND fulfilled_at IS NULL AND deadline_at > @deadline_at
+RETURNING *;
+
 -- FulfilSlaClock marks the target met at the instant (ARCH-004 §4.3). The
 -- fulfilled_at IS NULL guard makes it idempotent: the first fulfil matches
 -- the row, an already-fulfilled clock matches zero rows (the adapter reports

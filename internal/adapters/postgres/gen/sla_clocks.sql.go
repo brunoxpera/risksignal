@@ -44,6 +44,38 @@ func (q *Queries) FulfilSlaClock(ctx context.Context, arg FulfilSlaClockParams) 
 	return i, err
 }
 
+const getSlaClock = `-- name: GetSlaClock :one
+SELECT id, signal_id, target, started_at, deadline_at, fulfilled_at, paused_seconds, paused_at
+FROM sla_clocks
+WHERE signal_id = $1 AND target = $2
+`
+
+type GetSlaClockParams struct {
+	SignalID pgtype.UUID
+	Target   string
+}
+
+// GetSlaClock reads one clock by its natural key (signal_id, target) — the
+// read the priority-upgrade treatment takes before it decides whether a
+// target's clock is missing (create it) or present (tighten it if the new
+// deadline is earlier). It runs on the caller's transaction so the read sees
+// the same snapshot the following write acts on.
+func (q *Queries) GetSlaClock(ctx context.Context, arg GetSlaClockParams) (SlaClock, error) {
+	row := q.db.QueryRow(ctx, getSlaClock, arg.SignalID, arg.Target)
+	var i SlaClock
+	err := row.Scan(
+		&i.ID,
+		&i.SignalID,
+		&i.Target,
+		&i.StartedAt,
+		&i.DeadlineAt,
+		&i.FulfilledAt,
+		&i.PausedSeconds,
+		&i.PausedAt,
+	)
+	return i, err
+}
+
 const pauseSlaClock = `-- name: PauseSlaClock :one
 UPDATE sla_clocks SET
     paused_at = $1
@@ -206,6 +238,43 @@ func (q *Queries) ScanDueSlaClocks(ctx context.Context) ([]SlaClock, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const tightenSlaClock = `-- name: TightenSlaClock :one
+UPDATE sla_clocks SET
+    deadline_at = $1
+WHERE signal_id = $2 AND target = $3
+  AND fulfilled_at IS NULL AND deadline_at > $1
+RETURNING id, signal_id, target, started_at, deadline_at, fulfilled_at, paused_seconds, paused_at
+`
+
+type TightenSlaClockParams struct {
+	DeadlineAt pgtype.Timestamptz
+	SignalID   pgtype.UUID
+	Target     string
+}
+
+// TightenSlaClock shortens the deadline of an open clock on a priority
+// upgrade (ARCH-004 §4.3): the deadline becomes the new value only when it
+// is earlier than the stored one, so an upgrade never lengthens a clock and
+// a re-run is idempotent. The fulfilled_at IS NULL guard leaves a fulfilled
+// clock untouched (its target is met; there is no window to shorten). A
+// clock that is missing, already fulfilled or already at least as early
+// matches zero rows — the adapter reports "not tightened".
+func (q *Queries) TightenSlaClock(ctx context.Context, arg TightenSlaClockParams) (SlaClock, error) {
+	row := q.db.QueryRow(ctx, tightenSlaClock, arg.DeadlineAt, arg.SignalID, arg.Target)
+	var i SlaClock
+	err := row.Scan(
+		&i.ID,
+		&i.SignalID,
+		&i.Target,
+		&i.StartedAt,
+		&i.DeadlineAt,
+		&i.FulfilledAt,
+		&i.PausedSeconds,
+		&i.PausedAt,
+	)
+	return i, err
 }
 
 const upsertSlaClock = `-- name: UpsertSlaClock :one
