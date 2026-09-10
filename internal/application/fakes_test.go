@@ -167,6 +167,11 @@ type fakeDB struct {
 	nextAssetID     int
 	aliasVersion    int
 	decisionVersion int
+	// imports is the committed staged-import store (WP-5b.03); nextImportID
+	// is its id generator (monotonic over the test, rolled-back transactions
+	// included — ids are only compared for identity).
+	imports      []application.InventoryImportRecord
+	nextImportID int
 	// priorityRulesets is the committed copy-on-write priority_rules store
 	// (WP-4.04b / DEV-077): version -> the full P1..P4 snapshot at it. The
 	// fake PriorityRuleRepo reads it (effective = MAX version) and stages
@@ -391,6 +396,17 @@ type fakeStaged struct {
 	// priorityRulesets are the staged priority-rules snapshot publishes
 	// (WP-4.04b), applied to the committed store on commit.
 	priorityRulesets []storedRuleset
+	// importInserts and importMarks are the staged staged-import writes
+	// (WP-5b.03), applied to the committed import store on commit.
+	importInserts []application.InventoryImportRecord
+	importMarks   []storedImportMark
+}
+
+// storedImportMark is one staged staged-import commit-mark (WP-5b.03).
+type storedImportMark struct {
+	id     string
+	counts application.InventoryImportCounts
+	now    time.Time
 }
 
 // storedRuleset is one staged priority-rules snapshot publish.
@@ -455,6 +471,20 @@ func (t *fakeTx) commit() {
 	}
 	for _, s := range t.staged.priorityRulesets {
 		t.db.priorityRulesets[s.version] = s.rules
+	}
+	t.db.imports = append(t.db.imports, t.staged.importInserts...)
+	for _, m := range t.staged.importMarks {
+		for i := range t.db.imports {
+			if t.db.imports[i].ID != m.id {
+				continue
+			}
+			t.db.imports[i].Status = application.InventoryImportCommitted
+			t.db.imports[i].CommittedAt = m.now
+			t.db.imports[i].AssetsCreated = m.counts.AssetsCreated
+			t.db.imports[i].AssetsUpdated = m.counts.AssetsUpdated
+			t.db.imports[i].ComponentsCreated = m.counts.ComponentsCreated
+			t.db.imports[i].ComponentsUpdated = m.counts.ComponentsUpdated
+		}
 	}
 	t.committed = true
 }
@@ -1555,6 +1585,14 @@ type harness struct {
 
 	users *fakeUserRepo
 
+	// I5b fakes (WP-5b.03): the asset read repo, the current-state inventory
+	// reader (the preview diffs against it) and the staged-import store. The
+	// user/role administration port is served by h.users itself (one shared
+	// in-memory user store).
+	assets          *fakeAssetRepo
+	inventoryReader *fakeInventoryReader
+	imports         *fakeInventoryImportRepo
+
 	svc *application.Service
 }
 
@@ -1586,26 +1624,33 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 	h.priorityRules = &fakePriorityRuleRepo{db: h.db}
 	h.factorSource = &fakePriorityFactorRepo{rebuilds: map[string]application.PriorityFactorRebuild{}}
 	h.users = newFakeUserRepo()
+	h.assets = &fakeAssetRepo{db: h.db}
+	h.inventoryReader = &fakeInventoryReader{db: h.db}
+	h.imports = &fakeInventoryImportRepo{db: h.db}
 	deps := application.ServiceDeps{
-		Signals:         h.signals,
-		Audit:           h.audit,
-		Outbox:          h.outbox,
-		Vulnerabilities: h.vulns,
-		Matches:         h.matches,
-		SourceRuns:      h.runs,
-		RawRecords:      h.raws,
-		Sources:         h.sources,
-		Quarantine:      h.quarantine,
-		Components:      h.comps,
-		Inventory:       h.inventory,
-		SignalTriage:    h.signalTriage,
-		Comments:        h.comments,
-		SlaClocks:       h.slaClocks,
-		PriorityRules:   h.priorityRules,
-		FactorSource:    h.factorSource,
-		Users:           h.users,
-		Clock:           h.clock,
-		RunTx:           h.runner.Run,
+		Signals:          h.signals,
+		Audit:            h.audit,
+		Outbox:           h.outbox,
+		Vulnerabilities:  h.vulns,
+		Matches:          h.matches,
+		SourceRuns:       h.runs,
+		RawRecords:       h.raws,
+		Sources:          h.sources,
+		Quarantine:       h.quarantine,
+		Components:       h.comps,
+		Inventory:        h.inventory,
+		SignalTriage:     h.signalTriage,
+		Comments:         h.comments,
+		SlaClocks:        h.slaClocks,
+		PriorityRules:    h.priorityRules,
+		FactorSource:     h.factorSource,
+		Users:            h.users,
+		Assets:           h.assets,
+		InventoryReader:  h.inventoryReader,
+		InventoryImports: h.imports,
+		UserAdmin:        h.users,
+		Clock:            h.clock,
+		RunTx:            h.runner.Run,
 	}
 	for _, opt := range opts {
 		opt(&deps)
