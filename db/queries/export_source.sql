@@ -73,14 +73,14 @@ LEFT JOIN LATERAL (
         MIN(
             sc.deadline_at
             + make_interval(secs => sc.paused_seconds::double precision)
-            + CASE WHEN sc.paused_at IS NOT NULL THEN age(sc.paused_at, @now::timestamptz) ELSE interval '0' END
+            + CASE WHEN sc.paused_at IS NOT NULL THEN (@now::timestamptz) - sc.paused_at ELSE interval '0' END
         ) FILTER (WHERE sc.fulfilled_at IS NULL)                                          AS next_deadline,
         COALESCE(bool_or(sc.fulfilled_at IS NULL), false)                                 AS has_open,
         COALESCE(bool_or(
             sc.fulfilled_at IS NULL
             AND sc.deadline_at
                 + make_interval(secs => sc.paused_seconds::double precision)
-                + CASE WHEN sc.paused_at IS NOT NULL THEN age(sc.paused_at, @now::timestamptz) ELSE interval '0' END
+                + CASE WHEN sc.paused_at IS NOT NULL THEN (@now::timestamptz) - sc.paused_at ELSE interval '0' END
                 < @now::timestamptz
         ), false)                                                                         AS has_breached,
         count(*)                                                                          AS clock_count
