@@ -178,6 +178,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runInventory(e, commandArgs[1:])
 	case "quarantine":
 		return runQuarantine(e, commandArgs[1:])
+	case "signal":
+		return runSignal(e, commandArgs[1:])
 	default:
 		return e.emit(commandArgs[0], e.fail(exitValidation, classValidation,
 			"unknown command (run 'risksignal help' for usage)"))
@@ -320,6 +322,16 @@ commands:
                                     raw record of one isolated record
                                     (resolves on success; attempts + 1 and
                                     stays retryable on failure — audited)
+  signal acknowledge                apply the I5a reference triage command to
+        --signal <id> --version <n>  a signal (new -> in_review), gated by
+        [--as <subject>]             signals.triage inside the use case; the
+                                    CLI twin of POST
+                                    /api/v1/signals/{id}/commands (NFR-013)
+  signal override                   override a signal's effective priority
+        --signal <id>                (gated by signals.override, Analyst
+        --priority <P1..P4>          only): stores the computed value,
+        --reason <text>              stamps reason + actor; the CLI twin of
+        --version <n> [--as <subj>]  the same endpoint's override command
   help                              show this help
 
 The CLI is strictly non-interactive: it never prompts and never reads hidden

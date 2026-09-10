@@ -327,7 +327,13 @@ func newAppService(pool *pgxpool.Pool, clk clock.Clock) *application.Service {
 		// CreateSignal creates the SLA clocks of the signal's priority
 		// (ARCH-004 §4.3), so the demo chain wires the clock repository.
 		SlaClocks: repo.NewSlaClockRepo(q),
-		Clock:     clk,
+		// The I5a reference command (risksignal signal …, ARCH-005 §8) drives
+		// the I4 triage commands through the same ports the server root wires.
+		SignalTriage:  repo.NewSignalRepo(q),
+		Comments:      repo.NewCommentRepo(q),
+		PriorityRules: repo.NewPriorityRuleRepo(q),
+		FactorSource:  repo.NewPriorityFactorRepo(q),
+		Clock:         clk,
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)
 		},
