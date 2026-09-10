@@ -61,7 +61,7 @@ func NewAPIHandler(query SignalsQuery, reveal AuditReveal, commands SignalComman
 	h := &apiHandlers{
 		signalsHandler:         &signalsHandler{query: query, logger: logger},
 		auditRevealHandler:     auditRevealHandler{reveal: reveal, logger: logger},
-		signalCommandHandler:   signalCommandHandler{commands: commands, logger: logger},
+		signalCommandHandler:   signalCommandHandler{commands: commands, query: query, logger: logger},
 		inventoryImportHandler: &inventoryImportHandler{imports: surfaces.Inventory, logger: logger},
 		assetsHandler:          &assetsHandler{assets: surfaces.Assets, logger: logger},
 		userAdminHandler:       &userAdminHandler{admin: surfaces.Users, logger: logger},
