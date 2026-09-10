@@ -12,7 +12,11 @@
 // fetch_source.go / normalize_source.go / run_source.go) and the
 // quarantine review commands QuarantineList / QuarantineAck /
 // QuarantineReprocess (quarantine.go, ARCH-002 §4 state machine with one
-// audit event per transition).
+// audit event per transition). WP-4.04a (DEV-075) adds the I4 signal-triage
+// and SLA commands — TransitionSignal / AssignOwner / AddComment /
+// AcknowledgeSignal / OverridePriority / RevertPriority / PauseSla /
+// ResumeSla (signal_triage.go, ARCH-004 §2/§3/§4) — each writing its state
+// change, audit event and outbox event in one transaction.
 //
 // The layer depends only on the domain and on platform infrastructure
 // (.go-arch-lint.yml): every persistence concern sits behind the repository
