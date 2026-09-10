@@ -208,6 +208,31 @@ type Match struct {
 	AutoScore pgtype.Int4
 }
 
+// One notification per (outbox_event_id, channel) (ARCH-004 §6.2, ch. 14.3): the immutable outbox id is the channel idempotency key, so a redelivery is a no-op — exactly one notification per event and channel (FR-023)
+type Notification struct {
+	ID pgtype.UUID
+	// The signal this notification concerns
+	SignalID pgtype.UUID
+	// Delivery channel: in_app | smtp | webhook (ARCH-004 §6.1)
+	Channel string
+	// Event kind: signal.created | signal.escalated | signal.reopen_proposed | reminder
+	Kind string
+	// SMTP/webhook target (config-derived); NULL for the in-app surface
+	Recipient pgtype.Text
+	// Delivery state: pending | delivered | failed
+	Status string
+	// Delivery attempts so far; bounded by the relay maxAttempts (ch. 14.2)
+	Attempts int32
+	// Last delivery error text (failed deliveries); NULL while clean
+	LastError pgtype.Text
+	// When the delivery succeeded; NULL while pending/failed
+	DeliveredAt pgtype.Timestamptz
+	// The immutable outbox row id — the channel idempotency key (UQ (outbox_event_id, channel), ch. 14.3)
+	OutboxEventID string
+	// Insert instant from the injected clock; orders the per-signal list
+	CreatedAt pgtype.Timestamptz
+}
+
 // Transactional outbox / job queue (ch. 7.1, 5.1, 7.3): one row per integration event or background job, written atomically with its state change (ARCH-001 §1)
 type Outbox struct {
 	ID pgtype.UUID

@@ -96,3 +96,89 @@ WHERE (sqlc.narg('priority')::text IS NULL OR rs.priority = sqlc.narg('priority'
   AND (sqlc.narg('status')::text IS NULL OR rs.status = sqlc.narg('status'))
 ORDER BY rs.priority, rs.created_at, rs.id
 LIMIT @max_rows;
+
+-- The I4 signal writes (ARCH-004 §2.1/§2.3/§3, WP-4.03 / DEV-073). Every
+-- mutating statement is guarded on the optimistic-lock version the client
+-- read (WHERE id = $1 AND version = $2): a stale version matches zero rows,
+-- which the command layer maps to a conflict (HTTP 409, ch. 7.3), never a
+-- silent overwrite. The statement bumps version, so a losing writer's next
+-- attempt uses the fresh value. RETURNING * hands the stored row back for
+-- the caller's mapping in one round trip.
+
+-- GetRiskSignalByID returns the plain stored signal row (no joins) — the
+-- read the I4 command layer takes before it applies a guarded transition
+-- and the canonical row for the writes' RETURNING shape. A missing row is a
+-- not-found error.
+-- name: GetRiskSignalByID :one
+SELECT *
+FROM risk_signals
+WHERE id = @id;
+
+-- TransitionRiskSignal is the ch. 6.3 status change of ARCH-004 §2: it sets
+-- the new status and the closed_at stamp (the entry instant of a closed
+-- state, NULL when leaving to a non-closed state or reopening) under the
+-- optimistic lock. The domain state machine (domain.Transition) rules which
+-- edges are legal; this statement guards the row is still at the version the
+-- caller read and bumps it. Zero rows = a stale version (conflict).
+-- name: TransitionRiskSignal :one
+UPDATE risk_signals SET
+    status    = @status,
+    closed_at = @closed_at,
+    version   = version + 1
+WHERE id = @id AND version = @expected_version
+RETURNING *;
+
+-- OverrideRiskSignalPriority is the manual re-prioritisation of ARCH-004 §3
+-- (ADR-015 mirror): it sets the effective priority, preserves the computed
+-- value in auto_priority and stamps the mandatory reason/actor/time — the
+-- four override columns are all-set together (the schema CHECK enforces the
+-- all-or-nothing invariant). The caller supplies the computed auto_priority
+-- it read; the optimistic lock rejects a stale write.
+-- name: OverrideRiskSignalPriority :one
+UPDATE risk_signals SET
+    priority          = @priority,
+    auto_priority     = @auto_priority,
+    override_reason   = @override_reason,
+    override_actor_id = @override_actor_id,
+    override_at       = @override_at,
+    version           = version + 1
+WHERE id = @id AND version = @expected_version
+RETURNING *;
+
+-- RevertRiskSignalPriority restores the computed priority from auto_priority
+-- and clears the four override columns in one guarded write (ARCH-004 §3).
+-- priority = auto_priority reads the pre-update value, so the computed value
+-- is restored before the override quartet is cleared; the row ends purely
+-- computed (all four NULL — the CHECK holds). The optimistic lock rejects a
+-- stale write.
+-- name: RevertRiskSignalPriority :one
+UPDATE risk_signals SET
+    priority          = auto_priority,
+    auto_priority     = NULL,
+    override_reason   = NULL,
+    override_actor_id = NULL,
+    override_at       = NULL,
+    version           = version + 1
+WHERE id = @id AND version = @expected_version
+RETURNING *;
+
+-- AssignRiskSignalOwner assigns the (opaque, until I5a) owner principal under
+-- the optimistic lock (ARCH-004 §2.1). "" clears the owner (NULL).
+-- name: AssignRiskSignalOwner :one
+UPDATE risk_signals SET
+    owner   = @owner,
+    version = version + 1
+WHERE id = @id AND version = @expected_version
+RETURNING *;
+
+-- MarkRiskSignalEscalated records the first P1 escalation instant (ARCH-004
+-- §4.4). The escalated_at IS NULL guard makes it set-once: the first
+-- escalation matches the row, every later call matches zero rows (the
+-- adapter reports "already escalated"), so a reminder cadence can never
+-- re-stamp the instant. Zero rows is not an error.
+-- name: MarkRiskSignalEscalated :one
+UPDATE risk_signals SET
+    escalated_at = @escalated_at,
+    version      = version + 1
+WHERE id = @id AND escalated_at IS NULL
+RETURNING *;

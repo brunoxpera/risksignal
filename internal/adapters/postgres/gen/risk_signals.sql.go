@@ -11,6 +11,88 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const assignRiskSignalOwner = `-- name: AssignRiskSignalOwner :one
+UPDATE risk_signals SET
+    owner   = $1,
+    version = version + 1
+WHERE id = $2 AND version = $3
+RETURNING id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at, auto_priority, override_reason, override_actor_id, override_at, escalated_at
+`
+
+type AssignRiskSignalOwnerParams struct {
+	Owner           pgtype.Text
+	ID              pgtype.UUID
+	ExpectedVersion int32
+}
+
+// AssignRiskSignalOwner assigns the (opaque, until I5a) owner principal under
+// the optimistic lock (ARCH-004 §2.1). "" clears the owner (NULL).
+func (q *Queries) AssignRiskSignalOwner(ctx context.Context, arg AssignRiskSignalOwnerParams) (RiskSignal, error) {
+	row := q.db.QueryRow(ctx, assignRiskSignalOwner, arg.Owner, arg.ID, arg.ExpectedVersion)
+	var i RiskSignal
+	err := row.Scan(
+		&i.ID,
+		&i.MatchID,
+		&i.Priority,
+		&i.Status,
+		&i.Owner,
+		&i.DueAt,
+		&i.ClosedAt,
+		&i.Version,
+		&i.RuleVersion,
+		&i.Factors,
+		&i.CreatedAt,
+		&i.AutoPriority,
+		&i.OverrideReason,
+		&i.OverrideActorID,
+		&i.OverrideAt,
+		&i.EscalatedAt,
+	)
+	return i, err
+}
+
+const getRiskSignalByID = `-- name: GetRiskSignalByID :one
+
+SELECT id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at, auto_priority, override_reason, override_actor_id, override_at, escalated_at
+FROM risk_signals
+WHERE id = $1
+`
+
+// The I4 signal writes (ARCH-004 §2.1/§2.3/§3, WP-4.03 / DEV-073). Every
+// mutating statement is guarded on the optimistic-lock version the client
+// read (WHERE id = $1 AND version = $2): a stale version matches zero rows,
+// which the command layer maps to a conflict (HTTP 409, ch. 7.3), never a
+// silent overwrite. The statement bumps version, so a losing writer's next
+// attempt uses the fresh value. RETURNING * hands the stored row back for
+// the caller's mapping in one round trip.
+// GetRiskSignalByID returns the plain stored signal row (no joins) — the
+// read the I4 command layer takes before it applies a guarded transition
+// and the canonical row for the writes' RETURNING shape. A missing row is a
+// not-found error.
+func (q *Queries) GetRiskSignalByID(ctx context.Context, id pgtype.UUID) (RiskSignal, error) {
+	row := q.db.QueryRow(ctx, getRiskSignalByID, id)
+	var i RiskSignal
+	err := row.Scan(
+		&i.ID,
+		&i.MatchID,
+		&i.Priority,
+		&i.Status,
+		&i.Owner,
+		&i.DueAt,
+		&i.ClosedAt,
+		&i.Version,
+		&i.RuleVersion,
+		&i.Factors,
+		&i.CreatedAt,
+		&i.AutoPriority,
+		&i.OverrideReason,
+		&i.OverrideActorID,
+		&i.OverrideAt,
+		&i.EscalatedAt,
+	)
+	return i, err
+}
+
 const getSignalByID = `-- name: GetSignalByID :one
 SELECT
     rs.id,
@@ -304,4 +386,204 @@ func (q *Queries) ListSignals(ctx context.Context, arg ListSignalsParams) ([]Lis
 		return nil, err
 	}
 	return items, nil
+}
+
+const markRiskSignalEscalated = `-- name: MarkRiskSignalEscalated :one
+UPDATE risk_signals SET
+    escalated_at = $1,
+    version      = version + 1
+WHERE id = $2 AND escalated_at IS NULL
+RETURNING id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at, auto_priority, override_reason, override_actor_id, override_at, escalated_at
+`
+
+type MarkRiskSignalEscalatedParams struct {
+	EscalatedAt pgtype.Timestamptz
+	ID          pgtype.UUID
+}
+
+// MarkRiskSignalEscalated records the first P1 escalation instant (ARCH-004
+// §4.4). The escalated_at IS NULL guard makes it set-once: the first
+// escalation matches the row, every later call matches zero rows (the
+// adapter reports "already escalated"), so a reminder cadence can never
+// re-stamp the instant. Zero rows is not an error.
+func (q *Queries) MarkRiskSignalEscalated(ctx context.Context, arg MarkRiskSignalEscalatedParams) (RiskSignal, error) {
+	row := q.db.QueryRow(ctx, markRiskSignalEscalated, arg.EscalatedAt, arg.ID)
+	var i RiskSignal
+	err := row.Scan(
+		&i.ID,
+		&i.MatchID,
+		&i.Priority,
+		&i.Status,
+		&i.Owner,
+		&i.DueAt,
+		&i.ClosedAt,
+		&i.Version,
+		&i.RuleVersion,
+		&i.Factors,
+		&i.CreatedAt,
+		&i.AutoPriority,
+		&i.OverrideReason,
+		&i.OverrideActorID,
+		&i.OverrideAt,
+		&i.EscalatedAt,
+	)
+	return i, err
+}
+
+const overrideRiskSignalPriority = `-- name: OverrideRiskSignalPriority :one
+UPDATE risk_signals SET
+    priority          = $1,
+    auto_priority     = $2,
+    override_reason   = $3,
+    override_actor_id = $4,
+    override_at       = $5,
+    version           = version + 1
+WHERE id = $6 AND version = $7
+RETURNING id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at, auto_priority, override_reason, override_actor_id, override_at, escalated_at
+`
+
+type OverrideRiskSignalPriorityParams struct {
+	Priority        string
+	AutoPriority    pgtype.Text
+	OverrideReason  pgtype.Text
+	OverrideActorID pgtype.Text
+	OverrideAt      pgtype.Timestamptz
+	ID              pgtype.UUID
+	ExpectedVersion int32
+}
+
+// OverrideRiskSignalPriority is the manual re-prioritisation of ARCH-004 §3
+// (ADR-015 mirror): it sets the effective priority, preserves the computed
+// value in auto_priority and stamps the mandatory reason/actor/time — the
+// four override columns are all-set together (the schema CHECK enforces the
+// all-or-nothing invariant). The caller supplies the computed auto_priority
+// it read; the optimistic lock rejects a stale write.
+func (q *Queries) OverrideRiskSignalPriority(ctx context.Context, arg OverrideRiskSignalPriorityParams) (RiskSignal, error) {
+	row := q.db.QueryRow(ctx, overrideRiskSignalPriority,
+		arg.Priority,
+		arg.AutoPriority,
+		arg.OverrideReason,
+		arg.OverrideActorID,
+		arg.OverrideAt,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i RiskSignal
+	err := row.Scan(
+		&i.ID,
+		&i.MatchID,
+		&i.Priority,
+		&i.Status,
+		&i.Owner,
+		&i.DueAt,
+		&i.ClosedAt,
+		&i.Version,
+		&i.RuleVersion,
+		&i.Factors,
+		&i.CreatedAt,
+		&i.AutoPriority,
+		&i.OverrideReason,
+		&i.OverrideActorID,
+		&i.OverrideAt,
+		&i.EscalatedAt,
+	)
+	return i, err
+}
+
+const revertRiskSignalPriority = `-- name: RevertRiskSignalPriority :one
+UPDATE risk_signals SET
+    priority          = auto_priority,
+    auto_priority     = NULL,
+    override_reason   = NULL,
+    override_actor_id = NULL,
+    override_at       = NULL,
+    version           = version + 1
+WHERE id = $1 AND version = $2
+RETURNING id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at, auto_priority, override_reason, override_actor_id, override_at, escalated_at
+`
+
+type RevertRiskSignalPriorityParams struct {
+	ID              pgtype.UUID
+	ExpectedVersion int32
+}
+
+// RevertRiskSignalPriority restores the computed priority from auto_priority
+// and clears the four override columns in one guarded write (ARCH-004 §3).
+// priority = auto_priority reads the pre-update value, so the computed value
+// is restored before the override quartet is cleared; the row ends purely
+// computed (all four NULL — the CHECK holds). The optimistic lock rejects a
+// stale write.
+func (q *Queries) RevertRiskSignalPriority(ctx context.Context, arg RevertRiskSignalPriorityParams) (RiskSignal, error) {
+	row := q.db.QueryRow(ctx, revertRiskSignalPriority, arg.ID, arg.ExpectedVersion)
+	var i RiskSignal
+	err := row.Scan(
+		&i.ID,
+		&i.MatchID,
+		&i.Priority,
+		&i.Status,
+		&i.Owner,
+		&i.DueAt,
+		&i.ClosedAt,
+		&i.Version,
+		&i.RuleVersion,
+		&i.Factors,
+		&i.CreatedAt,
+		&i.AutoPriority,
+		&i.OverrideReason,
+		&i.OverrideActorID,
+		&i.OverrideAt,
+		&i.EscalatedAt,
+	)
+	return i, err
+}
+
+const transitionRiskSignal = `-- name: TransitionRiskSignal :one
+UPDATE risk_signals SET
+    status    = $1,
+    closed_at = $2,
+    version   = version + 1
+WHERE id = $3 AND version = $4
+RETURNING id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at, auto_priority, override_reason, override_actor_id, override_at, escalated_at
+`
+
+type TransitionRiskSignalParams struct {
+	Status          string
+	ClosedAt        pgtype.Timestamptz
+	ID              pgtype.UUID
+	ExpectedVersion int32
+}
+
+// TransitionRiskSignal is the ch. 6.3 status change of ARCH-004 §2: it sets
+// the new status and the closed_at stamp (the entry instant of a closed
+// state, NULL when leaving to a non-closed state or reopening) under the
+// optimistic lock. The domain state machine (domain.Transition) rules which
+// edges are legal; this statement guards the row is still at the version the
+// caller read and bumps it. Zero rows = a stale version (conflict).
+func (q *Queries) TransitionRiskSignal(ctx context.Context, arg TransitionRiskSignalParams) (RiskSignal, error) {
+	row := q.db.QueryRow(ctx, transitionRiskSignal,
+		arg.Status,
+		arg.ClosedAt,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i RiskSignal
+	err := row.Scan(
+		&i.ID,
+		&i.MatchID,
+		&i.Priority,
+		&i.Status,
+		&i.Owner,
+		&i.DueAt,
+		&i.ClosedAt,
+		&i.Version,
+		&i.RuleVersion,
+		&i.Factors,
+		&i.CreatedAt,
+		&i.AutoPriority,
+		&i.OverrideReason,
+		&i.OverrideActorID,
+		&i.OverrideAt,
+		&i.EscalatedAt,
+	)
+	return i, err
 }

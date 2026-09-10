@@ -55,7 +55,7 @@ func (r *SignalRepo) Create(ctx context.Context, tx application.Tx, rec applicat
 	if err != nil {
 		return domain.RiskSignal{}, mapDBError(op, err)
 	}
-	return riskSignalFromRow(row)
+	return riskSignalFromRow(op, row)
 }
 
 // GetByID implements application.SignalRepo with the joined detail view.
@@ -202,18 +202,31 @@ func toSignalView(j signalJoin) application.Signal {
 
 // riskSignalFromRow maps a stored risk_signals row back into the domain
 // aggregate (the persistence-layer mapping the domain package sanctions).
-func riskSignalFromRow(row gen.RiskSignal) (domain.RiskSignal, error) {
+// Every column the aggregate carries is mapped, including the I4
+// override-survival quartet (ARCH-004 §3): auto_priority is nil exactly when
+// no override is active. escalated_at has no domain field (the flag is a
+// write-only escalation marker of ARCH-004 §4.4) and is dropped here.
+func riskSignalFromRow(op string, row gen.RiskSignal) (domain.RiskSignal, error) {
 	var factors domain.PriorityFactors
 	if err := json.Unmarshal(row.Factors, &factors); err != nil {
-		return domain.RiskSignal{}, application.InfraError("create_signal", err)
+		return domain.RiskSignal{}, application.InfraError(op, err)
 	}
-	return domain.RiskSignal{
-		ID:          uuidString(row.ID),
-		MatchID:     uuidString(row.MatchID),
-		Priority:    domain.Priority(row.Priority),
-		Status:      domain.SignalStatus(row.Status),
-		Version:     int(row.Version),
-		RuleVersion: row.RuleVersion,
-		Factors:     factors,
-	}, nil
+	sig := domain.RiskSignal{
+		ID:              uuidString(row.ID),
+		MatchID:         uuidString(row.MatchID),
+		Priority:        domain.Priority(row.Priority),
+		Status:          domain.SignalStatus(row.Status),
+		Owner:           textValue(row.Owner),
+		Version:         int(row.Version),
+		RuleVersion:     row.RuleVersion,
+		Factors:         factors,
+		OverrideReason:  textValue(row.OverrideReason),
+		OverrideActorID: textValue(row.OverrideActorID),
+		OverrideAt:      tsTime(row.OverrideAt),
+	}
+	if row.AutoPriority.Valid {
+		auto := domain.Priority(row.AutoPriority.String)
+		sig.AutoPriority = &auto
+	}
+	return sig, nil
 }

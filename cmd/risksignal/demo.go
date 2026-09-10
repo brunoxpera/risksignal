@@ -61,8 +61,9 @@ const demoSource = "demo"
 // demoResetTables are the demo tables `demo reset` truncates (ARCH-001 §1:
 // the walking-skeleton chain sources … risk_signals plus audit_events and
 // outbox, which the demo's signal creation writes; quarantine, which since
-// I2 (00004) holds foreign keys into that set; and comments / sla_clocks,
-// which since I4 (00007) hold foreign keys into risk_signals — PostgreSQL
+// I2 (00004) holds foreign keys into that set; comments / sla_clocks, which
+// since I4 (00007) hold foreign keys into risk_signals; and notifications,
+// which since I4 (00008) holds a foreign key into risk_signals — PostgreSQL
 // refuses a TRUNCATE of a table referenced by an untruncated table, so the
 // reset must include every referrer). The reset is dev-only and requires
 // --yes; it never touches the migration bookkeeping (schema_migration_log)
@@ -71,6 +72,7 @@ var demoResetTables = []string{
 	"risk_signals",
 	"comments",
 	"sla_clocks",
+	"notifications",
 	"matches",
 	"evidences",
 	"quarantine",
@@ -89,7 +91,7 @@ var demoResetTables = []string{
 // order is irrelevant; no table outside the list references one of them,
 // hence no CASCADE (a later table with a foreign key into this set would
 // fail loudly instead of silently truncating).
-const demoTruncateSQL = `TRUNCATE TABLE risk_signals, comments, sla_clocks, matches, evidences, quarantine, vulnerabilities, raw_records, source_runs, components, assets, sources, audit_events, outbox`
+const demoTruncateSQL = `TRUNCATE TABLE risk_signals, comments, sla_clocks, notifications, matches, evidences, quarantine, vulnerabilities, raw_records, source_runs, components, assets, sources, audit_events, outbox`
 
 // runDemo dispatches `risksignal demo ...`.
 func runDemo(e *cmdEnv, args []string) int {
