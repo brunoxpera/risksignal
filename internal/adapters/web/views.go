@@ -162,6 +162,8 @@ type signalDetailView struct {
 	Asset             signalAssetView
 	Product           signalProductView
 	Components        []componentRow
+	Timeline          []timelineRow
+	TimelineDenied    bool
 	SLA               slaView
 	Conflict          bool
 	ConflictMessage   string
@@ -192,6 +194,15 @@ type componentRow struct {
 	Version string
 }
 
+// timelineRow is one signal audit-timeline entry (ARCH-006 §3.1): the event
+// instant, the actor (display name, falling back to the id) and the action.
+type timelineRow struct {
+	OccurredAt string
+	ActorType  string
+	Actor      string
+	Action     string
+}
+
 type sourceRow struct {
 	ID             string
 	Name           string
@@ -207,8 +218,7 @@ type sourceRow struct {
 
 type sourceMonitorView struct {
 	chrome
-	MonitorAvailable bool
-	Sources          []sourceRow
+	Sources []sourceRow
 }
 
 type inventoryView struct {

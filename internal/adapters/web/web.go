@@ -76,6 +76,22 @@ type Commands interface {
 	ResumeSla(ctx context.Context, in application.ResumeSlaInput) (domain.SlaClock, error)
 }
 
+// Monitors is the application surface of the source-monitor read (ARCH-006
+// §3.1, DEV-110): the GET /sources projection the web adapter renders. It is
+// the application use case, so the /sources view runs the same in-command
+// authoriser (sources.manage) as every other channel.
+type Monitors interface {
+	ListSourceStatus(ctx context.Context, in application.ListSourceStatusInput) (application.ListSourceStatusResult, error)
+}
+
+// Audits is the application surface of the signal audit timeline read
+// (ARCH-006 §3.1, DEV-110): the GetSignal companion that fills the signal
+// detail timeline. It is the application use case, so the timeline runs the
+// same in-command authoriser (audit.read) as every other channel.
+type Audits interface {
+	ListAuditEvents(ctx context.Context, in application.ListAuditEventsInput) (application.ListAuditEventsResult, error)
+}
+
 // ActorResolver maps an authenticated request identity onto the audit actor of
 // a command (application.Service.ResolveActor).
 type ActorResolver interface {
@@ -90,39 +106,19 @@ type RolesReader interface {
 	RolesByUserID(ctx context.Context, userID string) ([]domain.Role, error)
 }
 
-// Service is the application surface the web adapter drives: the eight I5b
-// read/admin/staged-import use cases, the eight triage/SLA commands and the
-// actor resolution — one narrow view of *application.Service.
+// Service is the application surface the web adapter drives: the I5b
+// read/admin/staged-import use cases, the source-monitor and signal-audit
+// reads, the eight triage/SLA commands and the actor resolution — one narrow
+// view of *application.Service.
 type Service interface {
 	Signals
 	Assets
 	Users
 	Imports
 	Commands
+	Monitors
+	Audits
 	ActorResolver
-}
-
-// SourceMonitor is the OPTIONAL source-monitor read seam (ARCH-006 §3.1). The
-// ARCH §3.1 route table names a "source monitor read", but I5b landed no
-// application use case for it (the read lives in cmd/risksignal as CLI-local
-// code). When this seam is nil the /sources view renders an explicit
-// "not configured" state; wiring it is a follow-up (reported to the
-// orchestrator). It is presentation-only: it returns pre-built rows.
-type SourceMonitor interface {
-	Sources(ctx context.Context, actor application.Actor) ([]SourceMonitorEntry, error)
-}
-
-// SourceMonitorEntry is one source's monitor row (see SourceMonitor).
-type SourceMonitorEntry struct {
-	ID             string
-	Name           string
-	Type           string
-	Status         string
-	LastRunAt      string
-	DataAge        string
-	ErrorCount     int
-	OpenQuarantine int
-	Degraded       bool
 }
 
 // Options are the construction inputs of the web adapter.
@@ -139,8 +135,6 @@ type Options struct {
 	// (required) — wired to httpapi.IdentityFromContext by the composition
 	// root, so the web adapter does not depend on the httpapi package.
 	Identity func(ctx context.Context) (domain.Identity, bool)
-	// SourceMonitor is the optional source-monitor read seam (see its doc).
-	SourceMonitor SourceMonitor
 	// Templates is the template tree rooted at the repository web/ directory
 	// (paths "templates/..."), supplied by the composition root from the
 	// embedded web/templates FS (required).
@@ -157,7 +151,6 @@ type Options struct {
 type Web struct {
 	svc      Service
 	roles    RolesReader
-	monitor  SourceMonitor
 	logger   *slog.Logger
 	clock    Clock
 	identity func(ctx context.Context) (domain.Identity, bool)
@@ -199,7 +192,6 @@ func New(opts Options) (*Web, error) {
 	return &Web{
 		svc:            opts.Service,
 		roles:          opts.Roles,
-		monitor:        opts.SourceMonitor,
 		logger:         opts.Logger,
 		clock:          opts.Clock,
 		identity:       opts.Identity,

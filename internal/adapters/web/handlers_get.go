@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/brunoxpera/risksignal/internal/application"
 	"github.com/brunoxpera/risksignal/internal/domain"
@@ -58,11 +59,13 @@ func (w *Web) handleDashboard(rw http.ResponseWriter, r *http.Request) {
 		SLARows:        slaRows(page.Signals, now),
 		SLAEndpoint:    fragmentEndpoint(""),
 	}
-	if w.monitor != nil {
-		entries, merr := w.monitor.Sources(r.Context(), actor)
-		if merr == nil {
+	// The source-monitor summary is best-effort: sources.manage gates the read
+	// (an administrator-only grant), so a principal without it simply sees no
+	// summary rather than a denied dashboard.
+	if hasPermission(pv.Roles, domain.PermissionSourcesManage) {
+		if status, serr := w.svc.ListSourceStatus(r.Context(), application.ListSourceStatusInput{Actor: actor}); serr == nil {
 			dv.SourceMonitorAvailable = true
-			dv.SourceSummary = toSourceRows(entries)
+			dv.SourceSummary = toSourceRows(status.Sources)
 		}
 	}
 	w.renderPage(rw, http.StatusOK, "dashboard", dv)
@@ -162,8 +165,10 @@ func (w *Web) handleSignalDetail(rw http.ResponseWriter, r *http.Request) {
 	w.renderSignalDetail(rw, r, http.StatusOK, pv, actor, r.PathValue("id"), nil, "")
 }
 
-// handleSourceMonitor renders GET /sources from the optional source-monitor
-// seam (ARCH-006 §3.1).
+// handleSourceMonitor renders GET /sources from the ListSourceStatus read use
+// case (ARCH-006 §3.1). The use case gates on sources.manage (deny-by-
+// default): a principal without it is denied with the mapped error status, a
+// permitted principal sees the real per-source status.
 func (w *Web) handleSourceMonitor(rw http.ResponseWriter, r *http.Request) {
 	pv, actor, err := w.principalFor(r)
 	if err != nil {
@@ -171,17 +176,15 @@ func (w *Web) handleSourceMonitor(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	csrf := w.csrfToken(rw, r)
-	view := sourceMonitorView{chrome: w.newChrome("Source monitor", "/sources", pv, nil, csrf)}
-	if w.monitor != nil {
-		entries, merr := w.monitor.Sources(r.Context(), actor)
-		if merr != nil {
-			w.renderErrorPage(rw, r, statusForError(merr), errorMessage(merr))
-			return
-		}
-		view.MonitorAvailable = true
-		view.Sources = toSourceRows(entries)
+	status, err := w.svc.ListSourceStatus(r.Context(), application.ListSourceStatusInput{Actor: actor})
+	if err != nil {
+		w.renderErrorPage(rw, r, statusForError(err), errorMessage(err))
+		return
 	}
-	w.renderPage(rw, http.StatusOK, "source-monitor", view)
+	w.renderPage(rw, http.StatusOK, "source-monitor", sourceMonitorView{
+		chrome:  w.newChrome("Source monitor", "/sources", pv, nil, csrf),
+		Sources: toSourceRows(status.Sources),
+	})
 }
 
 // handleInventory renders GET /inventory from ListAssets (ARCH-006 §3.1).
@@ -364,6 +367,25 @@ func (w *Web) renderSignalDetail(rw http.ResponseWriter, r *http.Request, status
 			}
 		}
 	}
+	timeline, err := w.svc.ListAuditEvents(r.Context(), application.ListAuditEventsInput{SignalID: signalID, Actor: actor})
+	var timelineRows []timelineRow
+	timelineDenied := false
+	if err != nil {
+		// The timeline is the audit.read-gated companion of the
+		// signals.read-gated detail page (ARCH-006 §3.1): a principal who may
+		// read the signal but who does not hold audit.read for it (e.g. an
+		// own/assigned-scoped grant on a signal it does not own) still sees
+		// the page — the timeline is omitted with an explicit note. Any other
+		// failure stays a rendered error.
+		if kind, _ := application.ErrorKindOf(err); kind == application.KindForbidden {
+			timelineDenied = true
+		} else {
+			w.renderErrorPage(rw, r, statusForError(err), errorMessage(err))
+			return
+		}
+	} else {
+		timelineRows = toTimelineRows(timeline.Events)
+	}
 	now := w.clock.Now()
 	dv := signalDetailView{
 		chrome:            w.newChrome("Signal "+sig.CveID, "/signals", pv, flash, csrf),
@@ -383,6 +405,8 @@ func (w *Web) renderSignalDetail(rw http.ResponseWriter, r *http.Request, status
 		Asset:             signalAssetView{Name: sig.Asset.Name, Type: sig.Asset.Type, Criticality: sig.Asset.Criticality},
 		Product:           signalProductView{Vendor: sig.Product.Vendor, Product: sig.Product.Product, Version: sig.Product.Version},
 		Components:        components,
+		Timeline:          timelineRows,
+		TimelineDenied:    timelineDenied,
 		SLA:               toSLAView(sig, now),
 		Conflict:          conflict != "",
 		ConflictMessage:   conflict,
@@ -493,18 +517,62 @@ func inventoryFilterBar(q url.Values) filterBarView {
 	}
 }
 
-// toSourceRows maps the optional monitor entries onto view rows.
-func toSourceRows(entries []SourceMonitorEntry) []sourceRow {
-	rows := make([]sourceRow, 0, len(entries))
-	for _, e := range entries {
+// toSourceRows maps the source-monitor read onto view rows (ordered by name).
+func toSourceRows(sources []application.SourceStatus) []sourceRow {
+	rows := make([]sourceRow, 0, len(sources))
+	for _, s := range sources {
+		status := s.LastRunStatus
+		if status == "" {
+			status = "never"
+		}
+		lastRun := ""
+		if !s.LastRunAt.IsZero() {
+			lastRun = formatTimestamp(s.LastRunAt)
+		}
+		dataAge := ""
+		if s.HasDataAge {
+			dataAge = formatDuration(s.DataAge)
+		}
 		rows = append(rows, sourceRow{
-			ID: e.ID, Name: e.Name, Type: e.Type, Status: e.Status,
-			StatusLabel: e.Status, LastRunAt: e.LastRunAt, DataAge: e.DataAge,
-			ErrorCount: e.ErrorCount, OpenQuarantine: e.OpenQuarantine, Degraded: e.Degraded,
+			ID: s.ID, Name: s.Name, Type: s.Type, Status: status, StatusLabel: status,
+			LastRunAt: lastRun, DataAge: dataAge,
+			ErrorCount: s.ErrorCount, OpenQuarantine: s.OpenQuarantine, Degraded: s.Degraded,
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
 	return rows
+}
+
+// toTimelineRows maps the signal audit timeline onto view rows. The order is
+// the use-case order (occurred_at then id) — presentation never re-sorts a
+// timeline.
+func toTimelineRows(events []application.AuditEvent) []timelineRow {
+	rows := make([]timelineRow, 0, len(events))
+	for _, ev := range events {
+		actor := ev.ActorDisplayName
+		if actor == "" {
+			actor = ev.ActorID
+		}
+		rows = append(rows, timelineRow{
+			OccurredAt: formatTimestamp(ev.OccurredAt),
+			ActorType:  ev.ActorType,
+			Actor:      actor,
+			Action:     ev.Action,
+		})
+	}
+	return rows
+}
+
+// formatTimestamp renders a monitor/timeline instant in the operator-facing
+// UTC form (the adapter reads only the injected clock's instants).
+func formatTimestamp(t time.Time) string {
+	return t.UTC().Format("2006-01-02 15:04 UTC")
+}
+
+// formatDuration renders a data age in the compact Go form (e.g. "3h0m0s"),
+// rounded to whole seconds.
+func formatDuration(d time.Duration) string {
+	return d.Round(time.Second).String()
 }
 
 // toImportView maps the application staged-import view onto the template view.

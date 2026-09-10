@@ -33,6 +33,9 @@ type fakeService struct {
 	users      []application.UserRecord
 	roles      []application.RoleDescriptor
 
+	sources     []application.SourceStatus
+	auditEvents []application.AuditEvent
+
 	// signal is returned by GetSignal (version can be bumped to simulate a
 	// stale-version conflict re-render).
 	signal application.Signal
@@ -44,9 +47,21 @@ type fakeService struct {
 	commitErr error
 	revokeErr error
 	deactErr  error
+	auditErr  error
 
 	lastListSignals application.ListSignalsInput
 	lastListAssets  application.ListAssetsInput
+}
+
+func (f *fakeService) ListSourceStatus(_ context.Context, _ application.ListSourceStatusInput) (application.ListSourceStatusResult, error) {
+	return application.ListSourceStatusResult{Sources: f.sources}, nil
+}
+
+func (f *fakeService) ListAuditEvents(_ context.Context, _ application.ListAuditEventsInput) (application.ListAuditEventsResult, error) {
+	if f.auditErr != nil {
+		return application.ListAuditEventsResult{}, f.auditErr
+	}
+	return application.ListAuditEventsResult{Events: f.auditEvents}, nil
 }
 
 func (f *fakeService) ResolveActor(_ context.Context, _ domain.Identity) (application.Actor, error) {
@@ -231,6 +246,17 @@ func sampleFake() *fakeService {
 		roles: []application.RoleDescriptor{
 			{Role: domain.RoleSecurityAnalyst, Permissions: []application.PermissionGrant{{Permission: domain.PermissionSignalsRead, Scope: domain.ScopeAll}}},
 		},
+		sources: []application.SourceStatus{
+			{ID: "src-1", Name: "nvd", Type: "nvd", Enabled: true, Schedule: "@daily",
+				LastRunStatus: "failed", ErrorCount: 2, RateLimited: true, OpenQuarantine: 1,
+				HasDataAge: true, DataAge: 3 * time.Hour, Degraded: true},
+		},
+		auditEvents: []application.AuditEvent{
+			{ID: "e1", AggregateType: "risk_signal", AggregateID: "s1", ActorType: "user",
+				ActorID: "u-1", ActorDisplayName: "Test Analyst", Action: "signal.created", OccurredAt: fixedTime.Add(-time.Hour)},
+			{ID: "e2", AggregateType: "risk_signal", AggregateID: "s1", ActorType: "user",
+				ActorID: "u-1", ActorDisplayName: "Test Analyst", Action: "signal.acknowledged", OccurredAt: fixedTime},
+		},
 	}
 }
 
@@ -357,5 +383,62 @@ func TestStaleVersionRerenders409(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `data-version="2"`) {
 		t.Errorf("409 must re-render with the fresh version")
+	}
+}
+
+func TestSourceMonitorRendersRealStatus(t *testing.T) {
+	h := newTestWeb(t, sampleFake(), allRoles())
+	rec := get(t, h, "/sources")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /sources = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `data-source-id="src-1"`) {
+		t.Fatalf("source row not rendered: %s", body)
+	}
+	if !strings.Contains(body, "nvd") || !strings.Contains(body, "failed") {
+		t.Errorf("source identity/status not rendered")
+	}
+	if !strings.Contains(body, `data-degraded="true"`) {
+		t.Errorf("degraded flag not rendered")
+	}
+	if strings.Contains(body, "not wired") || strings.Contains(body, "not configured") {
+		t.Errorf("the source-monitor stub must be replaced by real status")
+	}
+}
+
+func TestSignalDetailTimelineDeniedStillRenders(t *testing.T) {
+	svc := sampleFake()
+	svc.auditErr = application.ForbiddenError("list_audit_events", errors.New("not permitted"))
+	h := newTestWeb(t, svc, allRoles())
+	rec := get(t, h, "/signals/s1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /signals/s1 with a denied timeline = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "requires the audit.read permission") {
+		t.Errorf("denied timeline must render an explicit note")
+	}
+	if strings.Contains(body, `data-audit-action=`) {
+		t.Errorf("a denied timeline must render no rows")
+	}
+}
+
+func TestSignalDetailRendersAuditTimeline(t *testing.T) {
+	h := newTestWeb(t, sampleFake(), allRoles())
+	rec := get(t, h, "/signals/s1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /signals/s1 = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Audit timeline") {
+		t.Fatalf("timeline section missing")
+	}
+	if !strings.Contains(body, `data-audit-action="signal.created"`) ||
+		!strings.Contains(body, `data-audit-action="signal.acknowledged"`) {
+		t.Errorf("timeline events not rendered")
+	}
+	if !strings.Contains(body, "Test Analyst") {
+		t.Errorf("timeline actor not rendered")
 	}
 }

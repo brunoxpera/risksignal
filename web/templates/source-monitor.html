@@ -2,7 +2,6 @@
 <h1>Source monitor</h1>
 <p class="lead">Last run, data age, errors and open quarantine per source.</p>
 
-{{if .MonitorAvailable}}
 <section class="panel" aria-labelledby="source-list">
   <h2 id="source-list">Sources</h2>
   <table class="sources">
@@ -33,7 +32,4 @@
     </tbody>
   </table>
 </section>
-{{else}}
-<p class="empty" data-empty="source-monitor">The source monitor read is not wired into this process.</p>
-{{end}}
 {{end}}

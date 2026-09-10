@@ -162,4 +162,27 @@
   <p class="empty" data-empty="components">No component context available.</p>
   {{end}}
 </section>
+
+<section class="panel" aria-labelledby="detail-timeline">
+  <h2 id="detail-timeline">Audit timeline</h2>
+  {{if .TimelineDenied}}
+  <p class="empty" data-empty="timeline">The audit timeline requires the audit.read permission for this signal.</p>
+  {{else if .Timeline}}
+  <table class="timeline">
+    <caption>Audit events for this signal, oldest first</caption>
+    <thead><tr><th scope="col">When</th><th scope="col">Actor</th><th scope="col">Action</th></tr></thead>
+    <tbody>
+      {{- range .Timeline}}
+      <tr data-audit-action="{{.Action}}">
+        <td>{{.OccurredAt}}</td>
+        <td>{{.Actor}} <span class="muted">({{.ActorType}})</span></td>
+        <td>{{.Action}}</td>
+      </tr>
+      {{- end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="empty" data-empty="timeline">No audit events recorded for this signal.</p>
+  {{end}}
+</section>
 {{end}}
