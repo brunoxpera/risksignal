@@ -53,17 +53,20 @@ record. Binding decisions (ADR-001..ADR-015) are *not* restated here; they live 
 
 ### D-001 — Go module path
 
-- **Choice:** `github.com/xpera/risksignal`
-- **Status:** default, pending Bruno confirmation (hard-ish to change after first
-  published import, trivial before).
-- **Rationale:** matches the company name (lowercase `xpera`), is a conventional
-  VCS-style path, and does not depend on the (not yet chosen) CI/hosting provider.
+- **Choice:** `github.com/brunoxpera/risksignal` (hosted at
+  `https://github.com/brunoxpera/risksignal`; module path = repo URL per Go
+  convention).
+- **Status:** **Accepted by Bruno (2026-09-10).** Remote `origin` points at
+  `https://github.com/brunoxpera/risksignal.git`. The rename was executed in DEV-070
+  (commit `d9faa1f`): `go.mod` + ~157 import/doc references now use the new path;
+  zero occurrences of the old path remain.
+- **Rationale:** matches the GitHub owner (`brunoxpera`); conventional VCS-style
+  path; module path and repo URL must agree for `go get` to resolve.
 
 ### D-002 — CI platform
 
 - **Choice:** GitHub Actions
-- **Status:** default, pending Bruno confirmation. Repo has no remote yet; no lock-in
-  is created before the first push.
+- **Status:** **Accepted by Bruno (2026-09-10).**
 - **Rationale:** de facto standard, first-class service containers (a short-lived
   PostgreSQL for WP-1a.12), free for private repos at this scale. Alternatives
   (GitLab CI) kept in mind; nothing in the code depends on the choice.
@@ -140,7 +143,8 @@ dependency is added — these are build/CI-only.
 ### D-006 — configuration model (WP-1a.02)
 
 - **Choice:** environment variables (prefix `RISKSIGNAL_`) with an optional JSON config file (`encoding/json`, stdlib — no new dependency) and versioned defaults; modes `local`/`demo`/`production`; local auth bypass via `RISKSIGNAL_AUTH_BYPASS_ENABLED` (only valid in `local` mode).
-- **Status:** default, pending Bruno confirmation.
+- **Status:** **Accepted by Bruno (2026-09-10)** — JSON config file + `RISKSIGNAL_`
+  env prefix confirmed.
 - **Rationale:** concept §3.3 fixes the *mechanism* (defaults → file → env) but not the file format or naming. JSON keeps the dependency set narrow (concept §3.1); env vars are the primary override in containerised deployment. Recorded so a later switch to YAML/TOML is an explicit change, not drift.
 
 ## 4. Reliance on TD defaults (isolated behind config/ports)
@@ -164,3 +168,4 @@ are treated as best-available evidence (kickoff §2a).
 | 2026-09-09 | DEV-013/WP-1a.12: installed golangci-lint v2.13.2 + go-licenses v1.6.0; gitleaks 8.30.1 (pre-existing Homebrew) verified; `.golangci.yml`, `.gitleaks.toml`, `ci-lint`/`ci-test`/`ci-build` targets and `.github/workflows/ci.yml` landed; D-005 rows pinned | Accepted (defaults) |
 | 2026-09-08 | DEV-002/WP-1a.11: installed go-arch-lint v1.19.0; `.go-arch-lint.yml` gate + `lint-arch`/`test-arch` targets landed; D-005 row pinned | Accepted (defaults) |
 | 2026-09-09 | DEV-014/WP-1a.13: production Containerfiles (distroless non-root, digest-pinned) with build-metadata injection; cyclonedx-gomod v1.12.0 + govulncheck v1.8.0 + syft v1.51.1 + grype v0.118.0 + cosign v2.6.5 installed and pinned; `image`/`sbom`/`scan`/`sign` targets, CI image job and keyless-signing groundwork (`docs/plan/release-signing.md`) landed; D-005 rows pinned | Accepted (defaults) |
+| 2026-09-10 | D-001 accepted by Bruno: module path + repo = `github.com/brunoxpera/risksignal` (rename executed in DEV-070, commit `d9faa1f`). D-002 accepted: GitHub Actions. D-006 accepted: JSON config + `RISKSIGNAL_` env prefix. | Accepted (Bruno) |
