@@ -328,6 +328,11 @@ func newSignalService(pool *pgxpool.Pool) *application.Service {
 		// GET /sources projection of the latest run/data age/error
 		// count/rate-limit flag/open quarantine count.
 		SourceMonitor: repo.NewSourceMonitorRepo(q),
+		// The I6 retention port (ARCH-007 §2/§3, WP-6.05 / DEV-116-117):
+		// the candidate scan, the run lifecycle, the legal holds and the
+		// in-place pseudonymisation/deletion primitives. DEV-117 wires the
+		// postgres adapter so the retention use cases run end to end.
+		Retention: repo.NewRetentionRepo(q),
 		// The I5a reference command endpoint (ARCH-005 §8) drives the I4
 		// triage commands, so the server composition root wires the triage/
 		// SLA/priority ports the use cases author and persist through.
