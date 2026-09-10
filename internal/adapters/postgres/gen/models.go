@@ -183,6 +183,38 @@ type Evidence struct {
 	ObservedAt pgtype.Timestamptz
 }
 
+// Staged inventory-import records (ARCH-006 §2.1, WP-5b.02): uploaded CSV bytes + validation/preview report + commit outcome, keyed by the opaque import id the API returns; the staged commit runs the existing I3 CommitInventory over the stored bytes and marks the record committed
+type InventoryImport struct {
+	// Opaque import id returned by POST /inventory/imports and resolved by the Get/Commit endpoints (gen_random_uuid()); distinct from the I3 command's internal audit ImportID
+	ID pgtype.UUID
+	// Staged lifecycle: pending | committed | failed (inventory_imports_status_check) — the commit guard flips pending → committed exactly once
+	Status string
+	// Uploaded CSV bytes verbatim — the same bytes ValidateCSVInventory and CommitInventory consume; bounded by the application InventoryMaxBytes (16 MiB) at the HTTP body limit
+	File []byte
+	// Data rows the upload's CSV reader delimited (the upload report counter)
+	Rows int32
+	// Positioned validation problems of the upload (the upload report counter)
+	ErrorCount int32
+	// Data-quality warnings of the upload (unknown criticality/exposure — the upload report counter)
+	WarningCount int32
+	// Inventory assets the commit created (commit-outcome counter, stamped when the record is marked committed)
+	AssetsCreated int32
+	// Inventory assets the commit refreshed (commit-outcome counter)
+	AssetsUpdated int32
+	// Inventory components the commit created (commit-outcome counter)
+	ComponentsCreated int32
+	// Inventory components the commit refreshed (commit-outcome counter)
+	ComponentsUpdated int32
+	// Authenticated principal that staged the upload (users.id for a user actor, the channel dev subject otherwise) — the same value the I3 commit's audit actor stores
+	ActorID string
+	// Correlation id linking the record to the staging command's audit/outbox rows; NULL when the staging carried none
+	CorrelationID pgtype.Text
+	// Staging instant from the injected clock
+	CreatedAt pgtype.Timestamptz
+	// Commit instant from the injected clock; NULL while the record is pending or failed
+	CommittedAt pgtype.Timestamptz
+}
+
 // Method-led vulnerability-to-component matches (ADR-015); the natural key makes re-runs idempotent (ARCH-001 §1)
 type Match struct {
 	ID              pgtype.UUID

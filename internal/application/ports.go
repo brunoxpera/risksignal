@@ -273,6 +273,83 @@ type ComponentRepo interface {
 	ListByVendorProduct(ctx context.Context, vendor, product string) ([]Component, error)
 }
 
+// ---------------------------------------------------------------------------
+// I5b asset read port (ARCH-006 §2.2, WP-5b.02 / DEV-098)
+
+// Asset is one stored inventory asset as the I5b read paths of the
+// application layer return it (ARCH-006 §2.2): the visible columns of the
+// assets table with the stored vocabulary strings parsed back into the
+// domain enums (every row was written through the domain parsers or the
+// migration defaults, so the strings are canonical values). The two
+// lifecycle instants are the zero time when NULL (DeactivatedAt zero ⇒
+// active, VerifiedAt zero ⇒ never verified) — the same nullability
+// convention as UserIdentity.DeactivatedAt. It is a read model, not the
+// domain aggregate: the port returns stored rows, and the assets-read use
+// cases (WP-5b.03) render them; the domain.Asset aggregate is unchanged.
+type Asset struct {
+	ID          string // uuid
+	ExternalID  string // import idempotency key half (UQ source, external_id)
+	Source      string // import idempotency key half
+	Type        domain.AssetType
+	Name        string
+	Environment domain.Environment
+	Criticality domain.Criticality
+	Exposure    domain.Exposure
+	Owner       string // "" when unassigned
+
+	CreatedAt     time.Time // registration instant from the injected clock
+	UpdatedAt     time.Time // last inventory update from the injected clock
+	DeactivatedAt time.Time // deactivation instant; zero = active
+	VerifiedAt    time.Time // last manual verification; zero = never verified
+}
+
+// AssetFilter narrows the asset working-list read (ARCH-006 §2.2 ListAssets,
+// GET /assets). Nil fields keep the filter open. OwnerID is the object-scope
+// filter an `assigned`/`own` inventory.read grant injects at the query path
+// (ARCH-005 §5): a Systemverantwortliche sees only the assets they own.
+type AssetFilter struct {
+	Type        *domain.AssetType
+	Environment *domain.Environment
+	Criticality *domain.Criticality
+	Exposure    *domain.Exposure
+	OwnerID     *string
+	Source      *string
+}
+
+// AssetComponents is the ARCH-006 §2.2 GetAssetComponents read: one asset
+// together with its ordered components (the GET /assets/{id}/components
+// resource; also reused by the signal-detail asset context). Components is
+// ordered by natural_key and empty for a component-less asset, never nil in
+// the not-found sense — a missing asset is a not-found Error instead.
+type AssetComponents struct {
+	Asset      Asset
+	Components []Component
+}
+
+// AssetRepo is the I5b read port over the I3 assets/components tables
+// (ARCH-006 §2.2, WP-5b.02): the cursor-paginated, filterable asset list and
+// the one-asset-with-components read that back the I5b `ListAssets` /
+// `GetAssetComponents` use cases (WP-5b.03). It is read-only — inventory
+// mutation stays the I3 import write path (InventoryWriter) — and runs on
+// the pool-scoped query set (no transaction): a plain working-list read.
+// The DEV-098 postgres adapter *repo.AssetRepo implements it, mapping the
+// stored rows onto Asset/Component (the application layer never imports the
+// generated package) with no identity/principal mapping.
+type AssetRepo interface {
+	// ListAssets returns one page of the asset working list ordered by
+	// created_at then id (a stable sort). The filters narrow the read
+	// (nil keeps a filter open) and OwnerID is the object-scope injection
+	// point. limit and offset are the page window; the implementation
+	// fetches one more row than the window needs so the caller can detect a
+	// further page — the result therefore holds at most limit+1 assets.
+	ListAssets(ctx context.Context, filter AssetFilter, limit, offset int) ([]Asset, error)
+
+	// GetAssetComponents returns one asset and its ordered components. A
+	// missing asset is a not-found Error; a component-less asset returns
+	// the asset with an empty component slice, never an error.
+	GetAssetComponents(ctx context.Context, assetID string) (AssetComponents, error)
+}
+
 // AliasRuleRepo resolves the effective alias rules the match-time alias
 // closure reads through (ARCH-003 §2 item 2, WP-3.04/DEV-047): the
 // enabled alias rules of the current ruleset version, which the matcher

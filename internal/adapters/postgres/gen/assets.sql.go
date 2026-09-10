@@ -82,6 +82,125 @@ func (q *Queries) GetAssetBySourceExternalID(ctx context.Context, arg GetAssetBy
 	return i, err
 }
 
+const getAssetComponents = `-- name: GetAssetComponents :many
+SELECT
+    a.id,
+    a.external_id,
+    a.source,
+    a.type,
+    a.name,
+    a.environment,
+    a.criticality,
+    a.exposure,
+    a.owner,
+    a.created_at,
+    a.updated_at,
+    a.deactivated_at,
+    a.verified_at,
+    c.id             AS component_id,
+    c.vendor         AS component_vendor,
+    c.product        AS component_product,
+    c.version        AS component_version,
+    c.cpe            AS component_cpe,
+    c.purl           AS component_purl,
+    c.image          AS component_image,
+    c.digest         AS component_digest,
+    c.vendor_norm    AS component_vendor_norm,
+    c.product_norm   AS component_product_norm,
+    c.version_norm   AS component_version_norm,
+    c.version_scheme AS component_version_scheme,
+    c.natural_key    AS component_natural_key
+FROM assets a
+LEFT JOIN components c ON c.asset_id = a.id
+WHERE a.id = $1
+ORDER BY c.natural_key
+`
+
+type GetAssetComponentsRow struct {
+	ID                     pgtype.UUID
+	ExternalID             string
+	Source                 string
+	Type                   string
+	Name                   string
+	Environment            string
+	Criticality            string
+	Exposure               string
+	Owner                  pgtype.Text
+	CreatedAt              pgtype.Timestamptz
+	UpdatedAt              pgtype.Timestamptz
+	DeactivatedAt          pgtype.Timestamptz
+	VerifiedAt             pgtype.Timestamptz
+	ComponentID            pgtype.UUID
+	ComponentVendor        pgtype.Text
+	ComponentProduct       pgtype.Text
+	ComponentVersion       pgtype.Text
+	ComponentCpe           pgtype.Text
+	ComponentPurl          pgtype.Text
+	ComponentImage         pgtype.Text
+	ComponentDigest        pgtype.Text
+	ComponentVendorNorm    pgtype.Text
+	ComponentProductNorm   pgtype.Text
+	ComponentVersionNorm   pgtype.Text
+	ComponentVersionScheme pgtype.Text
+	ComponentNaturalKey    pgtype.Text
+}
+
+// GetAssetComponents returns one asset together with its components
+// (ARCH-006 §2.2 GetAssetComponents, GET /assets/{id}/components). It is a
+// LEFT JOIN from the asset to its components (IX components_asset_id_idx),
+// so an asset with no components still returns one row — with NULL component
+// columns — instead of vanishing, and an unknown asset id returns no rows
+// (the adapter maps that to a not-found error). Components are ordered by
+// natural_key (the import idempotency key) so the read is stable, exactly
+// like ListComponentsByAsset; the component columns travel in their full I3
+// shape. The asset columns are NOT NULL (the WHERE pins the left row).
+func (q *Queries) GetAssetComponents(ctx context.Context, id pgtype.UUID) ([]GetAssetComponentsRow, error) {
+	rows, err := q.db.Query(ctx, getAssetComponents, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAssetComponentsRow
+	for rows.Next() {
+		var i GetAssetComponentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ExternalID,
+			&i.Source,
+			&i.Type,
+			&i.Name,
+			&i.Environment,
+			&i.Criticality,
+			&i.Exposure,
+			&i.Owner,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeactivatedAt,
+			&i.VerifiedAt,
+			&i.ComponentID,
+			&i.ComponentVendor,
+			&i.ComponentProduct,
+			&i.ComponentVersion,
+			&i.ComponentCpe,
+			&i.ComponentPurl,
+			&i.ComponentImage,
+			&i.ComponentDigest,
+			&i.ComponentVendorNorm,
+			&i.ComponentProductNorm,
+			&i.ComponentVersionNorm,
+			&i.ComponentVersionScheme,
+			&i.ComponentNaturalKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const importUpsertAsset = `-- name: ImportUpsertAsset :one
 INSERT INTO assets (external_id, source, type, name, environment, criticality, exposure, owner, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -135,6 +254,93 @@ func (q *Queries) ImportUpsertAsset(ctx context.Context, arg ImportUpsertAssetPa
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const listAssets = `-- name: ListAssets :many
+SELECT
+    a.id,
+    a.external_id,
+    a.source,
+    a.type,
+    a.name,
+    a.environment,
+    a.criticality,
+    a.exposure,
+    a.owner,
+    a.created_at,
+    a.updated_at,
+    a.deactivated_at,
+    a.verified_at
+FROM assets a
+WHERE ($1::text IS NULL OR a.type = $1)
+  AND ($2::text IS NULL OR a.environment = $2)
+  AND ($3::text IS NULL OR a.criticality = $3)
+  AND ($4::text IS NULL OR a.exposure = $4)
+  AND ($5::text IS NULL OR a.owner = $5)
+  AND ($6::text IS NULL OR a.source = $6)
+ORDER BY a.created_at, a.id
+LIMIT $7
+`
+
+type ListAssetsParams struct {
+	Type        pgtype.Text
+	Environment pgtype.Text
+	Criticality pgtype.Text
+	Exposure    pgtype.Text
+	OwnerID     pgtype.Text
+	Source      pgtype.Text
+	MaxRows     int32
+}
+
+// ListAssets is the inventory working-list read (ARCH-006 §2.2 ListAssets,
+// GET /assets): every visible column of the assets table, ordered by
+// created_at then id (a stable sort — id is the tiebreak, so equal stamps
+// still paginate deterministically). type/environment/criticality/exposure/
+// owner_id/source filter optionally — pass NULL to keep a filter open. The
+// owner_id filter is the object-scope injection point of an `assigned`/`own`
+// read grant (ARCH-005 §5, ARCH-006 §2.2): a Systemverantwortliche sees only
+// their owned assets (a.owner = owner_id). The read is paginated by the
+// caller-supplied window (max_rows = offset+limit+1), like ListSignals.
+func (q *Queries) ListAssets(ctx context.Context, arg ListAssetsParams) ([]Asset, error) {
+	rows, err := q.db.Query(ctx, listAssets,
+		arg.Type,
+		arg.Environment,
+		arg.Criticality,
+		arg.Exposure,
+		arg.OwnerID,
+		arg.Source,
+		arg.MaxRows,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Asset
+	for rows.Next() {
+		var i Asset
+		if err := rows.Scan(
+			&i.ID,
+			&i.ExternalID,
+			&i.Source,
+			&i.Type,
+			&i.Name,
+			&i.Environment,
+			&i.Criticality,
+			&i.Exposure,
+			&i.Owner,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeactivatedAt,
+			&i.VerifiedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertAsset = `-- name: UpsertAsset :one
