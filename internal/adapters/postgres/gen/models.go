@@ -70,6 +70,10 @@ type AuditEvent struct {
 	After []byte
 	// Request/command correlation id linking the audit row to the outbox row of the same command
 	CorrelationID string
+	// row_hash of the preceding audit event in the chain order (occurred_at, id); NULL when the hash chain is disabled or the row predates it (ARCH-007 §7 control 3b)
+	PrevHash pgtype.Text
+	// SHA-256(prev_hash ‖ canonical row bytes) of this event; NULL when the hash chain is disabled or the row predates it; verified end-to-end by the chain-verify command
+	RowHash pgtype.Text
 }
 
 // Append-only signal timeline (ARCH-004 §2.2, ch. 12.3): no update/delete path; every comment is also an audit event (signal.commented) written in the same transaction
@@ -183,6 +187,38 @@ type Evidence struct {
 	ObservedAt pgtype.Timestamptz
 }
 
+// Asynchronous export jobs (ARCH-007 §1.2, FR-022/AT-014): the frozen filter context + format and the generation stamps; the artifact lives in the server-local spool, only its reference is stored here
+type Export struct {
+	// Export id returned by POST /exports (gen_random_uuid()) and resolved by the status/download endpoints
+	ID pgtype.UUID
+	// Lifecycle: pending | completed | failed | expired (exports_status_check) — pending at creation, stamped by the export.generate job and the expiry sweep
+	Status string
+	// Frozen signal filter context (ch. 10.4 vocabulary) + creation time; never changes after creation (ARCH-007 §1.2)
+	Filter []byte
+	// Serialisation format: csv | json (exports_format_check)
+	Format string
+	// Server-local spool path of the materialised artifact; NULL until completed (never a bytea — the artifact stays out of the audit/backup path)
+	StoragePath pgtype.Text
+	// Materialised row count; NULL until completed
+	RowCount pgtype.Int4
+	// Artifact size in bytes; NULL until completed
+	SizeBytes pgtype.Int8
+	// SHA-256 of the artifact; NULL until completed
+	Checksum pgtype.Text
+	// Export schema version stamped at generation; NULL until completed
+	SchemaVersion pgtype.Text
+	// Priority-rule version at generation time; NULL until completed
+	RuleVersion pgtype.Text
+	// Principal that created the export (audited); the object-scope creator for an assigned grant
+	CreatedBy string
+	// Creation instant from the injected clock (frozen at creation)
+	CreatedAt pgtype.Timestamptz
+	// Artifact expiry (created_at + export.ttl); NULL until completed; the download checks it against the injected clock
+	ExpiresAt pgtype.Timestamptz
+	// Error text of the failed generation; NULL while pending/completed
+	LastError pgtype.Text
+}
+
 // Staged inventory-import records (ARCH-006 §2.1, WP-5b.02): uploaded CSV bytes + validation/preview report + commit outcome, keyed by the opaque import id the API returns; the staged commit runs the existing I3 CommitInventory over the stored bytes and marks the record committed
 type InventoryImport struct {
 	// Opaque import id returned by POST /inventory/imports and resolved by the Get/Commit endpoints (gen_random_uuid()); distinct from the I3 command's internal audit ImportID
@@ -213,6 +249,24 @@ type InventoryImport struct {
 	CreatedAt pgtype.Timestamptz
 	// Commit instant from the injected clock; NULL while the record is pending or failed
 	CommittedAt pgtype.Timestamptz
+}
+
+// Documented legal holds (ARCH-007 §2.1, §13.4 step 2): one row per held aggregate; an active hold (released_at IS NULL) blocks both deletion and pseudonymisation of the aggregate and preserves the original record as-is
+type LegalHold struct {
+	// Hold id; the release acts by id (set-once)
+	ID pgtype.UUID
+	// Type of the held aggregate (default risk_signal — the MVP retention subject); polymorphic like audit_events.aggregate_type
+	AggregateType string
+	// UUID of the held aggregate (polymorphic — no FK, the aggregate type disambiguates)
+	AggregateID pgtype.UUID
+	// Documented justification of the hold (mandatory, ch. 13.4)
+	Reason string
+	// Principal that set the hold (audited, ARCH-007 §2.1)
+	ActorID string
+	// Hold instant from the injected clock
+	CreatedAt pgtype.Timestamptz
+	// Release instant from the injected clock; NULL = active hold, non-NULL = released (a release is set-once)
+	ReleasedAt pgtype.Timestamptz
 }
 
 // Method-led vulnerability-to-component matches (ADR-015); the natural key makes re-runs idempotent (ARCH-001 §1)
@@ -358,6 +412,42 @@ type RawRecord struct {
 	FetchedAt pgtype.Timestamptz
 	// Encoding of the stored payload bytes: identity | gzip | json — set by the fetching adapter, self-describing for reprocess
 	ContentEncoding pgtype.Text
+}
+
+// Retention reports (ARCH-007 §2.1/§2.2): one row per run/partition carrying the dry-run counts, the four-eyes approval and the final counts only (no business content); the row survives the deletion it reports on
+type RetentionRun struct {
+	// Run id; the lifecycle transitions (approve/execute/complete/fail) act by id
+	ID pgtype.UUID
+	// Retention policy the run applies, e.g. closed-signals-5y (the job idempotency key is policy_id + cutoff + batch)
+	PolicyID string
+	// Retention stage: pseudonymise | delete (retention_runs_stage_check) — pseudonymise runs before delete (§13.4)
+	Stage string
+	// Retention cutoff from the injected clock (closed_at <= cutoff are candidates); part of the job idempotency key
+	Cutoff pgtype.Timestamptz
+	// Stable partition of the run (month bucket / id-hash range); one partition per row, part of the job idempotency key
+	PartitionKey string
+	// Lifecycle: dry_run | approved | executing | completed | failed | rejected (retention_runs_status_check) — only an approved run may be executed
+	Status string
+	// Dry-run counts only (candidates / held / to_pseudonymise / to_delete) — no business content (ARCH-007 §2.1)
+	DryRun []byte
+	// Approving principal (four-eyes: the Product Owner holding settings.approve); NULL until approved
+	ApprovedBy pgtype.Text
+	// Approval instant from the injected clock; NULL until approved
+	ApprovedAt pgtype.Timestamptz
+	// Mandatory approval reason (ch. 13.4 four-eyes); NULL until approved
+	ApprovalReason pgtype.Text
+	// Execution start instant from the injected clock; NULL until executing
+	StartedAt pgtype.Timestamptz
+	// Run end instant from the injected clock; NULL until completed or failed
+	FinishedAt pgtype.Timestamptz
+	// Rows pseudonymised by the run (final counter, default 0)
+	PseudonymisedCount int32
+	// Rows deleted by the run (final counter, default 0)
+	DeletedCount int32
+	// Batches that failed within the run (final counter, default 0); a failing batch never fails the run silently
+	FailedCount int32
+	// Error text of the last failed batch/run; NULL when none failed
+	LastError pgtype.Text
 }
 
 // One signal per match (ch. 6.1); priority P1-P4, status new in I1b, version is the optimistic-lock token (ARCH-001 §1)

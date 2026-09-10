@@ -60,3 +60,29 @@ FROM audit_events
 WHERE aggregate_type = @aggregate_type
   AND aggregate_id = @aggregate_id
 ORDER BY occurred_at, id;
+
+-- LatestAuditHash reads the row_hash of the newest event that is part of the
+-- optional audit hash chain (migration 00012, ARCH-007 §7 control 3b) — the
+-- prev_hash a new Append links to when retention.hash_chain_enabled is on.
+-- The chain order is the audit trail's stable order (occurred_at, id), the
+-- same order the per-aggregate reads use; rows with a NULL row_hash predate
+-- the chain (or the chain is off) and are skipped. An empty/unstamped trail
+-- is pgx.ErrNoRows (the first chained event links to a NULL/absent prev).
+-- name: LatestAuditHash :one
+SELECT row_hash
+FROM audit_events
+WHERE row_hash IS NOT NULL
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1;
+
+-- ListAuditHashChain returns the whole audit trail in chain order
+-- (occurred_at then id) for the end-to-end chain verification (ARCH-007 §7
+-- control 3b, §4 AT-015): the verify command recomputes each row's
+-- SHA-256(prev_hash ‖ canonical row bytes) and compares it to the stored
+-- row_hash. It is a read over the append-only table (no second write path);
+-- rows with NULL hashes are included so the verifier can anchor the chain
+-- start. An empty trail yields no rows, never an error.
+-- name: ListAuditHashChain :many
+SELECT *
+FROM audit_events
+ORDER BY occurred_at, id;

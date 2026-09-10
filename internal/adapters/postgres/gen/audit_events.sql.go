@@ -12,7 +12,7 @@ import (
 )
 
 const getAuditEventByID = `-- name: GetAuditEventByID :one
-SELECT id, aggregate_type, aggregate_id, actor_type, actor_id, actor_display_name, action, occurred_at, before, after, correlation_id
+SELECT id, aggregate_type, aggregate_id, actor_type, actor_id, actor_display_name, action, occurred_at, before, after, correlation_id, prev_hash, row_hash
 FROM audit_events
 WHERE id = $1
 `
@@ -37,6 +37,8 @@ func (q *Queries) GetAuditEventByID(ctx context.Context, id pgtype.UUID) (AuditE
 		&i.Before,
 		&i.After,
 		&i.CorrelationID,
+		&i.PrevHash,
+		&i.RowHash,
 	)
 	return i, err
 }
@@ -67,7 +69,7 @@ VALUES (
     $9,
     $10
 )
-RETURNING id, aggregate_type, aggregate_id, actor_type, actor_id, actor_display_name, action, occurred_at, before, after, correlation_id
+RETURNING id, aggregate_type, aggregate_id, actor_type, actor_id, actor_display_name, action, occurred_at, before, after, correlation_id, prev_hash, row_hash
 `
 
 type InsertAuditEventParams struct {
@@ -121,12 +123,36 @@ func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventPara
 		&i.Before,
 		&i.After,
 		&i.CorrelationID,
+		&i.PrevHash,
+		&i.RowHash,
 	)
 	return i, err
 }
 
+const latestAuditHash = `-- name: LatestAuditHash :one
+SELECT row_hash
+FROM audit_events
+WHERE row_hash IS NOT NULL
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1
+`
+
+// LatestAuditHash reads the row_hash of the newest event that is part of the
+// optional audit hash chain (migration 00012, ARCH-007 §7 control 3b) — the
+// prev_hash a new Append links to when retention.hash_chain_enabled is on.
+// The chain order is the audit trail's stable order (occurred_at, id), the
+// same order the per-aggregate reads use; rows with a NULL row_hash predate
+// the chain (or the chain is off) and are skipped. An empty/unstamped trail
+// is pgx.ErrNoRows (the first chained event links to a NULL/absent prev).
+func (q *Queries) LatestAuditHash(ctx context.Context) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, latestAuditHash)
+	var row_hash pgtype.Text
+	err := row.Scan(&row_hash)
+	return row_hash, err
+}
+
 const listAuditEventsByAggregate = `-- name: ListAuditEventsByAggregate :many
-SELECT id, aggregate_type, aggregate_id, actor_type, actor_id, actor_display_name, action, occurred_at, before, after, correlation_id
+SELECT id, aggregate_type, aggregate_id, actor_type, actor_id, actor_display_name, action, occurred_at, before, after, correlation_id, prev_hash, row_hash
 FROM audit_events
 WHERE aggregate_type = $1
   AND aggregate_id = $2
@@ -165,6 +191,55 @@ func (q *Queries) ListAuditEventsByAggregate(ctx context.Context, arg ListAuditE
 			&i.Before,
 			&i.After,
 			&i.CorrelationID,
+			&i.PrevHash,
+			&i.RowHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditHashChain = `-- name: ListAuditHashChain :many
+SELECT id, aggregate_type, aggregate_id, actor_type, actor_id, actor_display_name, action, occurred_at, before, after, correlation_id, prev_hash, row_hash
+FROM audit_events
+ORDER BY occurred_at, id
+`
+
+// ListAuditHashChain returns the whole audit trail in chain order
+// (occurred_at then id) for the end-to-end chain verification (ARCH-007 §7
+// control 3b, §4 AT-015): the verify command recomputes each row's
+// SHA-256(prev_hash ‖ canonical row bytes) and compares it to the stored
+// row_hash. It is a read over the append-only table (no second write path);
+// rows with NULL hashes are included so the verifier can anchor the chain
+// start. An empty trail yields no rows, never an error.
+func (q *Queries) ListAuditHashChain(ctx context.Context) ([]AuditEvent, error) {
+	rows, err := q.db.Query(ctx, listAuditHashChain)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditEvent
+	for rows.Next() {
+		var i AuditEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.AggregateType,
+			&i.AggregateID,
+			&i.ActorType,
+			&i.ActorID,
+			&i.ActorDisplayName,
+			&i.Action,
+			&i.OccurredAt,
+			&i.Before,
+			&i.After,
+			&i.CorrelationID,
+			&i.PrevHash,
+			&i.RowHash,
 		); err != nil {
 			return nil, err
 		}
