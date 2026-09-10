@@ -18,29 +18,6 @@ import (
 // confidence and score are derived through the versioned ADR-015 mapping
 // (domain.MatchMethod.Derive) and never set independently.
 
-// evidenceTier is the identity strength of one (statement, component)
-// pair.
-type evidenceTier int
-
-const (
-	// tierNone: no identity or name relation — only weak name similarity
-	// (candidate) is left.
-	tierNone evidenceTier = iota
-	// tierAlias: vendor/product only meet through the controlled alias
-	// closure (an alias rule was required on at least one axis).
-	tierAlias
-	// tierCanonical: the normalised vendor/product names are directly
-	// equal (no alias rule needed).
-	tierCanonical
-	// tierIdentifier: the statement pins a CPE or purl whose identity
-	// (part/vendor/product resp. type/namespace/name) equals the
-	// component's identifier — stronger than a name comparison.
-	tierIdentifier
-	// tierDigest: image repository and immutable digest both match — the
-	// strongest identity (the digest pins the artifact).
-	tierDigest
-)
-
 // statementResult is the computed method evidence of one statement.
 type statementResult struct {
 	method     domain.MatchMethod

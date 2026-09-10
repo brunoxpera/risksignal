@@ -37,13 +37,10 @@ var _ application.MatchRepo = (*MatchRepo)(nil)
 func (r *MatchRepo) Insert(ctx context.Context, tx application.Tx, rec application.MatchRecord, createdAt time.Time) (string, error) {
 	const op = "match.insert"
 
-	// matches.score and matches.auto_score are int32 columns; reject a
-	// score the column cannot hold instead of silently truncating it.
+	// matches.score is an int32 column; reject a score the column cannot
+	// hold instead of silently truncating it.
 	if rec.Score < math.MinInt32 || rec.Score > math.MaxInt32 {
 		return "", application.Validationf(op, "score %d outside the int32 range", rec.Score)
-	}
-	if rec.AutoScore != nil && (*rec.AutoScore < math.MinInt32 || *rec.AutoScore > math.MaxInt32) {
-		return "", application.Validationf(op, "auto_score %d outside the int32 range", *rec.AutoScore)
 	}
 	vulnID, err := toUUID(rec.VulnerabilityID)
 	if err != nil {
@@ -84,7 +81,13 @@ func (r *MatchRepo) Insert(ctx context.Context, tx application.Tx, rec applicati
 	}
 	var autoScore pgtype.Int4
 	if rec.AutoScore != nil {
-		autoScore = pgtype.Int4{Int32: int32(*rec.AutoScore), Valid: true}
+		// matches.auto_score is an int32 column; reject a value the column
+		// cannot hold instead of silently truncating it.
+		v := *rec.AutoScore
+		if v < math.MinInt32 || v > math.MaxInt32 {
+			return "", application.Validationf(op, "auto_score %d outside the int32 range", v)
+		}
+		autoScore = pgtype.Int4{Int32: int32(v), Valid: true}
 	}
 
 	id, err := r.q.WithTx(tx).InsertMatch(ctx, gen.InsertMatchParams{

@@ -390,7 +390,12 @@ func (e *cmdEnv) cmdInventoryImport(args []string) outcome {
 // validation failure (the command argument names a file that cannot be
 // read); an oversized file carries the parser's stable error message.
 func readInventoryFile(path string) ([]byte, outcome) {
-	f, err := os.Open(path)
+	// G304 (file inclusion via variable): path is the inventory CSV named by
+	// the operator as the command's CLI argument (fs.Arg(0) in the callers
+	// above), not remotely tainted input — gosec's G304 model assumes a
+	// request-controlled path the CLI never exposes. This is a scoped allow
+	// for this call site, not a blanket G304 exclusion.
+	f, err := os.Open(path) //nolint:gosec // G304: operator-supplied CLI argument, not user-controlled input
 	if err != nil {
 		return nil, outcome{code: exitValidation, class: classValidation,
 			message: fmt.Sprintf("cannot read inventory file %s: %v", path, err)}

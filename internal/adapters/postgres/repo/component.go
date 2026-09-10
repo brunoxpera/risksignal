@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -140,6 +141,11 @@ func (r *ComponentRepo) ListComponentsPage(ctx context.Context, afterID string, 
 			return nil, application.ValidationError(op, err)
 		}
 		cursor = u
+	}
+	// components.page_limit is an int32 query parameter; reject a limit the
+	// parameter type cannot hold instead of silently truncating it.
+	if limit < 0 || limit > math.MaxInt32 {
+		return nil, application.Validationf(op, "limit %d outside the int32 range", limit)
 	}
 	rows, err := r.q.ListComponentsPage(ctx, gen.ListComponentsPageParams{
 		AfterID:   cursor,
