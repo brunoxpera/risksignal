@@ -49,12 +49,15 @@ func TestTransitionSignalWritesStateAuditOutbox(t *testing.T) {
 		t.Fatalf("updated = status %s version %d, want action_planned/%d", updated.Status, updated.Version, sig.Version+1)
 	}
 
-	// One command, one transaction; state → audit → outbox on it.
+	// One command, one transaction; state → audit → SLA clocks → outbox on
+	// it (the clock treatment of the transition commits with the rest).
 	tx := h.runner.last()
 	if tx == nil || !tx.committed || tx.rolledBack {
 		t.Fatalf("transaction committed=%v rolledBack=%v, want a committed one", tx.committed, tx.rolledBack)
 	}
-	if want := []string{"signal.transition", "audit", "outbox"}; !equalStrings(tx.log, want) {
+	// The P1 signal fulfils assessment + decision on → action_planned; both
+	// clocks are missing here, so each fulfil is a recorded no-op.
+	if want := []string{"signal.transition", "audit", "sla.fulfil", "sla.fulfil", "outbox"}; !equalStrings(tx.log, want) {
 		t.Fatalf("write order = %v, want %v", tx.log, want)
 	}
 
@@ -177,6 +180,15 @@ func TestTransitionSignalReopenClearsClosedAt(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	sig := seedSignal(t, h)
+	// A P1 signal defines all four clocks; the reopen resets each, so the
+	// fixture seeds them (a reset of a missing defined clock is an
+	// inconsistency and would fail the command).
+	for _, target := range []domain.SLATarget{
+		domain.SLATargetNotification, domain.SLATargetAcknowledgement,
+		domain.SLATargetAssessment, domain.SLATargetDecision,
+	} {
+		seedClock(h, sig.ID, target, fixedNow.Add(24*time.Hour))
+	}
 
 	planned, err := h.svc.TransitionSignal(ctx, application.TransitionSignalInput{
 		SignalID: sig.ID, To: domain.SignalStatusActionPlanned, ExpectedVersion: sig.Version, Actor: systemActor("analyst"),
@@ -543,7 +555,7 @@ func TestEveryTriageCommandEnqueuesOutbox(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	sig := seedSignal(t, h)
-	seedClock(h, sig.ID, domain.SLATargetAssessment, fixedNow.Add(time.Hour))
+	seedClock(h, sig.ID, domain.SLATargetNotification, fixedNow.Add(time.Hour))
 
 	analyst := systemActor("analyst")
 	expect := func(t *testing.T, before int, evtType string) {
@@ -597,13 +609,13 @@ func TestEveryTriageCommandEnqueuesOutbox(t *testing.T) {
 	expect(t, n, application.EventTypeSignalPriorityReverted)
 
 	n = len(h.db.outboxEvents)
-	if _, err := h.svc.PauseSla(ctx, application.PauseSlaInput{SignalID: sig.ID, Target: domain.SLATargetAssessment, Reason: "hold", Actor: analyst}); err != nil {
+	if _, err := h.svc.PauseSla(ctx, application.PauseSlaInput{SignalID: sig.ID, Target: domain.SLATargetNotification, Reason: "hold", Actor: analyst}); err != nil {
 		t.Fatalf("PauseSla: %v", err)
 	}
 	expect(t, n, application.EventTypeSignalSLAPaused)
 
 	n = len(h.db.outboxEvents)
-	if _, err := h.svc.ResumeSla(ctx, application.ResumeSlaInput{SignalID: sig.ID, Target: domain.SLATargetAssessment, Reason: "resume", Actor: analyst}); err != nil {
+	if _, err := h.svc.ResumeSla(ctx, application.ResumeSlaInput{SignalID: sig.ID, Target: domain.SLATargetNotification, Reason: "resume", Actor: analyst}); err != nil {
 		t.Fatalf("ResumeSla: %v", err)
 	}
 	expect(t, n, application.EventTypeSignalSLAResumed)
@@ -640,5 +652,233 @@ func TestTriageOutboxFaultRollsBackEverything(t *testing.T) {
 	}
 	if len(h.db.auditEvents) != 1 || len(h.db.outboxEvents) != 1 {
 		t.Fatalf("rows after rollback: audit=%d outbox=%d, want only the seed rows", len(h.db.auditEvents), len(h.db.outboxEvents))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DEV-076 — SLA clock fulfilment + reopen reset (ARCH-004 §4.3)
+
+// TestAcknowledgeFulfilsAcknowledgementClock proves the AcknowledgeSignal
+// command fulfils the acknowledgement clock (ARCH-004 §4.3) in the same
+// transaction as the status change, and fabricates no clock: exactly the
+// seeded acknowledgement clock exists afterwards and it is fulfilled at the
+// injected instant.
+func TestAcknowledgeFulfilsAcknowledgementClock(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	sig := seedSignal(t, h)
+	seedClock(h, sig.ID, domain.SLATargetAcknowledgement, fixedNow.Add(15*time.Minute))
+
+	if _, err := h.svc.AcknowledgeSignal(ctx, application.AcknowledgeSignalInput{
+		SignalID: sig.ID, ExpectedVersion: sig.Version, Actor: systemActor("analyst"),
+	}); err != nil {
+		t.Fatalf("AcknowledgeSignal: %v", err)
+	}
+
+	clock, ok := h.db.slaClockByKey(sig.ID, domain.SLATargetAcknowledgement)
+	if !ok {
+		t.Fatal("acknowledgement clock missing after the command")
+	}
+	if !clock.Fulfilled() || !clock.FulfilledAt.Equal(fixedNow) {
+		t.Fatalf("acknowledgement clock = %+v, want fulfilled at %v", clock, fixedNow)
+	}
+	// Only the seeded clock exists: the fulfil never creates one.
+	if len(h.db.slaClocks) != 1 {
+		t.Fatalf("sla clocks = %d, want exactly the 1 seeded clock", len(h.db.slaClocks))
+	}
+}
+
+// TestAcknowledgeWithoutClockIsNoOp proves a missing acknowledgement clock is
+// a no-op: the command succeeds and creates no clock (e.g. a priority that
+// defines no acknowledgement target).
+func TestAcknowledgeWithoutClockIsNoOp(t *testing.T) {
+	h := newHarness(t)
+	sig := seedSignal(t, h)
+
+	if _, err := h.svc.AcknowledgeSignal(context.Background(), application.AcknowledgeSignalInput{
+		SignalID: sig.ID, ExpectedVersion: sig.Version, Actor: systemActor("analyst"),
+	}); err != nil {
+		t.Fatalf("AcknowledgeSignal: %v", err)
+	}
+	if len(h.db.slaClocks) != 0 {
+		t.Fatalf("sla clocks = %d, want none created by the fulfil", len(h.db.slaClocks))
+	}
+}
+
+// TestTransitionFulfilsAssessmentAndDecisionOnce proves → action_planned
+// co-fulfils assessment + decision (ARCH-004 §4.3) and that a later closed
+// transition does not move an already-fulfilled clock (idempotent fulfil).
+func TestTransitionFulfilsAssessmentAndDecisionOnce(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	sig := seedSignal(t, h)
+	seedClock(h, sig.ID, domain.SLATargetAssessment, fixedNow.Add(time.Hour))
+	seedClock(h, sig.ID, domain.SLATargetDecision, fixedNow.Add(4*time.Hour))
+
+	planned, err := h.svc.TransitionSignal(ctx, application.TransitionSignalInput{
+		SignalID: sig.ID, To: domain.SignalStatusActionPlanned, ExpectedVersion: sig.Version, Actor: systemActor("analyst"),
+	})
+	if err != nil {
+		t.Fatalf("-> action_planned: %v", err)
+	}
+	for _, target := range []domain.SLATarget{domain.SLATargetAssessment, domain.SLATargetDecision} {
+		clock, ok := h.db.slaClockByKey(sig.ID, target)
+		if !ok || !clock.Fulfilled() || !clock.FulfilledAt.Equal(fixedNow) {
+			t.Fatalf("%s clock = %+v (ok=%v), want fulfilled at %v", target, clock, ok, fixedNow)
+		}
+	}
+
+	// A later closed transition re-attempts the fulfil; the clock keeps its
+	// original fulfilment instant (never re-opened).
+	h.clock.Advance(time.Hour)
+	if _, err := h.svc.TransitionSignal(ctx, application.TransitionSignalInput{
+		SignalID: sig.ID, To: domain.SignalStatusAccepted, Reason: "risk accepted", ExpectedVersion: planned.Version, Actor: systemActor("analyst"),
+	}); err != nil {
+		t.Fatalf("-> accepted: %v", err)
+	}
+	for _, target := range []domain.SLATarget{domain.SLATargetAssessment, domain.SLATargetDecision} {
+		clock, _ := h.db.slaClockByKey(sig.ID, target)
+		if !clock.FulfilledAt.Equal(fixedNow) {
+			t.Fatalf("%s fulfilled_at = %v, want the unchanged %v (idempotent fulfil)", target, clock.FulfilledAt, fixedNow)
+		}
+	}
+}
+
+// TestTransitionNotAffectedFulfilsAssessmentOnly proves → not_affected
+// fulfils the assessment clock and leaves the decision clock open
+// (ARCH-004 §4.3).
+func TestTransitionNotAffectedFulfilsAssessmentOnly(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	sig := seedSignal(t, h)
+	seedClock(h, sig.ID, domain.SLATargetAssessment, fixedNow.Add(time.Hour))
+	seedClock(h, sig.ID, domain.SLATargetDecision, fixedNow.Add(4*time.Hour))
+
+	if _, err := h.svc.TransitionSignal(ctx, application.TransitionSignalInput{
+		SignalID: sig.ID, To: domain.SignalStatusNotAffected, Reason: "no affected asset", ExpectedVersion: sig.Version, Actor: systemActor("analyst"),
+	}); err != nil {
+		t.Fatalf("-> not_affected: %v", err)
+	}
+	if clock, _ := h.db.slaClockByKey(sig.ID, domain.SLATargetAssessment); !clock.Fulfilled() {
+		t.Fatalf("assessment clock = %+v, want fulfilled", clock)
+	}
+	if clock, _ := h.db.slaClockByKey(sig.ID, domain.SLATargetDecision); clock.Fulfilled() {
+		t.Fatalf("decision clock = %+v, want still open on not_affected", clock)
+	}
+}
+
+// TestTransitionP3HasNoDecisionClock proves the profile guard: P3 defines no
+// decision clock, so → action_planned fulfils the assessment clock and
+// leaves any decision clock untouched (ARCH-004 §4.2/§4.3).
+func TestTransitionP3HasNoDecisionClock(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	sig := seedSignal(t, h) // computed P1
+	seedClock(h, sig.ID, domain.SLATargetAssessment, fixedNow.Add(72*time.Hour))
+	seedClock(h, sig.ID, domain.SLATargetDecision, fixedNow.Add(72*time.Hour))
+
+	// Effective priority P3 (no decision clock in the default profile).
+	downgraded, err := h.svc.OverridePriority(ctx, application.OverridePriorityInput{
+		SignalID: sig.ID, Priority: domain.PriorityP3, Reason: "plausible only", ExpectedVersion: sig.Version, Actor: systemActor("analyst"),
+	})
+	if err != nil {
+		t.Fatalf("OverridePriority: %v", err)
+	}
+	if _, err := h.svc.TransitionSignal(ctx, application.TransitionSignalInput{
+		SignalID: sig.ID, To: domain.SignalStatusActionPlanned, ExpectedVersion: downgraded.Version, Actor: systemActor("analyst"),
+	}); err != nil {
+		t.Fatalf("-> action_planned: %v", err)
+	}
+
+	if clock, _ := h.db.slaClockByKey(sig.ID, domain.SLATargetAssessment); !clock.Fulfilled() {
+		t.Fatalf("assessment clock = %+v, want fulfilled (P3 defines it)", clock)
+	}
+	if clock, _ := h.db.slaClockByKey(sig.ID, domain.SLATargetDecision); clock.Fulfilled() {
+		t.Fatalf("decision clock = %+v, want untouched (P3 defines no decision clock)", clock)
+	}
+}
+
+// TestReopenResetsClocks proves a reopen (a closed state → in_review) resets
+// every clock defined at the current priority to a fresh window
+// (ARCH-004 §4.3): started_at = now, deadline_at = now + duration,
+// fulfilled_at cleared, pause counters zeroed.
+func TestReopenResetsClocks(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	sig := seedSignal(t, h) // P1: all four clocks defined
+
+	// Seed every clock fulfilled/closed-window and stale.
+	for _, target := range []domain.SLATarget{
+		domain.SLATargetNotification, domain.SLATargetAcknowledgement,
+		domain.SLATargetAssessment, domain.SLATargetDecision,
+	} {
+		seedClock(h, sig.ID, target, fixedNow.Add(24*time.Hour))
+	}
+	closed, err := h.svc.TransitionSignal(ctx, application.TransitionSignalInput{
+		SignalID: sig.ID, To: domain.SignalStatusNotAffected, Reason: "no affected asset", ExpectedVersion: sig.Version, Actor: systemActor("analyst"),
+	})
+	if err != nil {
+		t.Fatalf("-> not_affected: %v", err)
+	}
+	if clock, _ := h.db.slaClockByKey(sig.ID, domain.SLATargetAssessment); !clock.Fulfilled() {
+		t.Fatal("assessment clock not fulfilled before the reopen")
+	}
+
+	reopenAt := fixedNow.Add(30 * time.Minute)
+	h.clock.Advance(30 * time.Minute)
+	if _, err := h.svc.TransitionSignal(ctx, application.TransitionSignalInput{
+		SignalID: sig.ID, To: domain.SignalStatusInReview, Reason: "new evidence", ExpectedVersion: closed.Version, Actor: systemActor("analyst"),
+	}); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+
+	want := map[domain.SLATarget]time.Duration{
+		domain.SLATargetNotification:    5 * time.Minute,
+		domain.SLATargetAcknowledgement: 15 * time.Minute,
+		domain.SLATargetAssessment:      60 * time.Minute,
+		domain.SLATargetDecision:        4 * time.Hour,
+	}
+	for target, d := range want {
+		clock, ok := h.db.slaClockByKey(sig.ID, target)
+		if !ok {
+			t.Fatalf("%s clock missing after the reopen", target)
+		}
+		if clock.Fulfilled() {
+			t.Fatalf("%s clock = %+v, want fulfilled_at cleared on reopen", target, clock)
+		}
+		if !clock.StartedAt.Equal(reopenAt) {
+			t.Fatalf("%s started_at = %v, want the reopen instant %v", target, clock.StartedAt, reopenAt)
+		}
+		if wantDeadline := reopenAt.Add(d); !clock.DeadlineAt.Equal(wantDeadline) {
+			t.Fatalf("%s deadline_at = %v, want %v (now + duration)", target, clock.DeadlineAt, wantDeadline)
+		}
+		if clock.PausedSeconds != 0 || clock.Paused() {
+			t.Fatalf("%s pause counters = %d/%v, want zeroed", target, clock.PausedSeconds, clock.PausedAt)
+		}
+	}
+}
+
+// TestTriageOutboxFaultRollsBackClockMutation proves the fault seam covers
+// the clock treatment: a failing outbox append rolls the fulfilled clock back
+// with the status change — no half-state (TR-004).
+func TestTriageOutboxFaultRollsBackClockMutation(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	sig := seedSignal(t, h)
+	seedClock(h, sig.ID, domain.SLATargetAssessment, fixedNow.Add(time.Hour))
+
+	h.outbox.failpoint = application.InfraError("outbox.append", errors.New("outbox append failed"))
+	if _, err := h.svc.TransitionSignal(ctx, application.TransitionSignalInput{
+		SignalID: sig.ID, To: domain.SignalStatusActionPlanned, ExpectedVersion: sig.Version, Actor: systemActor("analyst"),
+	}); err == nil {
+		t.Fatal("TransitionSignal succeeded despite the injected outbox error")
+	}
+
+	clock, _ := h.db.slaClockByKey(sig.ID, domain.SLATargetAssessment)
+	if clock.Fulfilled() {
+		t.Fatalf("assessment clock = %+v, want the fulfil rolled back with the transition", clock)
+	}
+	if row, _ := h.db.signalRowByID(sig.ID); row.sig.Status != domain.SignalStatusNew {
+		t.Fatalf("signal status = %s, want the unchanged new after the rollback", row.sig.Status)
 	}
 }

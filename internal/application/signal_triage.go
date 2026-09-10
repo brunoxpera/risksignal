@@ -223,6 +223,13 @@ func (s *Service) TransitionSignal(ctx context.Context, in TransitionSignalInput
 		if err := s.appendSignalAudit(ctx, tx, EventTypeSignalTransitioned, row.ID, actor, correlationID, now, before, after); err != nil {
 			return err
 		}
+		// The ch. 6.3 status change implies an SLA clock treatment
+		// (ARCH-004 §4.3): fulfil the target(s) the new status completes, or
+		// reset the clocks on a reopen. It runs on this very transaction, so
+		// a rolled-back transition rolls its clock treatment back with it.
+		if err := s.applyTransitionClocks(ctx, tx, current.Status, row, in.To, now); err != nil {
+			return err
+		}
 		return s.appendSignalOutbox(ctx, tx, EventTypeSignalTransitioned, row.ID, correlationID, now, signalCommandPayload{
 			Version: row.Version,
 			From:    string(current.Status),
@@ -381,6 +388,14 @@ func (s *Service) AcknowledgeSignal(ctx context.Context, in AcknowledgeSignalInp
 			return InfraError(op, err)
 		}
 		if err := s.appendSignalAudit(ctx, tx, EventTypeSignalAcknowledged, row.ID, actor, correlationID, now, before, after); err != nil {
+			return err
+		}
+		// The explicit acknowledgement fulfils the acknowledgement clock
+		// (ARCH-004 §4.3). The call is idempotent and never fabricates a
+		// clock: a missing clock (e.g. a priority with no acknowledgement
+		// target) or an already-fulfilled one is a no-op. It commits with
+		// the status change.
+		if _, _, err := s.slaClocks.Fulfil(ctx, tx, row.ID, domain.SLATargetAcknowledgement, now); err != nil {
 			return err
 		}
 		return s.appendSignalOutbox(ctx, tx, EventTypeSignalAcknowledged, row.ID, correlationID, now, signalCommandPayload{
@@ -753,6 +768,77 @@ func slaClockSnapshot(c domain.SlaClock, reason string) (json.RawMessage, error)
 		return nil, err
 	}
 	return b, nil
+}
+
+// definedAt reports whether the injected SLA time profile defines a clock
+// for the (priority, target) pair — a positive duration means defined
+// (ARCH-004 §4.2/§4.3). It guards every fulfil and reset the triage commands
+// issue: a target without a defined duration has no clock and is never
+// touched (never created, never fulfilled, never reset).
+func (s *Service) definedAt(priority domain.Priority, target domain.SLATarget) bool {
+	return s.slaProfile.Duration(priority, target) > 0
+}
+
+// applyTransitionClocks is the ARCH-004 §4.3 clock treatment of one ch. 6.3
+// status change, run on the transition's transaction:
+//
+//   - → action_planned / accepted / resolved fulfils the assessment and the
+//     decision clock — a qualified impact assessment is documented and a
+//     disposition is decided (the common fast path co-fulfils both);
+//   - → not_affected fulfils the assessment clock alone;
+//   - a reopen (a closed state → in_review) resets every clock defined at
+//     the signal's current priority;
+//   - every other target (new / in_review entry) leaves the clocks alone.
+//
+// Each fulfil is guarded by the injected profile, so e.g. P3's missing
+// decision clock is a no-op, and the reset touches only defined targets. The
+// priority is the signal's effective priority, which a status change never
+// alters.
+func (s *Service) applyTransitionClocks(ctx context.Context, tx Tx, from domain.SignalStatus, signal domain.RiskSignal, to domain.SignalStatus, now time.Time) error {
+	switch to {
+	case domain.SignalStatusActionPlanned, domain.SignalStatusAccepted, domain.SignalStatusResolved:
+		if err := s.fulfilClock(ctx, tx, signal, domain.SLATargetAssessment, now); err != nil {
+			return err
+		}
+		return s.fulfilClock(ctx, tx, signal, domain.SLATargetDecision, now)
+	case domain.SignalStatusNotAffected:
+		return s.fulfilClock(ctx, tx, signal, domain.SLATargetAssessment, now)
+	case domain.SignalStatusInReview:
+		if domain.IsReopen(from, to) {
+			return s.resetClocks(ctx, tx, signal, now)
+		}
+	}
+	return nil
+}
+
+// fulfilClock fulfils one SLA clock of a signal when the injected profile
+// defines it at the signal's priority (ARCH-004 §4.3). The port's Fulfil is
+// idempotent and never creates a clock: an already-fulfilled or missing
+// clock is a no-op (changed = false), and a target the profile does not
+// define is skipped before the call.
+func (s *Service) fulfilClock(ctx context.Context, tx Tx, signal domain.RiskSignal, target domain.SLATarget, at time.Time) error {
+	if !s.definedAt(signal.Priority, target) {
+		return nil
+	}
+	if _, _, err := s.slaClocks.Fulfil(ctx, tx, signal.ID, target, at); err != nil {
+		return err
+	}
+	return nil
+}
+
+// resetClocks restarts every SLA clock the profile defines at the signal's
+// priority on a reopen (ARCH-004 §4.3): started_at = now, deadline_at = now +
+// duration, fulfilled_at cleared and the pause counters zeroed. Targets the
+// profile does not define have no clock and are never touched. It runs on
+// the reopen's transaction, so a rolled-back reopen resets nothing.
+func (s *Service) resetClocks(ctx context.Context, tx Tx, signal domain.RiskSignal, now time.Time) error {
+	for _, target := range s.slaProfile.Targets(signal.Priority) {
+		deadline := now.Add(s.slaProfile.Duration(signal.Priority, target))
+		if _, err := s.slaClocks.Reset(ctx, tx, signal.ID, target, now, deadline); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // signalActor resolves the audit principal of a triage/SLA command: an empty

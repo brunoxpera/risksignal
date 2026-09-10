@@ -1,5 +1,7 @@
 package application
 
+import "github.com/brunoxpera/risksignal/internal/domain"
+
 // Service is the application service: it owns the use cases (CreateSignal,
 // ListSignals, GetSignal, RunSyntheticSource, the I2 source use cases
 // FetchSource / NormalizeSource / RunSource / QuarantineList / Ack /
@@ -31,8 +33,13 @@ type Service struct {
 	signalTriage SignalTriageRepo
 	comments     CommentRepo
 	slaClocks    SlaClockRepo
-	clock        Clock
-	runTx        TxRunner
+	// slaProfile is the injected (priority, target) → reaction-time duration
+	// profile (ARCH-004 §4.2/§4.3). The triage commands read it to decide
+	// which SLA clocks a transition fulfils or resets; it defaults to the
+	// ch. 9.4 durations when ServiceDeps.SlaTimeProfile is nil.
+	slaProfile domain.SLATimeProfile
+	clock      Clock
+	runTx      TxRunner
 }
 
 // ServiceDeps are the port implementations the service runs on. RunTx is
@@ -66,8 +73,15 @@ type ServiceDeps struct {
 	SignalTriage SignalTriageRepo
 	Comments     CommentRepo
 	SlaClocks    SlaClockRepo
-	Clock        Clock
-	RunTx        TxRunner
+	// SlaTimeProfile is the injectable (priority, target) → reaction-time
+	// duration profile the I4 triage commands read to decide which SLA
+	// clocks a status change fulfils or resets (ARCH-004 §4.2/§4.3,
+	// FR-032/NFR-015). It is optional: a nil profile takes the ch. 9.4
+	// defaults (domain.DefaultSLATimeProfile). The accelerated demo/test
+	// runs inject a scaled profile without touching any status/audit logic.
+	SlaTimeProfile *domain.SLATimeProfile
+	Clock          Clock
+	RunTx          TxRunner
 }
 
 // NewService assembles the service from its port implementations. A nil
@@ -113,6 +127,13 @@ func NewService(deps ServiceDeps) *Service {
 	if deps.RunTx == nil {
 		panic("application: NewService: RunTx must not be nil")
 	}
+	// The SLA time profile is optional: absent means the ch. 9.4 defaults
+	// (ARCH-004 §4.2), so a Service keeps a defined clock vocabulary even
+	// when the composition root injects no scaled profile.
+	slaProfile := domain.DefaultSLATimeProfile()
+	if deps.SlaTimeProfile != nil {
+		slaProfile = *deps.SlaTimeProfile
+	}
 	return &Service{
 		signals:      deps.Signals,
 		audit:        deps.Audit,
@@ -129,6 +150,7 @@ func NewService(deps ServiceDeps) *Service {
 		signalTriage: deps.SignalTriage,
 		comments:     deps.Comments,
 		slaClocks:    deps.SlaClocks,
+		slaProfile:   slaProfile,
 		clock:        deps.Clock,
 		runTx:        deps.RunTx,
 	}
