@@ -194,6 +194,15 @@ func (f *jobSourceRepo) SetLastContentHash(ctx context.Context, tx application.T
 	return nil
 }
 
+func (f *jobSourceRepo) SetCursor(ctx context.Context, tx application.Tx, sourceID string, cursor json.RawMessage) error {
+	desc, ok := f.db.sourceByID(sourceID)
+	if !ok {
+		return application.NotFoundError("source.set_cursor", fmt.Errorf("source %s not found", sourceID))
+	}
+	desc.Cursor = cursor
+	return nil
+}
+
 func (f *jobSourceRepo) ListEnabledScheduled(ctx context.Context) ([]application.ScheduledSource, error) {
 	return append([]application.ScheduledSource(nil), f.db.scheduled...), nil
 }

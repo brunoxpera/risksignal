@@ -134,6 +134,17 @@ type SourceRepo interface {
 	// config — every other member (window, overlap, the api_key_ref secret
 	// reference) stays intact.
 	SetLastContentHash(ctx context.Context, tx Tx, sourceID, contentHash string) error
+
+	// SetCursor promotes the cursor_after watermark of one successful run
+	// back into sources.cursor (DEV-067, ARCH-003 §6): the fetch use cases
+	// (FetchSource, RunSource) run the update in the same transaction as
+	// the raw-record insert and the run completion — success only; a
+	// failing or rate-limited run never reaches it, so the cursor advances
+	// only with a committed successful run (ch. 6.1) and the next fetch
+	// re-runs the failed window. cursor is the adapter-produced cursor
+	// value (the last-modified watermark of an incremental source); the
+	// full-set sources never call it — their fetches carry no cursor.
+	SetCursor(ctx context.Context, tx Tx, sourceID string, cursor json.RawMessage) error
 }
 
 // RawRecordRepo persists the unchanged raw source documents (ARCH-002 §1,

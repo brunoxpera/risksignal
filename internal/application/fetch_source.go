@@ -144,6 +144,18 @@ func (s *Service) FetchSource(ctx context.Context, in FetchSourceInput) (FetchSo
 		if err := s.sources.SetLastContentHash(ctx, tx, desc.ID, out.ContentHash); err != nil {
 			return err
 		}
+		// Cursor promotion (DEV-067, ARCH-003 §6): write the committed
+		// cursor_after watermark back into sources.cursor on the same
+		// transaction — the next run (and the next checkpointed full-import
+		// window) reads the advanced cursor off the source row. Success
+		// only by construction: this transaction is the terminal commit of
+		// a successful run, so a failed run leaves the cursor untouched
+		// (ch. 6.1). Full-set sources carry no cursor value and skip it.
+		if len(out.Cursor) > 0 {
+			if err := s.sources.SetCursor(ctx, tx, desc.ID, out.Cursor); err != nil {
+				return err
+			}
+		}
 		return s.appendNormalizeJob(ctx, tx, rawID, desc.ID, in.Adapter.NormalizerVersion(), out, now)
 	}); err != nil {
 		// Nothing of the terminal commit landed — close the run failed (no

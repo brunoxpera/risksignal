@@ -139,7 +139,22 @@ func (s *Service) RunSource(ctx context.Context, in RunSourceInput) (RunSourceRe
 		// raw record's hash from sources.config.last_content_hash (ch.
 		// 8.3); the update commits with the run — the hash advances only
 		// after a successful commit.
-		return s.sources.SetLastContentHash(ctx, tx, desc.ID, out.ContentHash)
+		if err := s.sources.SetLastContentHash(ctx, tx, desc.ID, out.ContentHash); err != nil {
+			return err
+		}
+		// Cursor promotion (DEV-067, ARCH-003 §6): write the committed
+		// cursor_after watermark back into sources.cursor on the same
+		// transaction — the next run (and the next checkpointed full-import
+		// window) reads the advanced cursor off the source row. Success
+		// only by construction: this transaction is the terminal commit of
+		// a successful run, so a failed run leaves the cursor untouched
+		// (ch. 6.1). Full-set sources carry no cursor value and skip it.
+		if len(out.Cursor) > 0 {
+			if err := s.sources.SetCursor(ctx, tx, desc.ID, out.Cursor); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if passErr != nil {
 		// The pass rolled back — no raw record, no normalised objects, no

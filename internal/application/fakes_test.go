@@ -117,6 +117,13 @@ type sourceHashMutation struct {
 	contentHash string
 }
 
+// sourceCursorMutation is one staged sources.cursor promotion of a fetch
+// run's terminal commit (DEV-067, ARCH-003 §6).
+type sourceCursorMutation struct {
+	sourceID string
+	cursor   json.RawMessage
+}
+
 // fakeDB is the committed state of the fake persistence: rows are visible
 // here only after the transaction that staged them committed.
 type fakeDB struct {
@@ -303,6 +310,11 @@ type fakeStaged struct {
 	qMutations  []domain.Quarantine
 	epssRows    []storedEpssRow
 	sourceHash  []sourceHashMutation
+	// sourceCursor is the staged sources.cursor promotions of fetch terminal
+	// commits (DEV-067): applied to the committed source descriptor at
+	// commit, discarded on rollback — the cursor advances only with a
+	// committed successful run.
+	sourceCursor []sourceCursorMutation
 	// assets is the copy-on-write overlay of the inventory commit path:
 	// nil until the inventory writer first stages on the transaction, then
 	// a deep clone of the committed assets the writer mutates (upserts by
@@ -336,6 +348,13 @@ func (t *fakeTx) commit() {
 				t.db.sources[i].Config = make(map[string]any)
 			}
 			t.db.sources[i].Config["last_content_hash"] = m.contentHash
+		}
+	}
+	for _, m := range t.staged.sourceCursor {
+		for i := range t.db.sources {
+			if t.db.sources[i].ID == m.sourceID {
+				t.db.sources[i].Cursor = m.cursor
+			}
 		}
 	}
 	for _, q := range t.staged.quarantine {
@@ -771,6 +790,21 @@ func (f *fakeSourceRepo) SetLastContentHash(ctx context.Context, tx application.
 	}
 	ftx.record("source.hash")
 	ftx.staged.sourceHash = append(ftx.staged.sourceHash, sourceHashMutation{sourceID: sourceID, contentHash: contentHash})
+	return nil
+}
+
+// SetCursor implements application.SourceRepo on the fake store: the
+// promotion is staged on the transaction and applied to the committed
+// source descriptor's cursor at commit (mirroring the generated UPDATE of
+// SetSourceCursor — the cursor advances only with the run's terminal
+// commit).
+func (f *fakeSourceRepo) SetCursor(ctx context.Context, tx application.Tx, sourceID string, cursor json.RawMessage) error {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return err
+	}
+	ftx.record("source.cursor")
+	ftx.staged.sourceCursor = append(ftx.staged.sourceCursor, sourceCursorMutation{sourceID: sourceID, cursor: cursor})
 	return nil
 }
 

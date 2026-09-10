@@ -198,6 +198,33 @@ func (q *Queries) ListSourcesByType(ctx context.Context, type_ string) ([]ListSo
 	return items, nil
 }
 
+const setSourceCursor = `-- name: SetSourceCursor :exec
+UPDATE sources
+SET cursor = $1
+WHERE id = $2
+`
+
+type SetSourceCursorParams struct {
+	Cursor []byte
+	ID     pgtype.UUID
+}
+
+// SetSourceCursor promotes the watermark of one successful run back into
+// sources.cursor (DEV-067, ARCH-003 §6): the fetch use cases (FetchSource,
+// RunSource) run the update in the same transaction as the raw-record
+// insert and the run completion, so the source cursor advances only with a
+// committed successful run (ch. 6.1 — a failed run leaves the cursor
+// untouched and the next fetch re-runs the same window). The I2 code
+// persisted cursor_before/cursor_after on source_runs but never promoted
+// the row cursor; without the promotion every fetch re-read the original
+// cursor, and the checkpointed windows of the full import could never
+// advance. Cursor-less (full-set) sources never call it — their fetches
+// carry no cursor value to promote.
+func (q *Queries) SetSourceCursor(ctx context.Context, arg SetSourceCursorParams) error {
+	_, err := q.db.Exec(ctx, setSourceCursor, arg.Cursor, arg.ID)
+	return err
+}
+
 const setSourceLastContentHash = `-- name: SetSourceLastContentHash :exec
 UPDATE sources
 SET config = COALESCE(config, '{}'::jsonb) || jsonb_build_object('last_content_hash', $1::text)

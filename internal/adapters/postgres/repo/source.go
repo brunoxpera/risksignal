@@ -72,6 +72,27 @@ func (r *SourceRepo) SetLastContentHash(ctx context.Context, tx application.Tx, 
 	return nil
 }
 
+// SetCursor implements application.SourceRepo: promote the cursor_after
+// watermark of one successful run back into sources.cursor on the caller's
+// transaction (the fetch run's terminal commit — DEV-067/ARCH-003 §6: the
+// source cursor advances only with a committed successful run, and the
+// checkpointed windows of the NVD full import resume from it).
+func (r *SourceRepo) SetCursor(ctx context.Context, tx application.Tx, sourceID string, cursor json.RawMessage) error {
+	const op = "source.set_cursor"
+
+	srcID, err := toUUID(sourceID)
+	if err != nil {
+		return application.ValidationError(op, err)
+	}
+	if err := r.q.WithTx(tx).SetSourceCursor(ctx, gen.SetSourceCursorParams{
+		ID:     srcID,
+		Cursor: cursor,
+	}); err != nil {
+		return mapDBError(op, err)
+	}
+	return nil
+}
+
 // ListEnabledScheduled implements application.SourceRepo: the scheduler
 // scan read (ARCH-002 §5) — every enabled source whose schedule is set,
 // with the row identity and the schedule string the scan derives the due

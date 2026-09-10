@@ -49,6 +49,22 @@ UPDATE sources
 SET config = COALESCE(config, '{}'::jsonb) || jsonb_build_object('last_content_hash', @content_hash::text)
 WHERE id = @id;
 
+-- SetSourceCursor promotes the watermark of one successful run back into
+-- sources.cursor (DEV-067, ARCH-003 §6): the fetch use cases (FetchSource,
+-- RunSource) run the update in the same transaction as the raw-record
+-- insert and the run completion, so the source cursor advances only with a
+-- committed successful run (ch. 6.1 — a failed run leaves the cursor
+-- untouched and the next fetch re-runs the same window). The I2 code
+-- persisted cursor_before/cursor_after on source_runs but never promoted
+-- the row cursor; without the promotion every fetch re-read the original
+-- cursor, and the checkpointed windows of the full import could never
+-- advance. Cursor-less (full-set) sources never call it — their fetches
+-- carry no cursor value to promote.
+-- name: SetSourceCursor :exec
+UPDATE sources
+SET cursor = @cursor
+WHERE id = @id;
+
 -- ListEnabledScheduledSources returns the rows the scheduler scan checks
 -- (WP-2.08/DEV-042, ARCH-002 §5): every enabled source whose schedule is
 -- set — NULL schedules (e.g. the operator-triggered synthetic source) never

@@ -165,6 +165,18 @@ func TestFetchSourceHappyPath(t *testing.T) {
 		t.Fatalf("counters = %+v, want records 1", run.counters)
 	}
 
+	// Cursor promotion (DEV-067, ARCH-003 §6): the committed cursor_after
+	// watermark is written back into sources.cursor on the same commit, so
+	// the next run — and the next checkpointed full-import window — opens
+	// from the advanced cursor.
+	desc, err := h.sources.GetByID(ctx, "src-nvd")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if string(desc.Cursor) != string(src.fetchOut.Cursor) {
+		t.Fatalf("sources.cursor = %s, want the promoted cursor_after %s", desc.Cursor, src.fetchOut.Cursor)
+	}
+
 	// The unchanged raw record was stored with its self-describing encoding
 	// (content type application/json -> 'json') and the normalize job was
 	// enqueued on the same commit.
@@ -319,6 +331,23 @@ func TestRunSourceHappyPathIsIdempotent(t *testing.T) {
 	if len(h.db.sourceRuns) != 2 {
 		t.Fatalf("runs = %d, want 2", len(h.db.sourceRuns))
 	}
+
+	// Cursor promotion (DEV-067): after the two successful runs the source
+	// row cursor holds the second run's committed watermark, so a third run
+	// opens from it instead of re-reading the original cursor.
+	desc, err := h.sources.GetByID(ctx, "src-nvd")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if string(desc.Cursor) != string(res2.CursorAfter) {
+		t.Fatalf("sources.cursor = %s, want the promoted cursor_after %s", desc.Cursor, res2.CursorAfter)
+	}
+	// The second run's fetch input opened from the promoted cursor (its
+	// window derives from 09:30Z minus the overlap, not the original
+	// 07:00Z cursor).
+	if !src.lastFetchIn.Window.From.Equal(time.Date(2026, 9, 9, 7, 30, 0, 0, time.UTC)) {
+		t.Fatalf("second window From = %v, want 07:30Z (promoted 09:30Z cursor minus the 2 h overlap)", src.lastFetchIn.Window.From)
+	}
 }
 
 // TestRunSourceFailingSinkRollsBackRunAndCursor is the ARCH-002 §6 fault
@@ -358,6 +387,16 @@ func TestRunSourceFailingSinkRollsBackRunAndCursor(t *testing.T) {
 	if len(h.db.rawRecords) != 0 || len(h.db.vulns) != 0 || len(h.db.evidenceRows) != 0 {
 		t.Fatalf("raw/vulns/evidences = %d/%d/%d, want 0 — nothing partially committed", len(h.db.rawRecords), len(h.db.vulns), len(h.db.evidenceRows))
 	}
+
+	// The failing sink left the source cursor untouched (DEV-067): no
+	// promotion, the next run re-fetches the same window.
+	desc, err := h.sources.GetByID(ctx, "src-nvd")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if string(desc.Cursor) != `{"last_modified":"2026-09-09T07:00:00Z"}` {
+		t.Fatalf("sources.cursor = %s, want the original cursor — a failed run never promotes", desc.Cursor)
+	}
 }
 
 // TestFetchSourceFailingOutboxAppendRollsBackCommit is the ARCH-002 §6
@@ -383,6 +422,16 @@ func TestFetchSourceFailingOutboxAppendRollsBackCommit(t *testing.T) {
 	}
 	if len(h.db.rawRecords) != 0 || len(h.db.outboxEvents) != 0 {
 		t.Fatalf("raw records/outbox = %d/%d, want 0 — the terminal commit rolled back entirely", len(h.db.rawRecords), len(h.db.outboxEvents))
+	}
+
+	// The rolled-back terminal commit left the source cursor untouched
+	// (DEV-067): no promotion on the failed run.
+	desc, err := h.sources.GetByID(ctx, "src-nvd")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if string(desc.Cursor) != `{"last_modified":"2026-09-09T07:00:00Z"}` {
+		t.Fatalf("sources.cursor = %s, want the original cursor — promotion commits only with the successful run", desc.Cursor)
 	}
 }
 
