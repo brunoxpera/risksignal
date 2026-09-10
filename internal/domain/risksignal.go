@@ -66,6 +66,13 @@ type RiskSignal struct {
 	OverrideReason  string
 	OverrideActorID string
 	OverrideAt      time.Time
+
+	// EscalatedAt is the first P1 escalation instant (ARCH-004 §4.4); the
+	// zero time means never escalated. The field is a write-only escalation
+	// marker of the sla.evaluate scheduler: the set-once guard lives in the
+	// persistence (MarkEscalated, escalated_at IS NULL), and a reminder
+	// cadence never re-stamps it.
+	EscalatedAt time.Time
 }
 
 // NewRiskSignal validates the factors and assembles a new signal: priority

@@ -204,8 +204,8 @@ func toSignalView(j signalJoin) application.Signal {
 // aggregate (the persistence-layer mapping the domain package sanctions).
 // Every column the aggregate carries is mapped, including the I4
 // override-survival quartet (ARCH-004 §3): auto_priority is nil exactly when
-// no override is active. escalated_at has no domain field (the flag is a
-// write-only escalation marker of ARCH-004 §4.4) and is dropped here.
+// no override is active. escalated_at maps onto EscalatedAt (the write-only
+// escalation marker of ARCH-004 §4.4, zero until the first P1 escalation).
 func riskSignalFromRow(op string, row gen.RiskSignal) (domain.RiskSignal, error) {
 	var factors domain.PriorityFactors
 	if err := json.Unmarshal(row.Factors, &factors); err != nil {
@@ -223,6 +223,7 @@ func riskSignalFromRow(op string, row gen.RiskSignal) (domain.RiskSignal, error)
 		OverrideReason:  textValue(row.OverrideReason),
 		OverrideActorID: textValue(row.OverrideActorID),
 		OverrideAt:      tsTime(row.OverrideAt),
+		EscalatedAt:     tsTime(row.EscalatedAt),
 	}
 	if row.AutoPriority.Valid {
 		auto := domain.Priority(row.AutoPriority.String)

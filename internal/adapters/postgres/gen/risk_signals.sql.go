@@ -266,6 +266,85 @@ func (q *Queries) InsertRiskSignal(ctx context.Context, arg InsertRiskSignalPara
 	return i, err
 }
 
+const listOpenRecomputeTargets = `-- name: ListOpenRecomputeTargets :many
+SELECT id, factors
+FROM risk_signals
+WHERE status NOT IN ('resolved', 'accepted', 'not_affected')
+ORDER BY id
+`
+
+type ListOpenRecomputeTargetsRow struct {
+	ID      pgtype.UUID
+	Factors []byte
+}
+
+// ListOpenRecomputeTargets returns the id and stored factor-set of every
+// open (non-closed) signal — the fan-in read of a ruleset publish (ARCH-004
+// §5: "a rule-version publish enqueues a batched recompute over all open
+// signals"). The closed states (resolved/accepted/not_affected) are excluded:
+// a closed signal is never silently changed (its recompute proposes a reopen
+// instead, §5) and is not part of the publish fan-out. Ordered by id. No open
+// signal yields no rows, never an error.
+func (q *Queries) ListOpenRecomputeTargets(ctx context.Context) ([]ListOpenRecomputeTargetsRow, error) {
+	rows, err := q.db.Query(ctx, listOpenRecomputeTargets)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOpenRecomputeTargetsRow
+	for rows.Next() {
+		var i ListOpenRecomputeTargetsRow
+		if err := rows.Scan(&i.ID, &i.Factors); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecomputeTargetsByVulnerabilityIDs = `-- name: ListRecomputeTargetsByVulnerabilityIDs :many
+SELECT DISTINCT rs.id, rs.factors
+FROM risk_signals rs
+JOIN matches m ON m.id = rs.match_id
+WHERE m.vulnerability_id IN (SELECT value::uuid FROM jsonb_array_elements_text($1::jsonb))
+ORDER BY rs.id
+`
+
+type ListRecomputeTargetsByVulnerabilityIDsRow struct {
+	ID      pgtype.UUID
+	Factors []byte
+}
+
+// ListRecomputeTargetsByVulnerabilityIDs returns the id and stored
+// factor-set of every signal whose match references one of the given
+// vulnerability row ids — the fan-in read of a matching.recompute run
+// (ARCH-004 §5: the run enqueues a per-signal priority.recompute for the
+// affected signals). ids is a jsonb array of canonical uuid strings; at most
+// one row per signal (UQ match_id) and ordered by id. An id-less query
+// returns no rows, never an error.
+func (q *Queries) ListRecomputeTargetsByVulnerabilityIDs(ctx context.Context, ids []byte) ([]ListRecomputeTargetsByVulnerabilityIDsRow, error) {
+	rows, err := q.db.Query(ctx, listRecomputeTargetsByVulnerabilityIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecomputeTargetsByVulnerabilityIDsRow
+	for rows.Next() {
+		var i ListRecomputeTargetsByVulnerabilityIDsRow
+		if err := rows.Scan(&i.ID, &i.Factors); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSignals = `-- name: ListSignals :many
 SELECT
     rs.id,

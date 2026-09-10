@@ -203,3 +203,30 @@ UPDATE risk_signals SET
     version      = version + 1
 WHERE id = @id AND escalated_at IS NULL
 RETURNING *;
+
+-- ListOpenRecomputeTargets returns the id and stored factor-set of every
+-- open (non-closed) signal — the fan-in read of a ruleset publish (ARCH-004
+-- §5: "a rule-version publish enqueues a batched recompute over all open
+-- signals"). The closed states (resolved/accepted/not_affected) are excluded:
+-- a closed signal is never silently changed (its recompute proposes a reopen
+-- instead, §5) and is not part of the publish fan-out. Ordered by id. No open
+-- signal yields no rows, never an error.
+-- name: ListOpenRecomputeTargets :many
+SELECT id, factors
+FROM risk_signals
+WHERE status NOT IN ('resolved', 'accepted', 'not_affected')
+ORDER BY id;
+
+-- ListRecomputeTargetsByVulnerabilityIDs returns the id and stored
+-- factor-set of every signal whose match references one of the given
+-- vulnerability row ids — the fan-in read of a matching.recompute run
+-- (ARCH-004 §5: the run enqueues a per-signal priority.recompute for the
+-- affected signals). ids is a jsonb array of canonical uuid strings; at most
+-- one row per signal (UQ match_id) and ordered by id. An id-less query
+-- returns no rows, never an error.
+-- name: ListRecomputeTargetsByVulnerabilityIDs :many
+SELECT DISTINCT rs.id, rs.factors
+FROM risk_signals rs
+JOIN matches m ON m.id = rs.match_id
+WHERE m.vulnerability_id IN (SELECT value::uuid FROM jsonb_array_elements_text(@ids::jsonb))
+ORDER BY rs.id;
