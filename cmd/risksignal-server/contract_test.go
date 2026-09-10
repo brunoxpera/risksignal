@@ -487,6 +487,10 @@ func validateOpenAPIContract(t *testing.T) {
 	// The I5b contract surface (WP-5b.01): the eight-command vocabulary and
 	// the inventory/assets/users/roles resources.
 	validateI5bContract(t, doc)
+
+	// The I6 contract surface (WP-6.01): the async exports resources and the
+	// retention/legal-hold schemas.
+	validateI6Contract(t, doc)
 }
 
 // i5bCommandRequired is the per-command required-field set of the generalised
@@ -652,6 +656,212 @@ func validateI5bContract(t *testing.T, doc *openapi3.T) {
 			t.Errorf("components.schemas.%s is missing from the document", name)
 		}
 	}
+}
+
+// validateI6Contract pins the I6 statements of the document (WP-6.01,
+// ARCH-007 §1.1/§1.2/§2.1/§2.2): the three asynchronous export operations
+// with their declared responses (the error responses all ProblemDetails), the
+// ExportRecord shape with the frozen filter and the generation-stamped fields,
+// and the retention/legal-hold request/report schemas the HTTP + CLI adapters
+// bind. It runs inside the contract suite (gate 3) and in the standalone
+// gate-1 hook (make lint-openapi-validate), and i6ClientSurface pins the
+// generated client at compile time (ADR-011: the generated client is the only
+// client of the wire contract).
+func validateI6Contract(t *testing.T, doc *openapi3.T) {
+	t.Helper()
+	i6ClientSurface()
+
+	// --- The export resources --------------------------------------------
+	for _, tc := range []struct {
+		op       string
+		method   string
+		path     string
+		statuses []string
+	}{
+		{"createExport", "POST", "/api/v1/exports", []string{"200", "400", "403", "500"}},
+		{"getExport", "GET", "/api/v1/exports/{id}", []string{"200", "400", "403", "404", "500"}},
+		{"downloadExport", "GET", "/api/v1/exports/{id}/download", []string{"200", "400", "403", "404", "410", "500"}},
+	} {
+		pi := doc.Paths.Value(tc.path)
+		if pi == nil {
+			t.Errorf("%s %s: path not declared", tc.method, tc.path)
+			continue
+		}
+		var operation *openapi3.Operation
+		switch tc.method {
+		case "GET":
+			operation = pi.Get
+		case "POST":
+			operation = pi.Post
+		}
+		if operation == nil {
+			t.Errorf("%s %s: operation not declared", tc.method, tc.path)
+			continue
+		}
+		if operation.OperationID != tc.op {
+			t.Errorf("%s %s: operationId = %q, want %q", tc.method, tc.path, operation.OperationID, tc.op)
+		}
+		for _, status := range tc.statuses {
+			respRef := operation.Responses.Value(status)
+			if respRef == nil || respRef.Value == nil {
+				t.Errorf("%s %s: response %s is not declared", tc.op, tc.path, status)
+				continue
+			}
+			if status == "200" {
+				continue // 200 carries the resource (or the artifact), asserted below
+			}
+			jsonMedia := respRef.Value.Content.Get("application/json")
+			if jsonMedia == nil || jsonMedia.Schema == nil {
+				t.Errorf("%s %s: error response %s has no application/json schema", tc.op, tc.path, status)
+				continue
+			}
+			if ref := jsonMedia.Schema.Ref; ref != "#/components/schemas/ProblemDetails" {
+				t.Errorf("%s %s: error response %s schema ref = %q, want ProblemDetails", tc.op, tc.path, status, ref)
+			}
+		}
+	}
+
+	// createExport/getExport 200 carry the ExportRecord; the download 200 is a
+	// binary attachment (application/octet-stream), never JSON.
+	for _, tc := range []struct {
+		op     string
+		method string
+		path   string
+		ref    string
+	}{
+		{"createExport", "POST", "/api/v1/exports", "#/components/schemas/ExportRecord"},
+		{"getExport", "GET", "/api/v1/exports/{id}", "#/components/schemas/ExportRecord"},
+	} {
+		op := doc.Paths.Value(tc.path)
+		if op == nil {
+			continue
+		}
+		var operation *openapi3.Operation
+		if tc.method == "POST" {
+			operation = op.Post
+		} else {
+			operation = op.Get
+		}
+		if operation == nil {
+			continue
+		}
+		respRef := operation.Responses.Value("200")
+		if respRef == nil || respRef.Value == nil {
+			t.Errorf("%s %s: response 200 is not declared", tc.op, tc.path)
+			continue
+		}
+		jsonMedia := respRef.Value.Content.Get("application/json")
+		if jsonMedia == nil || jsonMedia.Schema == nil {
+			t.Errorf("%s %s: response 200 has no application/json schema", tc.op, tc.path)
+			continue
+		}
+		if ref := jsonMedia.Schema.Ref; ref != tc.ref {
+			t.Errorf("%s %s: response 200 schema ref = %q, want %q", tc.op, tc.path, ref, tc.ref)
+		}
+	}
+	dl := doc.Paths.Value("/api/v1/exports/{id}/download")
+	if dl != nil && dl.Get != nil {
+		respRef := dl.Get.Responses.Value("200")
+		if respRef == nil || respRef.Value == nil {
+			t.Error("downloadExport: response 200 is not declared")
+		} else if bin := respRef.Value.Content.Get("application/octet-stream"); bin == nil || bin.Schema == nil {
+			t.Error("downloadExport: response 200 has no application/octet-stream schema")
+		}
+	}
+
+	// --- The export record shape (ARCH-007 §1.2) -------------------------
+	record := doc.Components.Schemas["ExportRecord"]
+	if record == nil || record.Value == nil {
+		t.Fatal("components.schemas.ExportRecord is missing from the document")
+	}
+	wantRecordRequired := []string{
+		"id", "status", "filter", "created_at", "row_count", "size_bytes",
+		"checksum", "schema_version", "rule_version", "expires_at",
+	}
+	if !sameStringSet(record.Value.Required, wantRecordRequired) {
+		t.Errorf("ExportRecord required = %v, want %v", record.Value.Required, wantRecordRequired)
+	}
+	for _, field := range []string{"row_count", "size_bytes", "checksum", "schema_version", "rule_version", "expires_at"} {
+		prop := record.Value.Properties[field]
+		if prop == nil || prop.Value == nil || !nullableSchema(prop.Value) {
+			t.Errorf("ExportRecord.%s = %v, want a nullable generation-stamped field", field, prop)
+		}
+	}
+
+	create := doc.Components.Schemas["ExportCreateRequest"]
+	if create == nil || create.Value == nil {
+		t.Fatal("components.schemas.ExportCreateRequest is missing from the document")
+	}
+	if !sameStringSet(create.Value.Required, []string{"filter", "format"}) {
+		t.Errorf("ExportCreateRequest required = %v, want [filter format]", create.Value.Required)
+	}
+	assertEnum(t, doc, "ExportFormat", []string{"csv", "json"})
+	assertEnum(t, doc, "ExportStatus", []string{"pending", "completed", "failed", "expired"})
+
+	// --- The retention + legal-hold schemas (ARCH-007 §2.1/§2.2) ---------
+	for _, name := range []string{
+		"ExportFilter",
+		"RetentionStage", "RetentionRunStatus", "RetentionDryRunReport",
+		"RetentionDryRunRequest", "RetentionApproveRequest", "RetentionExecuteRequest",
+		"RetentionRun", "RetentionRunList",
+		"LegalHold", "LegalHoldList", "LegalHoldCreateRequest", "LegalHoldReleaseRequest",
+	} {
+		if s := doc.Components.Schemas[name]; s == nil || s.Value == nil {
+			t.Errorf("components.schemas.%s is missing from the document", name)
+		}
+	}
+	assertEnum(t, doc, "RetentionStage", []string{"pseudonymise", "delete"})
+	assertEnum(t, doc, "RetentionRunStatus", []string{"dry_run", "approved", "executing", "completed", "failed", "rejected"})
+
+	// The dry-run report is counts-only; the approve/release/create bodies
+	// carry the mandatory reason and the legal-hold aggregate id.
+	for _, tc := range []struct {
+		name     string
+		required []string
+	}{
+		{"RetentionDryRunReport", []string{"candidates", "held", "to_pseudonymise", "to_delete"}},
+		{"RetentionApproveRequest", []string{"reason"}},
+		{"RetentionExecuteRequest", []string{"run_id"}},
+		{"LegalHoldCreateRequest", []string{"aggregate_id", "reason"}},
+		{"LegalHoldReleaseRequest", []string{"reason"}},
+	} {
+		s := doc.Components.Schemas[tc.name]
+		if s == nil || s.Value == nil {
+			continue
+		}
+		if !sameStringSet(s.Value.Required, tc.required) {
+			t.Errorf("%s required = %v, want %v", tc.name, s.Value.Required, tc.required)
+		}
+	}
+}
+
+// assertEnum asserts the named string schema declares exactly want as its
+// enum vocabulary.
+func assertEnum(t *testing.T, doc *openapi3.T, name string, want []string) {
+	t.Helper()
+	s := doc.Components.Schemas[name]
+	if s == nil || s.Value == nil {
+		t.Errorf("components.schemas.%s is missing from the document", name)
+		return
+	}
+	got := make([]string, 0, len(s.Value.Enum))
+	for _, v := range s.Value.Enum {
+		if str, ok := v.(string); ok {
+			got = append(got, str)
+		}
+	}
+	if !sameStringSet(got, want) {
+		t.Errorf("%s enum = %v, want %v", name, got, want)
+	}
+}
+
+// i6ClientSurface pins the generated client of the I6 export resources at
+// compile time (ADR-011: the generated client is the only client of the wire
+// contract, and a missing operation is a compile error).
+func i6ClientSurface() {
+	var _ = (*gen.ClientWithResponses).CreateExportWithResponse
+	var _ = (*gen.ClientWithResponses).GetExportWithResponse
+	var _ = (*gen.ClientWithResponses).DownloadExportWithResponse
 }
 
 // nullableSchema reports whether s admits a JSON null: a [T, "null"] type
