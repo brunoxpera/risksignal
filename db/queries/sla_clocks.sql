@@ -73,16 +73,20 @@ RETURNING *;
 
 -- ResumeSlaClock ends the active pause at the instant: the elapsed pause is
 -- accumulated into paused_seconds (whole seconds) and paused_at is cleared.
--- Only a currently-paused clock matches. Pauses are not retroactive, so the
--- accumulation is added to, never folded into, the frozen deadline. The
--- elapsed seconds are the numeric difference of the two epochs cast once, so
--- the whole-second truncation happens after the subtraction (never a double
--- rounding).
+-- Only a currently-paused clock matches, and only when the resume instant is
+-- not earlier than the pause start (@resumed_at >= paused_at) — the same
+-- guard as domain.SlaClock.Resume, so a backward clock can never subtract a
+-- negative pause (the elapsed term is always >= 0). Pauses are not
+-- retroactive, so the accumulation is added to, never folded into, the frozen
+-- deadline. The elapsed seconds are the numeric difference of the two epochs
+-- cast once, so the whole-second truncation happens after the subtraction
+-- (never a double rounding).
 -- name: ResumeSlaClock :one
 UPDATE sla_clocks SET
     paused_seconds = paused_seconds + (EXTRACT(EPOCH FROM @resumed_at::timestamptz) - EXTRACT(EPOCH FROM paused_at))::bigint,
     paused_at      = NULL
 WHERE signal_id = @signal_id AND target = @target AND paused_at IS NOT NULL
+  AND @resumed_at >= paused_at
 RETURNING *;
 
 -- ResetSlaClock restarts one clock on a reopen (ARCH-004 §4.3): started_at

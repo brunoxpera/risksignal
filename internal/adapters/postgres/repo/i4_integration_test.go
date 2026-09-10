@@ -297,3 +297,89 @@ func TestI4PersistenceIntegration(t *testing.T) {
 		t.Fatalf("notifications = %d, want exactly 1 (idempotency key)", len(list))
 	}
 }
+
+// TestI4ResumeBeforePauseGuardIntegration is the DEV-084 corrective: the
+// ResumeSlaClock statement must reject a resume instant that precedes the
+// pause start (@resumed_at >= paused_at, mirroring domain.SlaClock.Resume).
+// Without the guard the backward clock subtracts a negative pause from
+// paused_seconds; with it the statement matches zero rows, the adapter maps
+// that onto a conflict, and the stored clock keeps its non-negative pause.
+func TestI4ResumeBeforePauseGuardIntegration(t *testing.T) {
+	pool := newI4TestPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	q := gen.New(pool)
+
+	signalID := seedSignal(t, ctx, pool)
+	clockRepo := NewSlaClockRepo(q)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	clock := domain.SlaClock{
+		SignalID:   signalID,
+		Target:     domain.SLATargetAcknowledgement,
+		StartedAt:  now,
+		DeadlineAt: now.Add(15 * time.Minute),
+	}
+	if err := postgres.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := clockRepo.Upsert(ctx, tx, clock)
+		return err
+	}); err != nil {
+		t.Fatalf("upsert clock: %v", err)
+	}
+
+	pauseAt := now.Add(time.Minute)
+	if err := postgres.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := clockRepo.Pause(ctx, tx, signalID, domain.SLATargetAcknowledgement, pauseAt)
+		return err
+	}); err != nil {
+		t.Fatalf("pause clock: %v", err)
+	}
+
+	// A resume one minute before the pause start must match 0 rows and
+	// surface a conflict — never a negative paused_seconds.
+	resumeAt := pauseAt.Add(-time.Minute)
+	err := postgres.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		_, err := clockRepo.Resume(ctx, tx, signalID, domain.SLATargetAcknowledgement, resumeAt)
+		return err
+	})
+	if err == nil {
+		t.Fatal("resume before pause start succeeded, want a conflict")
+	}
+	if kind, _ := application.ErrorKindOf(err); kind != application.KindConflict {
+		t.Fatalf("resume-before-pause error kind = %s, want conflict", kind)
+	}
+
+	// The guard left the clock untouched: still paused, never a negative
+	// (or even prematurely accumulated) pause.
+	var stored domain.SlaClock
+	if err := postgres.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		var err error
+		stored, _, err = clockRepo.Get(ctx, tx, signalID, domain.SLATargetAcknowledgement)
+		return err
+	}); err != nil {
+		t.Fatalf("get clock after guarded resume: %v", err)
+	}
+	if !stored.Paused() {
+		t.Fatalf("clock = %+v, want still paused after guarded resume", stored)
+	}
+	if stored.PausedSeconds != 0 {
+		t.Fatalf("paused_seconds = %d after guarded resume, want 0", stored.PausedSeconds)
+	}
+
+	// The happy path is unaffected: a resume at or after the pause start
+	// still accumulates a non-negative pause.
+	var resumed domain.SlaClock
+	if err := postgres.WithTx(ctx, pool, func(tx pgx.Tx) error {
+		var err error
+		resumed, err = clockRepo.Resume(ctx, tx, signalID, domain.SLATargetAcknowledgement, pauseAt.Add(time.Minute))
+		return err
+	}); err != nil {
+		t.Fatalf("resume after pause start: %v", err)
+	}
+	if resumed.Paused() {
+		t.Fatalf("clock still paused after valid resume: %+v", resumed)
+	}
+	if resumed.PausedSeconds != 60 {
+		t.Fatalf("paused_seconds = %d after valid resume, want 60", resumed.PausedSeconds)
+	}
+}
