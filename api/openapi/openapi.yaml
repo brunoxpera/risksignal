@@ -8,10 +8,10 @@
 #
 # Locked conventions (ADR-011/ADR-008, concept ch. 3.1): JSON snake_case,
 # RFC 3339 UTC date-times, string identifiers, RFC 9457 Problem Details.
-# I1b exposes the *reachable subset* of the domain enum vocabularies only —
-# SignalStatus "new", MatchMethod exact_identifier|canonical_product_range —
-# the full domain sets (internal/domain, DEV-015) grow the contract with I3
-# and I4.
+# The enum vocabularies follow the domain sets (internal/domain, DEV-015):
+# I4 grows SignalStatus to the full ch. 6.3 lifecycle and MatchMethod to the
+# full ADR-015 set, so the read model can carry the triaged, SLA-tracked
+# signals the I4 demo seed produces (ARCH-004 §8, UC-08).
 #
 # Deliberately outside this document (ARCH-001 §4, httpapi/system.go): the
 # System endpoints GET /health/live, GET /health/ready and GET /version —
@@ -246,23 +246,23 @@ components:
         next_cursor:
           type: [string, 'null']
           description: Opaque cursor of the next page; null on the last page.
-    # --- Enum vocabularies (I1b reachable subset, ARCH-001 §4) -------------
+    # --- Enum vocabularies (full domain sets since I4, ARCH-001 §4) --------
     Priority:
       type: string
       description: Urgency class of a signal (concept ch. 6.2, ch. 9.3); P1 is most urgent.
       enum: [P1, P2, P3, P4]
     SignalStatus:
       type: string
-      description: Lifecycle state of a signal. I1b signals are always new; the full vocabulary arrives with I4.
-      enum: [new]
+      description: Lifecycle state of a signal (ch. 6.2, ch. 6.3) — new, in_review, action_planned, resolved, accepted, not_affected.
+      enum: [new, in_review, action_planned, resolved, accepted, not_affected]
     Confidence:
       type: string
       description: Reliability of the vulnerability-to-component assignment, derived from the match method (ADR-015).
       enum: [high, medium, low, none]
     MatchMethod:
       type: string
-      description: How the vulnerability was matched to the component (ADR-015). The I1b reachable subset only; the full vocabulary grows with I3.
-      enum: [exact_identifier, canonical_product_range]
+      description: How the vulnerability was matched to the component (ADR-015); the full method-led set.
+      enum: [exact_identifier, container_digest, alias_exact_version, canonical_product_range, product_uncertain_version, controlled_alias_only, candidate, no_match]
     Criticality:
       type: string
       description: Business criticality of the asset (concept ch. 6.2).

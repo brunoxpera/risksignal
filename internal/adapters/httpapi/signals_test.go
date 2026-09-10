@@ -348,18 +348,18 @@ func TestListSignalsRejectsInvalidPriority(t *testing.T) {
 	}
 }
 
-// TestListSignalsRejectsInvalidStatus asserts the same for a status the I1b
-// vocabulary does not reach (only "new" is on the wire until I4).
+// TestListSignalsRejectsInvalidStatus asserts the same for a status outside
+// the ch. 6.3 vocabulary (the full lifecycle is on the wire since I4).
 func TestListSignalsRejectsInvalidStatus(t *testing.T) {
 	fake := &fakeSignals{}
 	h := newSignalAPI(t, fake)
 
-	rec := doRequest(t, h, http.MethodGet, "/api/v1/signals?status=resolved")
+	rec := doRequest(t, h, http.MethodGet, "/api/v1/signals?status=archived")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
 	}
 	p := decodeProblem(t, rec)
-	if p.Title != "Invalid request" || p.Detail == nil || !strings.Contains(*p.Detail, "resolved") {
+	if p.Title != "Invalid request" || p.Detail == nil || !strings.Contains(*p.Detail, "archived") {
 		t.Errorf("problem = (%q, %v), want Invalid request naming the bad status", p.Title, p.Detail)
 	}
 	if fake.listCalls != 0 {
