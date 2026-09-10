@@ -11,6 +11,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getNotificationByEventChannel = `-- name: GetNotificationByEventChannel :one
+SELECT id, signal_id, channel, kind, recipient, status, attempts, last_error, delivered_at, outbox_event_id, created_at
+FROM notifications
+WHERE outbox_event_id = $1 AND channel = $2
+`
+
+type GetNotificationByEventChannelParams struct {
+	OutboxEventID string
+	Channel       string
+}
+
+// GetNotificationByEventChannel returns the one notification of an
+// (outbox_event_id, channel) pair — the handler's read of a redelivered
+// event: it resolves whether the existing row is already delivered (a
+// no-op) or still pending after a temporary delivery failure (a retry),
+// without re-inserting. A missing row yields no row, never an error (the
+// insert path then proceeds).
+func (q *Queries) GetNotificationByEventChannel(ctx context.Context, arg GetNotificationByEventChannelParams) (Notification, error) {
+	row := q.db.QueryRow(ctx, getNotificationByEventChannel, arg.OutboxEventID, arg.Channel)
+	var i Notification
+	err := row.Scan(
+		&i.ID,
+		&i.SignalID,
+		&i.Channel,
+		&i.Kind,
+		&i.Recipient,
+		&i.Status,
+		&i.Attempts,
+		&i.LastError,
+		&i.DeliveredAt,
+		&i.OutboxEventID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertNotification = `-- name: InsertNotification :one
 
 INSERT INTO notifications (signal_id, channel, kind, recipient, status, attempts, outbox_event_id, created_at)

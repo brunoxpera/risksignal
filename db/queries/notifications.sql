@@ -36,6 +36,17 @@ UPDATE notifications SET
 WHERE id = @id
 RETURNING *;
 
+-- GetNotificationByEventChannel returns the one notification of an
+-- (outbox_event_id, channel) pair — the handler's read of a redelivered
+-- event: it resolves whether the existing row is already delivered (a
+-- no-op) or still pending after a temporary delivery failure (a retry),
+-- without re-inserting. A missing row yields no row, never an error (the
+-- insert path then proceeds).
+-- name: GetNotificationByEventChannel :one
+SELECT *
+FROM notifications
+WHERE outbox_event_id = @outbox_event_id AND channel = @channel;
+
 -- ListNotificationsBySignal returns a signal's notifications ordered by
 -- created_at then id (the IX notifications_signal_id index serves the
 -- filter). The in-app surface (I5b) and the tests read it. A signal without

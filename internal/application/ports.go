@@ -528,15 +528,12 @@ type SlaClockRepo interface {
 }
 
 // NotificationRepo is the notification delivery-state port (ARCH-004 §6.2):
-// the idempotent insert keyed on (outbox_event_id, channel), the
-// delivery-state update and the per-signal read. The relay handler and the
-// NotifyPort adapters that drive it land with WP-4.06; this port owns the
-// persistence shape the application layer programs against. It returns the
-// application-level Notification (models.go), not the generated row type:
-// the application layer never imports the adapters' gen package
-// (.go-arch-lint.yml). The DEV-073 adapter *repo.NotificationRepo
-// (notification.go) currently returns gen.Notification; aligning it onto
-// this port is WP-4.06's read-model work.
+// the idempotent insert keyed on (outbox_event_id, channel), the by-key read
+// a redelivery uses, the delivery-state update and the per-signal read. The
+// relay notify handler (WP-4.06) drives it. It returns the application-level
+// Notification (models.go), not the generated row type: the application
+// layer never imports the adapters' gen package (.go-arch-lint.yml). The
+// DEV-073 adapter *repo.NotificationRepo (notification.go) implements it.
 type NotificationRepo interface {
 	// Insert stores one notification row on the caller's transaction and
 	// reports whether it was newly inserted. The UQ (outbox_event_id,
@@ -545,6 +542,13 @@ type NotificationRepo interface {
 	// channel) (FR-023). status is the initial delivery state ('pending' on
 	// the create path), createdAt the injected clock.
 	Insert(ctx context.Context, tx Tx, signalID, channel, kind, recipient, status, outboxEventID string, createdAt time.Time) (Notification, bool, error)
+
+	// GetByEventChannel returns the one notification of an
+	// (outbox_event_id, channel) pair and whether it exists. A missing row
+	// is (zero, false, nil) — not an error: the relay handler's redelivery
+	// path reads it to decide between the already-delivered no-op and the
+	// retry of a still-pending row. It runs on the caller's transaction.
+	GetByEventChannel(ctx context.Context, tx Tx, outboxEventID, channel string) (Notification, bool, error)
 
 	// UpdateDelivery records the delivery receipt of one notification by
 	// its id: the new status, the attempt count, the last error text (""
