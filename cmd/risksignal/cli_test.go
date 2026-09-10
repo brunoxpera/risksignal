@@ -531,6 +531,26 @@ const goldenDiagnoseConfigJSON = `{
       "value": "1h0m0s",
       "source": "default"
     },
+    "worker.retention_schedule": {
+      "value": "720h0m0s",
+      "source": "default"
+    },
+    "worker.export_sweep_interval": {
+      "value": "24h0m0s",
+      "source": "default"
+    },
+    "export.dir": {
+      "value": "var/exports",
+      "source": "default"
+    },
+    "export.ttl": {
+      "value": "168h0m0s",
+      "source": "default"
+    },
+    "export.max_rows": {
+      "value": 100000,
+      "source": "default"
+    },
     "notify.p2_active": {
       "value": true,
       "source": "default"
