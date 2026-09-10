@@ -171,6 +171,27 @@ UPDATE risk_signals SET
 WHERE id = @id AND version = @expected_version
 RETURNING *;
 
+-- RecomputeRiskSignalPriority persists the outcome of a targeted priority
+-- recompute (ARCH-004 §5, ch. 9.5) in one write: the freshly rebuilt factor
+-- set, the rule version the recompute ran under and the recomputed computed
+-- priority. The override-survival mirror of §3 is enforced in the SET list:
+-- for a purely computed signal (auto_priority IS NULL) the effective
+-- priority is updated and auto_priority stays NULL; for an overridden signal
+-- the computed value updates auto_priority only and the effective priority
+-- (the human decision) is left untouched. The statement is not
+-- version-guarded — the changed-only comparison of the command keeps an
+-- identical recompute from reaching it at all — and it bumps version so a
+-- concurrent guarded write still sees a fresh token.
+-- name: RecomputeRiskSignalPriority :one
+UPDATE risk_signals SET
+    priority      = CASE WHEN auto_priority IS NULL THEN @priority::text ELSE priority END,
+    auto_priority = CASE WHEN auto_priority IS NULL THEN NULL ELSE @priority::text END,
+    rule_version  = @rule_version,
+    factors       = @factors,
+    version       = version + 1
+WHERE id = @id
+RETURNING *;
+
 -- MarkRiskSignalEscalated records the first P1 escalation instant (ARCH-004
 -- §4.4). The escalated_at IS NULL guard makes it set-once: the first
 -- escalation matches the row, every later call matches zero rows (the

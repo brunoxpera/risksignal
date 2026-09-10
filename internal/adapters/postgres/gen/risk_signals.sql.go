@@ -490,6 +490,64 @@ func (q *Queries) OverrideRiskSignalPriority(ctx context.Context, arg OverrideRi
 	return i, err
 }
 
+const recomputeRiskSignalPriority = `-- name: RecomputeRiskSignalPriority :one
+UPDATE risk_signals SET
+    priority      = CASE WHEN auto_priority IS NULL THEN $1::text ELSE priority END,
+    auto_priority = CASE WHEN auto_priority IS NULL THEN NULL ELSE $1::text END,
+    rule_version  = $2,
+    factors       = $3,
+    version       = version + 1
+WHERE id = $4
+RETURNING id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at, auto_priority, override_reason, override_actor_id, override_at, escalated_at
+`
+
+type RecomputeRiskSignalPriorityParams struct {
+	Priority    string
+	RuleVersion string
+	Factors     []byte
+	ID          pgtype.UUID
+}
+
+// RecomputeRiskSignalPriority persists the outcome of a targeted priority
+// recompute (ARCH-004 §5, ch. 9.5) in one write: the freshly rebuilt factor
+// set, the rule version the recompute ran under and the recomputed computed
+// priority. The override-survival mirror of §3 is enforced in the SET list:
+// for a purely computed signal (auto_priority IS NULL) the effective
+// priority is updated and auto_priority stays NULL; for an overridden signal
+// the computed value updates auto_priority only and the effective priority
+// (the human decision) is left untouched. The statement is not
+// version-guarded — the changed-only comparison of the command keeps an
+// identical recompute from reaching it at all — and it bumps version so a
+// concurrent guarded write still sees a fresh token.
+func (q *Queries) RecomputeRiskSignalPriority(ctx context.Context, arg RecomputeRiskSignalPriorityParams) (RiskSignal, error) {
+	row := q.db.QueryRow(ctx, recomputeRiskSignalPriority,
+		arg.Priority,
+		arg.RuleVersion,
+		arg.Factors,
+		arg.ID,
+	)
+	var i RiskSignal
+	err := row.Scan(
+		&i.ID,
+		&i.MatchID,
+		&i.Priority,
+		&i.Status,
+		&i.Owner,
+		&i.DueAt,
+		&i.ClosedAt,
+		&i.Version,
+		&i.RuleVersion,
+		&i.Factors,
+		&i.CreatedAt,
+		&i.AutoPriority,
+		&i.OverrideReason,
+		&i.OverrideActorID,
+		&i.OverrideAt,
+		&i.EscalatedAt,
+	)
+	return i, err
+}
+
 const revertRiskSignalPriority = `-- name: RevertRiskSignalPriority :one
 UPDATE risk_signals SET
     priority          = auto_priority,
