@@ -56,20 +56,23 @@ func encodeCursor(offset int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func decodeCursor(s string) (int, error) {
+// decodeCursor decodes the opaque page cursor. op names the calling use case
+// so a malformed cursor is reported against it (the same opaque encoding backs
+// every cursor-paginated read — ListSignals, ListAssets, ListUsers).
+func decodeCursor(op, s string) (int, error) {
 	if s == "" {
 		return 0, nil
 	}
 	b, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
-		return 0, Validationf("list_signals", "invalid cursor: %v", err)
+		return 0, Validationf(op, "invalid cursor: %v", err)
 	}
 	var pc pageCursor
 	if err := json.Unmarshal(b, &pc); err != nil {
-		return 0, Validationf("list_signals", "invalid cursor: %v", err)
+		return 0, Validationf(op, "invalid cursor: %v", err)
 	}
 	if pc.Offset < 0 {
-		return 0, Validationf("list_signals", "invalid cursor: negative offset")
+		return 0, Validationf(op, "invalid cursor: negative offset")
 	}
 	return pc.Offset, nil
 }
@@ -107,7 +110,7 @@ func (s *Service) ListSignals(ctx context.Context, in ListSignalsInput) (ListSig
 	if in.Status != nil && !in.Status.Valid() {
 		return ListSignalsResult{}, Validationf(op, "invalid status filter %q", *in.Status)
 	}
-	offset, err := decodeCursor(in.Cursor)
+	offset, err := decodeCursor(op, in.Cursor)
 	if err != nil {
 		return ListSignalsResult{}, err
 	}

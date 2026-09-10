@@ -62,6 +62,18 @@ type Service struct {
 	// user-invokable commands run under a user principal must carry it (the
 	// I5b root wires the DEV-089 postgres *repo.UserRepo).
 	users UserRepo
+	// I5b ports (ARCH-006 §2.1/§2.2/§3.3, WP-5b.03): assets is the asset read
+	// port (ListAssets/GetAssetComponents), inventoryReader the current-state
+	// read the staged import previews against, imports the staged-import
+	// persistence and userAdmin the user/role administration port. They are
+	// optional at construction like the triage/SLA/identity ports — the
+	// I1b–I5a composition roots wire a Service without them and never invoke
+	// the I5b use cases; the I5b root wires the DEV-098/DEV-089 postgres
+	// implementations.
+	assets          AssetRepo
+	inventoryReader InventoryRepo
+	imports         InventoryImportRepo
+	userAdmin       UserAdminRepo
 	// slaProfile is the injected (priority, target) → reaction-time duration
 	// profile (ARCH-004 §4.2/§4.3). The triage commands read it to decide
 	// which SLA clocks a transition fulfils or resets; it defaults to the
@@ -120,6 +132,16 @@ type ServiceDeps struct {
 	// the I1b–I4 roots wire a Service without it and never gate a user
 	// actor; the I5b root wires the DEV-089 *repo.UserRepo.
 	Users UserRepo
+	// Assets/InventoryReader/InventoryImports/UserAdmin are the I5b ports
+	// (ARCH-006 §2.1/§2.2/§3.3, WP-5b.03). They are optional at construction
+	// like the identity port: a composition root that never drives the I5b
+	// read/admin/staged-import use cases leaves them nil. The I5b root wires
+	// the DEV-098 read ports (*repo.AssetRepo, *repo.InventoryRepo) and the
+	// staged-import/admin repositories.
+	Assets           AssetRepo
+	InventoryReader  InventoryRepo
+	InventoryImports InventoryImportRepo
+	UserAdmin        UserAdminRepo
 	// SlaTimeProfile is the injectable (priority, target) → reaction-time
 	// duration profile the I4 triage commands read to decide which SLA
 	// clocks a status change fulfils or resets (ARCH-004 §4.2/§4.3,
@@ -213,6 +235,10 @@ func NewService(deps ServiceDeps) *Service {
 		priorityRules:      deps.PriorityRules,
 		factorSource:       deps.FactorSource,
 		users:              deps.Users,
+		assets:             deps.Assets,
+		inventoryReader:    deps.InventoryReader,
+		imports:            deps.InventoryImports,
+		userAdmin:          deps.UserAdmin,
 		slaProfile:         slaProfile,
 		slaReminderCadence: slaReminderCadence,
 		clock:              deps.Clock,
