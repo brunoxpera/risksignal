@@ -118,6 +118,20 @@ func componentReadView(assetID string, c fakeStoredComponent) application.Compon
 }
 
 // ---------------------------------------------------------------------------
+// fakeSourceMonitorRepo (application.SourceMonitorRepo)
+
+type fakeSourceMonitorRepo struct{ db *fakeDB }
+
+var _ application.SourceMonitorRepo = (*fakeSourceMonitorRepo)(nil)
+
+// ListSourceStatus returns the committed source-monitor store of the fake DB
+// (seeded by a test) — the DEV-110 read port. Ordering is the caller's
+// concern (the use case keeps the port's order).
+func (f *fakeSourceMonitorRepo) ListSourceStatus(_ context.Context) ([]application.SourceStatusRecord, error) {
+	return append([]application.SourceStatusRecord(nil), f.db.sourceStatus...), nil
+}
+
+// ---------------------------------------------------------------------------
 // fakeInventoryImportRepo (application.InventoryImportRepo)
 
 type fakeInventoryImportRepo struct{ db *fakeDB }

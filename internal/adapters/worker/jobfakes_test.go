@@ -430,6 +430,9 @@ func (s *jobStubRepo) Append(ctx context.Context, tx application.Tx, ev applicat
 func (s *jobStubRepo) GetEventByID(ctx context.Context, id string) (application.AuditEvent, error) {
 	return application.AuditEvent{}, s.method()
 }
+func (s *jobStubRepo) ListByAggregate(ctx context.Context, aggregateType, aggregateID string) ([]application.AuditEvent, error) {
+	return nil, s.method()
+}
 func (s *jobStubRepo) Insert(ctx context.Context, tx application.Tx, rec application.MatchRecord, createdAt time.Time) (string, error) {
 	return "", s.method()
 }

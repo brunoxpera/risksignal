@@ -81,3 +81,30 @@ func auditEventFromRow(row gen.AuditEvent) application.AuditEvent {
 		CorrelationID:    row.CorrelationID,
 	}
 }
+
+// ListByAggregate implements application.AuditRepo: read one aggregate's
+// audit timeline ordered by occurred_at then id (ARCH-006 §3.1, DEV-110) —
+// the signal-detail timeline read. It is a read over the append-only table
+// (not a second write path) walking IX
+// audit_events_aggregate_type_aggregate_id_idx; an aggregate with no event is
+// an empty slice, never an error.
+func (r *AuditRepo) ListByAggregate(ctx context.Context, aggregateType, aggregateID string) ([]application.AuditEvent, error) {
+	const op = "audit.list_by_aggregate"
+
+	id, err := toUUID(aggregateID)
+	if err != nil {
+		return nil, application.ValidationError(op, err)
+	}
+	rows, err := r.q.ListAuditEventsByAggregate(ctx, gen.ListAuditEventsByAggregateParams{
+		AggregateType: aggregateType,
+		AggregateID:   id,
+	})
+	if err != nil {
+		return nil, mapDBError(op, err)
+	}
+	out := make([]application.AuditEvent, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, auditEventFromRow(row))
+	}
+	return out, nil
+}

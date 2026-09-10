@@ -74,6 +74,11 @@ type Service struct {
 	inventoryReader InventoryRepo
 	imports         InventoryImportRepo
 	userAdmin       UserAdminRepo
+	// sourceMonitor is the DEV-110 source-monitor read port (ListSourceStatus,
+	// GET /sources). It is optional at construction like the other I5b ports —
+	// a composition root that does not serve the source-monitor view leaves it
+	// nil; the I5b server root wires the DEV-110 postgres *repo.SourceMonitorRepo.
+	sourceMonitor SourceMonitorRepo
 	// slaProfile is the injected (priority, target) → reaction-time duration
 	// profile (ARCH-004 §4.2/§4.3). The triage commands read it to decide
 	// which SLA clocks a transition fulfils or resets; it defaults to the
@@ -142,6 +147,11 @@ type ServiceDeps struct {
 	InventoryReader  InventoryRepo
 	InventoryImports InventoryImportRepo
 	UserAdmin        UserAdminRepo
+	// SourceMonitor is the DEV-110 source-monitor read port (ListSourceStatus,
+	// GET /sources, ARCH-006 §3.1). It is optional at construction like the
+	// other I5b ports; a Service whose ListSourceStatus use case runs must
+	// carry it (the I5b server root wires the postgres *repo.SourceMonitorRepo).
+	SourceMonitor SourceMonitorRepo
 	// SlaTimeProfile is the injectable (priority, target) → reaction-time
 	// duration profile the I4 triage commands read to decide which SLA
 	// clocks a status change fulfils or resets (ARCH-004 §4.2/§4.3,
@@ -239,6 +249,7 @@ func NewService(deps ServiceDeps) *Service {
 		inventoryReader:    deps.InventoryReader,
 		imports:            deps.InventoryImports,
 		userAdmin:          deps.UserAdmin,
+		sourceMonitor:      deps.SourceMonitor,
 		slaProfile:         slaProfile,
 		slaReminderCadence: slaReminderCadence,
 		clock:              deps.Clock,

@@ -47,3 +47,16 @@ RETURNING *;
 SELECT *
 FROM audit_events
 WHERE id = @id;
+
+-- ListAuditEventsByAggregate reads one aggregate's audit timeline ordered by
+-- occurred_at then id (ARCH-006 §3.1, DEV-110): the signal-detail timeline
+-- read of the web adapter. It is a read over the append-only table (no
+-- second write path) and walks the IX
+-- audit_events_aggregate_type_aggregate_id_idx. An aggregate with no event
+-- yields no rows — the caller renders an empty timeline, never an error.
+-- name: ListAuditEventsByAggregate :many
+SELECT *
+FROM audit_events
+WHERE aggregate_type = @aggregate_type
+  AND aggregate_id = @aggregate_id
+ORDER BY occurred_at, id;

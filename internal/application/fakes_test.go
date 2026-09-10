@@ -177,6 +177,9 @@ type fakeDB struct {
 	// fake PriorityRuleRepo reads it (effective = MAX version) and stages
 	// publishes into it on commit.
 	priorityRulesets map[int][]domain.PriorityRule
+	// sourceStatus is the committed source-monitor store of the DEV-110 read
+	// (the fake SourceMonitorRepo returns it verbatim).
+	sourceStatus []application.SourceStatusRecord
 }
 
 func (d *fakeDB) hasSignalForMatch(matchID string) bool {
@@ -757,6 +760,26 @@ func (f *fakeAuditRepo) GetEventByID(ctx context.Context, id string) (applicatio
 		}
 	}
 	return application.AuditEvent{}, application.NotFoundError("audit.get_by_id", fmt.Errorf("audit event %s not found", id))
+}
+
+// ListByAggregate implements application.AuditRepo: the signal-detail audit
+// timeline read (DEV-110). It filters the committed audit store by aggregate
+// type + id and orders by occurred_at then id — the real read's contract. An
+// aggregate with no event yields an empty slice, never an error.
+func (f *fakeAuditRepo) ListByAggregate(_ context.Context, aggregateType, aggregateID string) ([]application.AuditEvent, error) {
+	out := make([]application.AuditEvent, 0, len(f.db.auditEvents))
+	for _, ev := range f.db.auditEvents {
+		if ev.AggregateType == aggregateType && ev.AggregateID == aggregateID {
+			out = append(out, ev)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].OccurredAt.Equal(out[j].OccurredAt) {
+			return out[i].OccurredAt.Before(out[j].OccurredAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
 var _ application.AuditRepo = (*fakeAuditRepo)(nil)
@@ -1592,6 +1615,7 @@ type harness struct {
 	assets          *fakeAssetRepo
 	inventoryReader *fakeInventoryReader
 	imports         *fakeInventoryImportRepo
+	sourceMonitor   *fakeSourceMonitorRepo
 
 	svc *application.Service
 }
@@ -1627,6 +1651,7 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 	h.assets = &fakeAssetRepo{db: h.db}
 	h.inventoryReader = &fakeInventoryReader{db: h.db}
 	h.imports = &fakeInventoryImportRepo{db: h.db}
+	h.sourceMonitor = &fakeSourceMonitorRepo{db: h.db}
 	deps := application.ServiceDeps{
 		Signals:          h.signals,
 		Audit:            h.audit,
@@ -1649,6 +1674,7 @@ func newHarness(t *testing.T, opts ...harnessOption) *harness {
 		InventoryReader:  h.inventoryReader,
 		InventoryImports: h.imports,
 		UserAdmin:        h.users,
+		SourceMonitor:    h.sourceMonitor,
 		Clock:            h.clock,
 		RunTx:            h.runner.Run,
 	}

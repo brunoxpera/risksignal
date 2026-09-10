@@ -76,6 +76,13 @@ type AuditRepo interface {
 	// read — the table stays append-only, this is not a second write path. A
 	// missing id is a not-found Error (the reveal then writes nothing).
 	GetEventByID(ctx context.Context, id string) (AuditEvent, error)
+
+	// ListByAggregate reads one aggregate's audit timeline ordered by
+	// occurred_at then id (ARCH-006 §3.1, DEV-110) — the signal-detail
+	// timeline read of the web adapter. It is a read over the append-only
+	// table (not a second write path); an aggregate with no event yields an
+	// empty slice, never an error.
+	ListByAggregate(ctx context.Context, aggregateType, aggregateID string) ([]AuditEvent, error)
 }
 
 // OutboxRepo appends outbox rows (ARCH-001 §1 and §2, WP-1b.03). The append
@@ -271,6 +278,59 @@ type QuarantineRepo interface {
 // affected version range over the returned set in application code.
 type ComponentRepo interface {
 	ListByVendorProduct(ctx context.Context, vendor, product string) ([]Component, error)
+}
+
+// ---------------------------------------------------------------------------
+// DEV-110 read ports (ARCH-006 §3.1)
+
+// SourceMonitorRepo is the read port of the source-monitor view (ARCH-006
+// §3.1 / ARCH-002 §5, DEV-110): the per-source operational projection the
+// `ListSourceStatus` use case renders on GET /sources — the latest run, the
+// data-age basis, the open quarantine count and the source identity. It is
+// read-only and pool-scoped (no transaction): the sources join the latest
+// source_runs rows (any terminal state), the latest successful run (the
+// data-age basis) and the open quarantine counts. The projection's derived
+// fields (data age, stale/degraded flag, rate-limit flag) are computed by
+// the use case from the returned rows and the injected clock — the port
+// returns stored state only, never a decision. (The same read backs the
+// operator-facing `source list`/`source status` CLI projection; the adapter
+// here is the application-layer port, the CLI keeps its own read.)
+type SourceMonitorRepo interface {
+	// ListSourceStatus returns one raw monitor record per registered source
+	// ordered by type then name (a stable operator-facing order). A source
+	// without a run carries a nil LastRun; without a successful run a nil
+	// Succeeded. A read failure is returned as-is; a corrupt stored counters
+	// shape is wrapped as an infrastructure error by the adapter.
+	ListSourceStatus(ctx context.Context) ([]SourceStatusRecord, error)
+}
+
+// SourceStatusRecord is one source's stored monitor input (the raw row the
+// SourceMonitorRepo returns): the source identity, its latest run and its
+// latest successful run (nil when absent) and the open quarantine count.
+// The ListSourceStatus use case derives the reported status from it.
+type SourceStatusRecord struct {
+	ID             string
+	Name           string
+	Type           SourceType
+	Enabled        bool
+	Schedule       string            // "" when unset (operator-triggered source)
+	LastRun        *SourceRunSummary // nil when the source never ran
+	Succeeded      *SourceRunSummary // nil when the source has no successful run
+	OpenQuarantine int
+}
+
+// SourceRunSummary is the monitor-relevant subset of one source run: the
+// terminal status, its start/finish instants, the committed counters, the
+// error text of a failed run and the committed cursor (the data-age basis of
+// an incremental source). FinishedAt is the zero time while a run is still
+// 'running'.
+type SourceRunSummary struct {
+	Status      SourceRunStatus
+	StartedAt   time.Time
+	FinishedAt  time.Time
+	Counters    SourceRunCounters
+	Error       string
+	CursorAfter json.RawMessage
 }
 
 // ---------------------------------------------------------------------------

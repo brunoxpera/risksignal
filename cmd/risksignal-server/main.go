@@ -324,6 +324,10 @@ func newSignalService(pool *pgxpool.Pool) *application.Service {
 		InventoryReader:  repo.NewInventoryRepo(q),
 		InventoryImports: repo.NewInventoryImportRepo(q),
 		UserAdmin:        repo.NewUserRepo(q),
+		// The DEV-110 source-monitor read port (ARCH-006 §3.1): the
+		// GET /sources projection of the latest run/data age/error
+		// count/rate-limit flag/open quarantine count.
+		SourceMonitor: repo.NewSourceMonitorRepo(q),
 		// The I5a reference command endpoint (ARCH-005 §8) drives the I4
 		// triage commands, so the server composition root wires the triage/
 		// SLA/priority ports the use cases author and persist through.

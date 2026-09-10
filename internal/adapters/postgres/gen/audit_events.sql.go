@@ -124,3 +124,54 @@ func (q *Queries) InsertAuditEvent(ctx context.Context, arg InsertAuditEventPara
 	)
 	return i, err
 }
+
+const listAuditEventsByAggregate = `-- name: ListAuditEventsByAggregate :many
+SELECT id, aggregate_type, aggregate_id, actor_type, actor_id, actor_display_name, action, occurred_at, before, after, correlation_id
+FROM audit_events
+WHERE aggregate_type = $1
+  AND aggregate_id = $2
+ORDER BY occurred_at, id
+`
+
+type ListAuditEventsByAggregateParams struct {
+	AggregateType string
+	AggregateID   pgtype.UUID
+}
+
+// ListAuditEventsByAggregate reads one aggregate's audit timeline ordered by
+// occurred_at then id (ARCH-006 §3.1, DEV-110): the signal-detail timeline
+// read of the web adapter. It is a read over the append-only table (no
+// second write path) and walks the IX
+// audit_events_aggregate_type_aggregate_id_idx. An aggregate with no event
+// yields no rows — the caller renders an empty timeline, never an error.
+func (q *Queries) ListAuditEventsByAggregate(ctx context.Context, arg ListAuditEventsByAggregateParams) ([]AuditEvent, error) {
+	rows, err := q.db.Query(ctx, listAuditEventsByAggregate, arg.AggregateType, arg.AggregateID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditEvent
+	for rows.Next() {
+		var i AuditEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.AggregateType,
+			&i.AggregateID,
+			&i.ActorType,
+			&i.ActorID,
+			&i.ActorDisplayName,
+			&i.Action,
+			&i.OccurredAt,
+			&i.Before,
+			&i.After,
+			&i.CorrelationID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
