@@ -4,9 +4,9 @@
 # I1b exit criterion of ARCH-001 as one command:
 #
 #   compose db up + migrations -> `demo reset` (deterministic fresh state) ->
-#   `demo seed` (synthetic source, DEV-019) -> server up ->
-#   GET /api/v1/signals shows the four deterministic reference signals with
-#   the expected P1/P2/P2/P3 priorities -> teardown.
+#   `demo seed` (synthetic source, DEV-019, plus the I4 P1-P4 fixture,
+#   WP-4.08) -> server up -> GET /api/v1/signals shows the deterministic
+#   reference signals with the expected priorities -> teardown.
 #
 # Teardown scope: the demo server this script starts is always stopped (also
 # on failure, via the EXIT trap). The compose db stays up — like `make
@@ -17,10 +17,10 @@
 # Deterministic by construction (ARCH-001 §3): the demo starts by truncating
 # the I1b demo tables (`demo reset --yes`, dev-only, concept ch. 11.3), so
 # every run seeds from the same clean state and produces the same observable
-# outcome — the same four reference signals with the same priorities —
-# regardless of what earlier runs left behind. Only the synthetic
-# run/signal uuids and RFC 3339 timestamps differ between runs; the seed
-# itself is idempotent (a second seed without a reset creates nothing new).
+# outcome — the same reference signals with the same priorities — regardless
+# of what earlier runs left behind. Only the synthetic run/signal uuids and
+# RFC 3339 timestamps differ between runs; the seed itself is idempotent (a
+# second seed without a reset creates nothing new).
 #
 # Everything binds loopback only: the demo server defaults to 127.0.0.1:18080
 # (the server default 127.0.0.1:8080 is left free for a developer's own
@@ -114,11 +114,12 @@ say "[3/6] demo reset (fresh I1b demo state)"
 "$ROOT/bin/risksignal" demo reset --yes >"$LOG_DIR/reset.log"
 
 # [4/6] demo seed — the operator path that produces the reference signals
-# (DEV-019). --output json prints exactly one machine-readable envelope; the
-# assertions pin the deterministic first-seed outcome: 2 assets, 2
-# components, the run counting the malformed E1 case (terminal status
-# 'failed' is the expected reference behaviour, ARCH-001 §3) with records 7 /
-# matched 4 / signals 4.
+# (DEV-019) plus the I4 P1-P4 fixture (WP-4.08). --output json prints exactly
+# one machine-readable envelope; the assertions pin the deterministic
+# first-seed outcome: 2 synthetic assets, 2 components, the run counting the
+# malformed E1 case (terminal status 'failed' is the expected reference
+# behaviour, ARCH-001 §3) with records 7 / matched 4 / signals 4, and the
+# eight-signal I4 fixture.
 say "[4/6] demo seed (synthetic source)"
 "$ROOT/bin/risksignal" demo seed --output json >"$SEED_JSON"
 jq -e '.status == "ok" and .exit_code == 0' "$SEED_JSON" >/dev/null \
@@ -130,7 +131,10 @@ jq -e '.result.run.counters == {records: 7, matched: 4, signals: 4}' "$SEED_JSON
 jq -e '.result.run.status == "failed" and (.result.run.errors | length) == 1' "$SEED_JSON" >/dev/null \
 	|| die "demo seed run should be 'failed' with the E1 case counted: $(cat "$SEED_JSON")"
 RUN_ID="$(jq -r '.result.run.run_id' "$SEED_JSON")"
+jq -e '.result.fixture.signals == 8 and .result.fixture.already_present == false' "$SEED_JSON" >/dev/null \
+	|| die "demo seed should write the eight-signal I4 fixture: $(cat "$SEED_JSON")"
 say "       run $RUN_ID: records 7, matched 4, signals 4 (status 'failed': malformed E1 case counted — expected)"
+say "       I4 fixture: 8 signals (P1-P4 across all statuses)"
 
 # [5/6] server up — the composition root of cmd/risksignal-server on the
 # loopback demo address; readiness (db ping + verified migrations + config)
@@ -152,31 +156,40 @@ done
 [[ -n "$ready" ]] || die "server not ready within 60s (log tail): $(tail -n 5 "$SERVER_LOG" 2>/dev/null || true)"
 say "       ready: GET /health/ready answers 200"
 
-# [6/6] the exit-criterion read — GET /api/v1/signals returns the synthetic
-# signals with the reference priorities (C1 P1, C2 P2, C3 P2, C4 P3 in the
-# priority-ascending sort of ARCH-001 §4), and the detail read of the first
-# signal matches.
+# [6/6] the exit-criterion read — GET /api/v1/signals returns the seeded
+# signals with the reference priorities: the four synthetic cases (C1 P1,
+# C2 P2, C3 P2, C4 P3) and the eight-signal I4 fixture (P1-P4, spanning every
+# status) in the priority-ascending sort of ARCH-001 §4, and the detail read
+# of the first signal matches.
 say "[6/6] assert GET /api/v1/signals (exit-criterion read)"
 curl -fsS "http://$HTTP_ADDR/api/v1/signals?limit=100" >"$LIST_JSON" \
 	|| die "GET /api/v1/signals failed: $(cat "$LIST_JSON" 2>/dev/null || true)"
-jq -e '.data | length == 4' "$LIST_JSON" >/dev/null \
-	|| die "expected 4 signals after one demo seed, got: $(cat "$LIST_JSON")"
-jq -e '.data[0].cve_id == "CVE-2024-0001" and .data[0].priority == "P1" and .data[0].status == "new"' "$LIST_JSON" >/dev/null \
-	|| die "first signal is not the P1 reference signal (CVE-2024-0001): $(cat "$LIST_JSON")"
+jq -e '.data | length == 12' "$LIST_JSON" >/dev/null \
+	|| die "expected 12 signals after one demo seed (4 synthetic + 8 I4 fixture), got: $(cat "$LIST_JSON")"
+jq -e '.data[0].cve_id == "CVE-2026-9001" and .data[0].priority == "P1" and .data[0].status == "new"' "$LIST_JSON" >/dev/null \
+	|| die "first signal is not the P1 fixture signal (CVE-2026-9001): $(cat "$LIST_JSON")"
 jq -e --argjson want '[
+	{"cve_id": "CVE-2026-9001", "priority": "P1"},
+	{"cve_id": "CVE-2026-9002", "priority": "P1"},
 	{"cve_id": "CVE-2024-0001", "priority": "P1"},
+	{"cve_id": "CVE-2026-9003", "priority": "P2"},
+	{"cve_id": "CVE-2026-9004", "priority": "P2"},
 	{"cve_id": "CVE-2024-0002", "priority": "P2"},
 	{"cve_id": "CVE-2024-0003", "priority": "P2"},
-	{"cve_id": "CVE-2024-0004", "priority": "P3"}
+	{"cve_id": "CVE-2026-9005", "priority": "P3"},
+	{"cve_id": "CVE-2026-9006", "priority": "P3"},
+	{"cve_id": "CVE-2024-0004", "priority": "P3"},
+	{"cve_id": "CVE-2026-9007", "priority": "P4"},
+	{"cve_id": "CVE-2026-9008", "priority": "P4"}
 ]' '.data | map({cve_id, priority}) == $want' "$LIST_JSON" >/dev/null \
-	|| die "signal list does not match the reference P1/P2/P2/P3 matrix: $(cat "$LIST_JSON")"
+	|| die "signal list does not match the reference P1/P1/P1/P2/P2/P2/P2/P3/P3/P3/P4/P4 matrix: $(cat "$LIST_JSON")"
 SIGNAL_ID="$(jq -r '.data[0].id' "$LIST_JSON")"
 curl -fsS "http://$HTTP_ADDR/api/v1/signals/$SIGNAL_ID" >"$DETAIL_JSON" \
 	|| die "GET /api/v1/signals/$SIGNAL_ID failed"
-jq -e --arg id "$SIGNAL_ID" '.id == $id and .cve_id == "CVE-2024-0001" and .priority == "P1"' "$DETAIL_JSON" >/dev/null \
+jq -e --arg id "$SIGNAL_ID" '.id == $id and .cve_id == "CVE-2026-9001" and .priority == "P1"' "$DETAIL_JSON" >/dev/null \
 	|| die "detail read does not match the list read: $(cat "$DETAIL_JSON")"
-say "       CVE-2024-0001 P1 readable over the API (list + detail read)"
-say "       matrix: CVE-2024-0001 P1, CVE-2024-0002 P2, CVE-2024-0003 P2, CVE-2024-0004 P3"
+say "       CVE-2026-9001 P1 readable over the API (list + detail read)"
+say "       matrix: P1-P4 across the 8 I4 fixture signals + the 4 synthetic cases (C1-C4)"
 
 say "== E2E demo passed (WP-1b.11 exit criterion demonstrated) =="
 say "teardown: demo server stopped; the compose db stays up for the next run ('make down' stops it)"

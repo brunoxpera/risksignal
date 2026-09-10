@@ -121,16 +121,15 @@ as a risk signal over the API — is one command:
 
 `make demo` builds the binaries, starts the compose database (`make up-db`)
 and applies the schema migrations, then runs `scripts/demo.sh`: it resets
-the I1b demo tables (`demo reset --yes`) so every run starts from the same
-deterministic state, seeds the synthetic source (`demo seed`, WP-1b.05),
-starts `bin/risksignal-server` on the loopback demo address
-(`127.0.0.1:18080`; override `RISKSIGNAL_HTTP_ADDR`) and asserts that
-`GET /api/v1/signals` serves the four reference signals with the expected
-P1/P2/P2/P3 priorities — the exit-criterion read, via the list and the
-detail endpoint — then stops the demo server. The demo uses synthetic seed
-data and loopback bindings only; the compose db stays up afterwards
-(`make down` stops it). Running `make demo` again always demonstrates the
-same outcome.
+the demo tables (`demo reset --yes`) so every run starts from the same
+deterministic state, seeds the synthetic source and the I4 P1–P4 fixture
+(`demo seed`, WP-1b.05 + WP-4.08), starts `bin/risksignal-server` on the
+loopback demo address (`127.0.0.1:18080`; override `RISKSIGNAL_HTTP_ADDR`)
+and asserts that `GET /api/v1/signals` serves the reference signals with the
+expected priorities — the exit-criterion read, via the list and the detail
+endpoint — then stops the demo server. The demo uses synthetic seed data and
+loopback bindings only; the compose db stays up afterwards (`make down`
+stops it). Running `make demo` again always demonstrates the same outcome.
 
 The manual equivalent, with the compose defaults exported:
 
@@ -138,16 +137,18 @@ The manual equivalent, with the compose defaults exported:
     export RISKSIGNAL_OIDC_ISSUER='http://127.0.0.1:9000/oidc'
 
     make up-db && make migrate    # db up and healthy, schema applied
-    bin/risksignal demo seed      # deterministic synthetic run (C1-C4 -> 4 signals)
+    bin/risksignal demo seed      # synthetic run (C1-C4) + I4 P1-P4 fixture
     bin/risksignal-server &       # serves /api/v1/signals on 127.0.0.1:8080
     curl -s 'http://127.0.0.1:8080/api/v1/signals?limit=100'
 
-The reference cases C1–C4 (ARCH-001 §3) are deterministic: the list comes
-back priority-ascending with CVE-2024-0001 first at `"priority":"P1"`
-(then P2/P2/P3), every signal carrying `"status":"new"` and the readable
-join (asset, product, summary, confidence, method). `demo run` re-runs the
-source idempotently; `demo reset --yes` clears the demo tables. The demo
-CLI commands are documented under "CLI commands and exit codes".
+The reference cases C1–C4 (ARCH-001 §3) plus the eight-signal I4 fixture
+(WP-4.08, ARCH-004 §8) are deterministic: the list comes back
+priority-ascending (P1 first) with the readable join (asset, product,
+summary, confidence, method). `demo run` drives the accelerated UC-08 SLA
+scenario (create → deliver → acknowledge → action_planned → resolve, a
+P3→P1 upgrade and a P1 escalation) through the real use cases; `demo reset
+--yes` clears the demo tables. The demo CLI commands are documented under
+"CLI commands and exit codes".
 
 ### CI pipeline stages 1–2 (WP-1a.12)
 
@@ -254,14 +255,21 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
 - `demo seed` — register the synthetic source
   (`type=synthetic`, `name=synthetic-source`), seed the demo inventory
   (acme/portal 2.4.4 on a critical/internet asset, acme/api 1.0 on a
-  normal/internal asset) and run the deterministic reference source once
-  (WP-1b.05, ARCH-001 §3). Seeding twice yields no duplicates. The
-  malformed reference case E1 (missing `cve_id`) is counted as a run error
-  without aborting the run: the reported run `status` is `failed` — that is
-  the expected reference behaviour — while the command itself exits 0 and
-  the counted error plus the run counters are part of the result.
-- `demo run` — re-run the synthetic source against the seeded inventory:
-  an idempotent no-op that creates no duplicate rows and no new signals.
+  normal/internal asset), run the deterministic reference source once
+  (WP-1b.05, ARCH-001 §3) and write the deterministic I4 P1–P4 fixture
+  (WP-4.08, ARCH-004 §8): eight fixed-id signals spanning every ch. 6.3
+  status with their SLA clocks and audit rows. Seeding twice yields no
+  duplicates and the fixture is a no-op the second time. The malformed
+  reference case E1 (missing `cve_id`) is counted as a run error without
+  aborting the run: the reported run `status` is `failed` — that is the
+  expected reference behaviour — while the command itself exits 0 and the
+  counted error plus the run counters are part of the result.
+- `demo run` — drive the accelerated UC-08 SLA scenario (WP-4.08) through
+  the real application use cases and worker pieces on a scaled SLA profile
+  and an injected clock: a P1 create → deliver → acknowledge →
+  action_planned → resolve, a P3→P1 upgrade (missing clocks created,
+  existing clocks tightened) and an unacknowledged-P1 escalation. Emits a
+  machine-readable scenario result with `--output json`.
 - `demo reset --yes` — truncate the demo tables (sources, source runs,
   raw records, vulnerabilities, evidences, matches, risk signals,
   quarantine, assets, components, audit events, outbox). Dev-only: requires
@@ -454,8 +462,8 @@ remains the default output; help output is always human-oriented. Examples:
     bin/risksignal badcmd; echo $?        # 2 (validation)
     RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
       bin/risksignal demo seed
-    bin/risksignal demo seed --output json   # run id, status, counters, errors
-    bin/risksignal demo run                  # idempotent re-run, no new signals
+    bin/risksignal demo seed --output json   # run + I4 fixture summary
+    bin/risksignal demo run                  # accelerated UC-08 SLA scenario (json)
     bin/risksignal demo reset --yes          # dev-only, truncates the demo tables
 
     RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
