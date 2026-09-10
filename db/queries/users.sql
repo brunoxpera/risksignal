@@ -85,3 +85,15 @@ RETURNING *;
 SELECT *
 FROM users
 ORDER BY display_name, id;
+
+-- GetUserBySubject reads one user by its issuer-qualified external subject_id
+-- (ARCH-005 §1/§2) — the resolution the authenticated adapters (the reveal
+-- endpoint and the CLI identity-lookup) run to turn a verified identity into
+-- the internal users.id the authoriser and the audit actor key on. It is a
+-- pure read: a login creates the row (UpsertUserBySubject), request-time
+-- resolution never does. An unknown subject is pgx.ErrNoRows (mapped to
+-- not-found by the adapter); a deactivated user still resolves.
+-- name: GetUserBySubject :one
+SELECT *
+FROM users
+WHERE subject_id = @subject_id;

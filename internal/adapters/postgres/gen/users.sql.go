@@ -78,6 +78,35 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	return i, err
 }
 
+const getUserBySubject = `-- name: GetUserBySubject :one
+SELECT id, subject_id, display_name, email, deactivated_at, last_login_at, created_at, updated_at
+FROM users
+WHERE subject_id = $1
+`
+
+// GetUserBySubject reads one user by its issuer-qualified external subject_id
+// (ARCH-005 §1/§2) — the resolution the authenticated adapters (the reveal
+// endpoint and the CLI identity-lookup) run to turn a verified identity into
+// the internal users.id the authoriser and the audit actor key on. It is a
+// pure read: a login creates the row (UpsertUserBySubject), request-time
+// resolution never does. An unknown subject is pgx.ErrNoRows (mapped to
+// not-found by the adapter); a deactivated user still resolves.
+func (q *Queries) GetUserBySubject(ctx context.Context, subjectID string) (User, error) {
+	row := q.db.QueryRow(ctx, getUserBySubject, subjectID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.SubjectID,
+		&i.DisplayName,
+		&i.Email,
+		&i.DeactivatedAt,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listUsers = `-- name: ListUsers :many
 SELECT id, subject_id, display_name, email, deactivated_at, last_login_at, created_at, updated_at
 FROM users

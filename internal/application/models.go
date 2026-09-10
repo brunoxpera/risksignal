@@ -64,6 +64,10 @@ type SignalFilter struct {
 // WP-1b.03). It carries no secrets: before/after are minimised state
 // snapshots (concept ch. 13.5) and the actor is a system principal in I1b.
 type AuditEvent struct {
+	// ID is the audit row id (database-assigned). It is empty on the
+	// append path (InsertAuditEvent lets the column default assign it) and
+	// populated by the read path (AuditRepo.GetByID).
+	ID               string
 	AggregateType    string // e.g. "risk_signal"
 	AggregateID      string // uuid of the changed aggregate
 	ActorType        string // "system" in I1b ("user" from I5a)

@@ -43,3 +43,41 @@ func (r *AuditRepo) Append(ctx context.Context, tx application.Tx, ev applicatio
 	})
 	return mapDBError(op, err)
 }
+
+// GetByID implements application.AuditRepo: read one audit event by its id —
+// the load step of the governed audit.reveal_identity act (ARCH-005 §7,
+// ADR-014). It is a read; the table stays append-only. A missing id is a
+// not-found Error (the reveal then writes nothing). The stored row is mapped
+// onto the application-level AuditEvent (id and actor_display_name
+// included); the before/after snapshots pass through as raw JSON.
+func (r *AuditRepo) GetEventByID(ctx context.Context, id string) (application.AuditEvent, error) {
+	const op = "audit.get_by_id"
+
+	eid, err := toUUID(id)
+	if err != nil {
+		return application.AuditEvent{}, application.ValidationError(op, err)
+	}
+	row, err := r.q.GetAuditEventByID(ctx, eid)
+	if err != nil {
+		return application.AuditEvent{}, mapDBError(op, err) // pgx.ErrNoRows → not-found
+	}
+	return auditEventFromRow(row), nil
+}
+
+// auditEventFromRow maps a stored audit row onto the application-level
+// AuditEvent (ch. 13.5: before/after stay minimised snapshots, no secrets).
+func auditEventFromRow(row gen.AuditEvent) application.AuditEvent {
+	return application.AuditEvent{
+		ID:               uuidString(row.ID),
+		AggregateType:    row.AggregateType,
+		AggregateID:      uuidString(row.AggregateID),
+		ActorType:        row.ActorType,
+		ActorID:          row.ActorID,
+		ActorDisplayName: textValue(row.ActorDisplayName),
+		Action:           row.Action,
+		OccurredAt:       tsTime(row.OccurredAt),
+		Before:           row.Before,
+		After:            row.After,
+		CorrelationID:    row.CorrelationID,
+	}
+}

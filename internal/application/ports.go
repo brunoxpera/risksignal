@@ -69,6 +69,13 @@ type SignalRepo interface {
 // change (ch. 5.1).
 type AuditRepo interface {
 	Append(ctx context.Context, tx Tx, ev AuditEvent) error
+
+	// GetEventByID reads one audit event by its id (ARCH-005 §7, ADR-014):
+	// the load step of the governed audit.reveal_identity act, which then
+	// resolves the event's actor_id and appends the self-audit. It is a
+	// read — the table stays append-only, this is not a second write path. A
+	// missing id is a not-found Error (the reveal then writes nothing).
+	GetEventByID(ctx context.Context, id string) (AuditEvent, error)
 }
 
 // OutboxRepo appends outbox rows (ARCH-001 §1 and §2, WP-1b.03). The append

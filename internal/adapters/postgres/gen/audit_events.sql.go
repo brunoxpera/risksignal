@@ -11,6 +11,36 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getAuditEventByID = `-- name: GetAuditEventByID :one
+SELECT id, aggregate_type, aggregate_id, actor_type, actor_id, actor_display_name, action, occurred_at, before, after, correlation_id
+FROM audit_events
+WHERE id = $1
+`
+
+// GetAuditEventByID reads one audit event by its id — the load step of the
+// governed audit.reveal_identity act (ARCH-005 §7, ADR-014): the command
+// loads the event whose actor_id it resolves. The table stays append-only;
+// this is a read, not a second write path. A missing id is pgx.ErrNoRows
+// (mapped to not-found by the adapter); the reveal then writes nothing.
+func (q *Queries) GetAuditEventByID(ctx context.Context, id pgtype.UUID) (AuditEvent, error) {
+	row := q.db.QueryRow(ctx, getAuditEventByID, id)
+	var i AuditEvent
+	err := row.Scan(
+		&i.ID,
+		&i.AggregateType,
+		&i.AggregateID,
+		&i.ActorType,
+		&i.ActorID,
+		&i.ActorDisplayName,
+		&i.Action,
+		&i.OccurredAt,
+		&i.Before,
+		&i.After,
+		&i.CorrelationID,
+	)
+	return i, err
+}
+
 const insertAuditEvent = `-- name: InsertAuditEvent :one
 
 INSERT INTO audit_events (

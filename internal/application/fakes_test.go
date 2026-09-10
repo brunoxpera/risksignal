@@ -645,9 +645,17 @@ func newFakeUserRepo() *fakeUserRepo {
 }
 
 // add registers one user with the given roles (an empty role list is a
-// role-less user — deny-by-default on everything).
+// role-less user — deny-by-default on everything). The issuer-qualified
+// subject defaults to the id so a test can resolve the principal by either.
 func (f *fakeUserRepo) add(id, displayName string, roles ...domain.Role) {
-	f.byID[id] = application.UserIdentity{ID: id, DisplayName: displayName}
+	f.byID[id] = application.UserIdentity{ID: id, SubjectID: id, DisplayName: displayName}
+	f.roles[id] = roles
+}
+
+// addWithSubject registers one user with an explicit issuer-qualified
+// subject_id (the login key the reveal endpoint / CLI resolve on).
+func (f *fakeUserRepo) addWithSubject(id, subjectID, displayName string, roles ...domain.Role) {
+	f.byID[id] = application.UserIdentity{ID: id, SubjectID: subjectID, DisplayName: displayName}
 	f.roles[id] = roles
 }
 
@@ -671,6 +679,17 @@ func (f *fakeUserRepo) RolesByUserID(ctx context.Context, userID string) ([]doma
 	return f.roles[userID], nil
 }
 
+// GetUserBySubject implements application.UserRepo: the subject_id → user
+// resolution (ARCH-005 §2). An unknown subject is a not-found error.
+func (f *fakeUserRepo) GetUserBySubject(ctx context.Context, subjectID string) (application.UserIdentity, error) {
+	for _, u := range f.byID {
+		if u.SubjectID == subjectID {
+			return u, nil
+		}
+	}
+	return application.UserIdentity{}, application.NotFoundError("user.get_by_subject", fmt.Errorf("user with subject %s not found", subjectID))
+}
+
 var _ application.UserRepo = (*fakeUserRepo)(nil)
 
 type fakeAuditRepo struct {
@@ -688,9 +707,29 @@ func (f *fakeAuditRepo) Append(ctx context.Context, tx application.Tx, ev applic
 	if f.failpoint != nil {
 		return f.failpoint
 	}
+	if ev.ID == "" {
+		// Mirror the gen_random_uuid() column default: the stored row carries
+		// a database-assigned id, so the read path (GetByID) can resolve it.
+		ev.ID = uuid.New()
+	}
 	ftx.staged.audit = append(ftx.staged.audit, ev)
 	return nil
 }
+
+// GetEventByID implements application.AuditRepo: the load step of the
+// governed audit.reveal_identity act. It reads the committed audit store
+// (the real read runs pool-scoped, outside any transaction); a missing id is
+// a not-found error.
+func (f *fakeAuditRepo) GetEventByID(ctx context.Context, id string) (application.AuditEvent, error) {
+	for _, ev := range f.db.auditEvents {
+		if ev.ID == id {
+			return ev, nil
+		}
+	}
+	return application.AuditEvent{}, application.NotFoundError("audit.get_by_id", fmt.Errorf("audit event %s not found", id))
+}
+
+var _ application.AuditRepo = (*fakeAuditRepo)(nil)
 
 type fakeOutboxRepo struct {
 	db *fakeDB

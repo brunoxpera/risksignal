@@ -37,3 +37,13 @@ VALUES (
     @correlation_id
 )
 RETURNING *;
+
+-- GetAuditEventByID reads one audit event by its id — the load step of the
+-- governed audit.reveal_identity act (ARCH-005 §7, ADR-014): the command
+-- loads the event whose actor_id it resolves. The table stays append-only;
+-- this is a read, not a second write path. A missing id is pgx.ErrNoRows
+-- (mapped to not-found by the adapter); the reveal then writes nothing.
+-- name: GetAuditEventByID :one
+SELECT *
+FROM audit_events
+WHERE id = @id;

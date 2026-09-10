@@ -17,6 +17,11 @@ import (
 type UserIdentity struct {
 	// ID is the stable internal users.id.
 	ID string
+	// SubjectID is the issuer-qualified external OIDC subject
+	// (users.subject_id, "<issuer>::<sub>") — the login key the authenticated
+	// adapters resolve an Identity on (ARCH-005 §2) and the value
+	// audit.reveal_identity returns as the revealed subject id (ADR-014).
+	SubjectID string
 	// DisplayName is snapshotted into the audit row of a user command.
 	DisplayName string
 	// DeactivatedAt is the deactivation instant; the zero value means the
@@ -46,4 +51,13 @@ type UserRepo interface {
 	// time). A user holding no roles yields an empty slice, never an error —
 	// zero roles means deny-by-default on everything (ARCH-005 §3).
 	RolesByUserID(ctx context.Context, userID string) ([]domain.Role, error)
+
+	// GetUserBySubject reads one user by its issuer-qualified external
+	// subject_id — the resolution the authenticated adapters (the reveal
+	// endpoint and the CLI identity-lookup) run to turn a verified identity
+	// into the internal users.id the authoriser and the audit actor key on
+	// (ARCH-005 §2). It is a pure read: a login creates the row, request-time
+	// resolution never does. An unknown subject is a not-found Error (the
+	// caller fails closed); a deactivated user still resolves.
+	GetUserBySubject(ctx context.Context, subjectID string) (UserIdentity, error)
 }

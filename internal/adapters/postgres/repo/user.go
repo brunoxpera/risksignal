@@ -247,9 +247,30 @@ func (r *UserRepo) RolesByUserID(ctx context.Context, userID string) ([]domain.R
 func userIdentityFromRow(row gen.User) application.UserIdentity {
 	return application.UserIdentity{
 		ID:            uuidString(row.ID),
+		SubjectID:     row.SubjectID,
 		DisplayName:   row.DisplayName,
 		DeactivatedAt: tsTime(row.DeactivatedAt),
 	}
+}
+
+// GetUserBySubject implements application.UserRepo (WP-5a.07): the
+// request-time resolution of an authenticated identity onto the internal
+// users.id (ARCH-005 §2), used by the reveal endpoint and the CLI
+// identity-lookup. It is a pure read — a login creates the row
+// (UpsertBySubject), request-time resolution never does. An unknown subject
+// is a not-found Error (the caller fails closed); a deactivated user still
+// resolves (the caller reads DeactivatedAt to decide the state).
+func (r *UserRepo) GetUserBySubject(ctx context.Context, subjectID string) (application.UserIdentity, error) {
+	const op = "user.get_by_subject"
+
+	if subjectID == "" {
+		return application.UserIdentity{}, application.Validationf(op, "subject_id is mandatory")
+	}
+	row, err := r.q.GetUserBySubject(ctx, subjectID)
+	if err != nil {
+		return application.UserIdentity{}, mapDBError(op, err) // pgx.ErrNoRows → not-found
+	}
+	return userIdentityFromRow(row), nil
 }
 
 // ListRolesByUser returns one user's current roles ordered by role — the

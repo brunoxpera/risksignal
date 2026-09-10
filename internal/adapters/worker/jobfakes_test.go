@@ -427,6 +427,9 @@ func (s *jobStubRepo) ExistsByMatchID(ctx context.Context, matchID string) (bool
 func (s *jobStubRepo) Append(ctx context.Context, tx application.Tx, ev application.AuditEvent) error {
 	return s.method()
 }
+func (s *jobStubRepo) GetEventByID(ctx context.Context, id string) (application.AuditEvent, error) {
+	return application.AuditEvent{}, s.method()
+}
 func (s *jobStubRepo) Insert(ctx context.Context, tx application.Tx, rec application.MatchRecord, createdAt time.Time) (string, error) {
 	return "", s.method()
 }
