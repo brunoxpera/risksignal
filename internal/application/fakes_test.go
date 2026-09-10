@@ -51,6 +51,10 @@ var fixedNow = time.Date(2026, 9, 9, 9, 30, 0, 0, time.UTC)
 type storedSignal struct {
 	sig       domain.RiskSignal
 	createdAt time.Time
+	// closedAt is the closed_at stamp of the row (nil while the signal is
+	// open) — the retention-countdown instant the transition write sets on
+	// entering a closed state and clears on a reopen.
+	closedAt *time.Time
 }
 
 type storedVuln struct {
@@ -148,6 +152,10 @@ type fakeDB struct {
 	components []application.Component
 	// signalViews is the joined §4 read store, seeded by read-path tests.
 	signalViews []application.Signal
+	// comments is the committed append-only comment timeline (ARCH-004
+	// §2.2); slaClocks the committed SLA clocks (ARCH-004 §4.1).
+	comments  []domain.Comment
+	slaClocks []domain.SlaClock
 	// assets is the committed inventory of the commit write path
 	// (DEV-060): staged wholesale per transaction (copy-on-write overlay),
 	// replaced on commit, discarded on rollback. nextAssetID is the id
@@ -168,6 +176,51 @@ func (d *fakeDB) hasSignalForMatch(matchID string) bool {
 		}
 	}
 	return false
+}
+
+// signalRowByID resolves one committed signal row by its id (the read the
+// I4 triage commands take before a guarded write).
+func (d *fakeDB) signalRowByID(id string) (storedSignal, bool) {
+	for _, r := range d.signalRows {
+		if r.sig.ID == id {
+			return r, true
+		}
+	}
+	return storedSignal{}, false
+}
+
+// applySignalMutation replaces the committed signal row of the mutation's id
+// with the mutated aggregate and its closed_at stamp — the commit effect of
+// the guarded I4 signal writes (the row's created_at is preserved).
+func (d *fakeDB) applySignalMutation(m storedSignal) {
+	for i := range d.signalRows {
+		if d.signalRows[i].sig.ID == m.sig.ID {
+			d.signalRows[i].sig = m.sig
+			d.signalRows[i].closedAt = m.closedAt
+			return
+		}
+	}
+}
+
+// slaClockByKey resolves one committed clock by its natural key.
+func (d *fakeDB) slaClockByKey(signalID string, target domain.SLATarget) (domain.SlaClock, bool) {
+	for _, c := range d.slaClocks {
+		if c.SignalID == signalID && c.Target == target {
+			return c, true
+		}
+	}
+	return domain.SlaClock{}, false
+}
+
+// applySlaClock upserts the committed clock by its natural key.
+func (d *fakeDB) applySlaClock(c domain.SlaClock) {
+	for i := range d.slaClocks {
+		if d.slaClocks[i].SignalID == c.SignalID && d.slaClocks[i].Target == c.Target {
+			d.slaClocks[i] = c
+			return
+		}
+	}
+	d.slaClocks = append(d.slaClocks, c)
 }
 
 func (d *fakeDB) vulnByCVE(cveID string) (string, bool) {
@@ -322,6 +375,14 @@ type fakeStaged struct {
 	// never touches inventory leaves it nil and commit leaves the
 	// committed assets alone.
 	assets []fakeStoredAsset
+	// signalMutations are the guarded I4 signal writes (transition,
+	// override, revert, owner assignment) staged on the transaction; commit
+	// applies them to the committed signal rows (replace by id).
+	signalMutations []storedSignal
+	// comments and slaClocks are the staged I4 timeline/clock writes,
+	// published on commit.
+	comments  []domain.Comment
+	slaClocks []domain.SlaClock
 }
 
 func (t *fakeTx) record(op string) { t.log = append(t.log, op) }
@@ -367,6 +428,13 @@ func (t *fakeTx) commit() {
 		if err := t.db.applyCompletion(c); err != nil {
 			panic(err) // a completion of a missing run is a test bug
 		}
+	}
+	for _, m := range t.staged.signalMutations {
+		t.db.applySignalMutation(m)
+	}
+	t.db.comments = append(t.db.comments, t.staged.comments...)
+	for _, c := range t.staged.slaClocks {
+		t.db.applySlaClock(c)
 	}
 	t.committed = true
 }
@@ -967,6 +1035,253 @@ func (f *fakeComponentRepo) ListByVendorProduct(ctx context.Context, vendor, pro
 }
 
 // ---------------------------------------------------------------------------
+// I4 triage/SLA fakes (ARCH-004 §2/§3/§4)
+
+// fakeSignalTriageRepo is the in-memory application.SignalTriageRepo. Writes
+// are guarded on the optimistic-lock version exactly as the DEV-073 adapter:
+// a stale expectedVersion (or a missing row) is a conflict Error and nothing
+// is staged. Staged mutations are visible to a later method of the same
+// transaction (intra-transaction visibility) and are applied to the committed
+// rows on commit.
+type fakeSignalTriageRepo struct{ db *fakeDB }
+
+// resolve returns the base signal of a guarded write: the transaction's own
+// staged mutation when one exists, otherwise the committed row.
+func (f *fakeSignalTriageRepo) resolve(ftx *fakeTx, id string) (domain.RiskSignal, bool) {
+	for i := len(ftx.staged.signalMutations) - 1; i >= 0; i-- {
+		if ftx.staged.signalMutations[i].sig.ID == id {
+			return ftx.staged.signalMutations[i].sig, true
+		}
+	}
+	row, ok := f.db.signalRowByID(id)
+	if !ok {
+		return domain.RiskSignal{}, false
+	}
+	return row.sig, true
+}
+
+func (f *fakeSignalTriageRepo) GetRiskSignal(ctx context.Context, id string) (domain.RiskSignal, error) {
+	row, ok := f.db.signalRowByID(id)
+	if !ok {
+		return domain.RiskSignal{}, application.NotFoundError("signals.get_risk_signal", fmt.Errorf("signal %s not found", id))
+	}
+	return row.sig, nil
+}
+
+// guarded returns the committed/staged base of a guarded write after the
+// optimistic-lock check, mirroring guardedSignalError: a missing row or a
+// stale version is a conflict.
+func (f *fakeSignalTriageRepo) guarded(ftx *fakeTx, op, id string, expectedVersion int) (domain.RiskSignal, error) {
+	base, ok := f.resolve(ftx, id)
+	if !ok || base.Version != expectedVersion {
+		return domain.RiskSignal{}, application.ConflictError(op, fmt.Errorf("signal %s: stale version (optimistic lock failed)", id))
+	}
+	return base, nil
+}
+
+func (f *fakeSignalTriageRepo) Transition(ctx context.Context, tx application.Tx, id string, to domain.SignalStatus, closedAt *time.Time, expectedVersion int) (domain.RiskSignal, error) {
+	const op = "signals.transition"
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	ftx.record("signal.transition")
+	base, err := f.guarded(ftx, op, id, expectedVersion)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	next := base
+	next.Status = to
+	next.Version = base.Version + 1
+	ftx.staged.signalMutations = append(ftx.staged.signalMutations, storedSignal{sig: next, closedAt: closedAt})
+	return next, nil
+}
+
+func (f *fakeSignalTriageRepo) OverridePriority(ctx context.Context, tx application.Tx, id string, priority, autoPriority domain.Priority, reason, actorID string, at time.Time, expectedVersion int) (domain.RiskSignal, error) {
+	const op = "signals.override_priority"
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	ftx.record("signal.override")
+	base, err := f.guarded(ftx, op, id, expectedVersion)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	auto := autoPriority
+	next := base
+	next.Priority = priority
+	next.AutoPriority = &auto
+	next.OverrideReason = reason
+	next.OverrideActorID = actorID
+	next.OverrideAt = at
+	next.Version = base.Version + 1
+	ftx.staged.signalMutations = append(ftx.staged.signalMutations, storedSignal{sig: next})
+	return next, nil
+}
+
+func (f *fakeSignalTriageRepo) RevertPriority(ctx context.Context, tx application.Tx, id string, expectedVersion int) (domain.RiskSignal, error) {
+	const op = "signals.revert_priority"
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	ftx.record("signal.revert")
+	base, err := f.guarded(ftx, op, id, expectedVersion)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	if base.AutoPriority == nil {
+		return domain.RiskSignal{}, application.ConflictError(op, fmt.Errorf("signal %s has no override to revert", id))
+	}
+	next := base
+	next.Priority = *base.AutoPriority
+	next.AutoPriority = nil
+	next.OverrideReason = ""
+	next.OverrideActorID = ""
+	next.OverrideAt = time.Time{}
+	next.Version = base.Version + 1
+	ftx.staged.signalMutations = append(ftx.staged.signalMutations, storedSignal{sig: next})
+	return next, nil
+}
+
+func (f *fakeSignalTriageRepo) AssignOwner(ctx context.Context, tx application.Tx, id, owner string, expectedVersion int) (domain.RiskSignal, error) {
+	const op = "signals.assign_owner"
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	ftx.record("signal.owner")
+	base, err := f.guarded(ftx, op, id, expectedVersion)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	next := base
+	next.Owner = owner
+	next.Version = base.Version + 1
+	ftx.staged.signalMutations = append(ftx.staged.signalMutations, storedSignal{sig: next})
+	return next, nil
+}
+
+// fakeCommentRepo is the in-memory application.CommentRepo: append-only, the
+// committed timeline read back in insertion order.
+type fakeCommentRepo struct{ db *fakeDB }
+
+func (f *fakeCommentRepo) Add(ctx context.Context, tx application.Tx, signalID, actorID, body string, createdAt time.Time) (domain.Comment, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.Comment{}, err
+	}
+	ftx.record("comment")
+	c, err := domain.NewComment(uuid.New(), signalID, actorID, body)
+	if err != nil {
+		return domain.Comment{}, application.ValidationError("comments.add", err)
+	}
+	ftx.staged.comments = append(ftx.staged.comments, c)
+	return c, nil
+}
+
+func (f *fakeCommentRepo) ListBySignal(ctx context.Context, signalID string) ([]domain.Comment, error) {
+	var out []domain.Comment
+	for _, c := range f.db.comments {
+		if c.SignalID == signalID {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// fakeSlaClockRepo is the in-memory application.SlaClockRepo. Its guarded
+// writes apply the domain preconditions (domain.SlaClock.Pause/Resume/…)
+// exactly as the DEV-073 SQL guards do and stage the updated clock.
+type fakeSlaClockRepo struct{ db *fakeDB }
+
+func (f *fakeSlaClockRepo) resolve(ftx *fakeTx, signalID string, target domain.SLATarget) (domain.SlaClock, bool) {
+	for i := len(ftx.staged.slaClocks) - 1; i >= 0; i-- {
+		if ftx.staged.slaClocks[i].SignalID == signalID && ftx.staged.slaClocks[i].Target == target {
+			return ftx.staged.slaClocks[i], true
+		}
+	}
+	return f.db.slaClockByKey(signalID, target)
+}
+
+func (f *fakeSlaClockRepo) Upsert(ctx context.Context, tx application.Tx, clock domain.SlaClock) (domain.SlaClock, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.SlaClock{}, err
+	}
+	ftx.record("sla.upsert")
+	if clock.ID == "" {
+		clock.ID = uuid.New()
+	}
+	f.db.applySlaClock(clock)
+	return clock, nil
+}
+
+func (f *fakeSlaClockRepo) Fulfil(ctx context.Context, tx application.Tx, signalID string, target domain.SLATarget, at time.Time) (domain.SlaClock, bool, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.SlaClock{}, false, err
+	}
+	ftx.record("sla.fulfil")
+	base, ok := f.resolve(ftx, signalID, target)
+	if !ok || base.Fulfilled() {
+		return domain.SlaClock{}, false, nil // missing / already fulfilled: no change
+	}
+	next, err := base.Fulfil(at)
+	if err != nil {
+		return domain.SlaClock{}, false, application.ConflictError("sla_clocks.fulfil", err)
+	}
+	ftx.staged.slaClocks = append(ftx.staged.slaClocks, next)
+	return next, true, nil
+}
+
+func (f *fakeSlaClockRepo) Pause(ctx context.Context, tx application.Tx, signalID string, target domain.SLATarget, at time.Time) (domain.SlaClock, error) {
+	return f.guardedClock(tx, "sla_clocks.pause", signalID, target, func(c domain.SlaClock) (domain.SlaClock, error) { return c.Pause(at) })
+}
+
+func (f *fakeSlaClockRepo) Resume(ctx context.Context, tx application.Tx, signalID string, target domain.SLATarget, at time.Time) (domain.SlaClock, error) {
+	return f.guardedClock(tx, "sla_clocks.resume", signalID, target, func(c domain.SlaClock) (domain.SlaClock, error) { return c.Resume(at) })
+}
+
+func (f *fakeSlaClockRepo) Reset(ctx context.Context, tx application.Tx, signalID string, target domain.SLATarget, startedAt, deadlineAt time.Time) (domain.SlaClock, error) {
+	return f.guardedClock(tx, "sla_clocks.reset", signalID, target, func(c domain.SlaClock) (domain.SlaClock, error) {
+		return c.Reset(startedAt, deadlineAt.Sub(startedAt))
+	})
+}
+
+// guardedClock applies the domain precondition of a guarded clock write and
+// stages the result; a missing clock or a failed precondition is a conflict,
+// mirroring guardedClockError of the adapter.
+func (f *fakeSlaClockRepo) guardedClock(tx application.Tx, op, signalID string, target domain.SLATarget, fn func(domain.SlaClock) (domain.SlaClock, error)) (domain.SlaClock, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.SlaClock{}, err
+	}
+	ftx.record("sla.guarded")
+	base, ok := f.resolve(ftx, signalID, target)
+	if !ok {
+		return domain.SlaClock{}, application.ConflictError(op, fmt.Errorf("sla clock %s/%s missing", signalID, target))
+	}
+	next, err := fn(base)
+	if err != nil {
+		return domain.SlaClock{}, application.ConflictError(op, err)
+	}
+	ftx.staged.slaClocks = append(ftx.staged.slaClocks, next)
+	return next, nil
+}
+
+func (f *fakeSlaClockRepo) Due(ctx context.Context) ([]domain.SlaClock, error) {
+	var out []domain.SlaClock
+	for _, c := range f.db.slaClocks {
+		if c.Overdue(fixedNow) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// ---------------------------------------------------------------------------
 // harness
 
 // harness wires every fake into a ready-to-use application service.
@@ -986,6 +1301,10 @@ type harness struct {
 	comps      *fakeComponentRepo
 	inventory  *fakeInventoryWriter
 	clock      *clock.FakeClock
+
+	signalTriage *fakeSignalTriageRepo
+	comments     *fakeCommentRepo
+	slaClocks    *fakeSlaClockRepo
 
 	svc *application.Service
 }
@@ -1008,6 +1327,9 @@ func newHarness(t *testing.T) *harness {
 	h.quarantine = &fakeQuarantineRepo{db: h.db}
 	h.comps = &fakeComponentRepo{db: h.db}
 	h.inventory = &fakeInventoryWriter{db: h.db}
+	h.signalTriage = &fakeSignalTriageRepo{db: h.db}
+	h.comments = &fakeCommentRepo{db: h.db}
+	h.slaClocks = &fakeSlaClockRepo{db: h.db}
 	h.svc = application.NewService(application.ServiceDeps{
 		Signals:         h.signals,
 		Audit:           h.audit,
@@ -1020,6 +1342,9 @@ func newHarness(t *testing.T) *harness {
 		Quarantine:      h.quarantine,
 		Components:      h.comps,
 		Inventory:       h.inventory,
+		SignalTriage:    h.signalTriage,
+		Comments:        h.comments,
+		SlaClocks:       h.slaClocks,
 		Clock:           h.clock,
 		RunTx:           h.runner.Run,
 	})
