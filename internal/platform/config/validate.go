@@ -66,6 +66,39 @@ func Validate(c *Config) []error {
 		errs = append(errs, errors.New("auth.bypass_enabled: local authentication bypass may only be enabled in local mode (TR-010)"))
 	}
 
+	// ARCH-005 §4.1 loopback lock: even in local mode the bypass may only be
+	// served on a loopback bind — the missing half of FR-029 ("technically
+	// limited to local use"). A non-loopback or all-interfaces address with
+	// the bypass on is refused. The address is only classified when it is a
+	// valid host:port (the shape error above already covers the rest).
+	if c.Auth.BypassEnabled && env == "local" && addr != "" {
+		if _, _, err := net.SplitHostPort(addr); err == nil && !isLoopbackAddr(addr) {
+			errs = append(errs, errors.New("auth.bypass_enabled: local authentication bypass requires a loopback http.addr (127.0.0.0/8 or ::1), ARCH-005 §4.1"))
+		}
+	}
+
+	// oidc.session_ttl must be positive: a non-positive session lifetime
+	// would make every browser session expire at once (or never).
+	if c.OIDC.SessionTTL <= 0 {
+		errs = append(errs, errors.New("oidc.session_ttl: must be a positive duration (set it via a config file or RISKSIGNAL_OIDC_SESSION_TTL)"))
+	}
+
+	// oidc.scopes must name at least one scope; an empty list would request
+	// an unauthenticated token (ARCH-005 §2).
+	if len(trimEach(c.OIDC.Scopes)) == 0 {
+		errs = append(errs, errors.New("oidc.scopes: must contain at least one scope (default: openid profile email)"))
+	}
+
+	// oidc.role_mappings values must be non-empty. The role vocabulary itself
+	// is validated against the domain in the composition root (the platform
+	// package never imports the domain).
+	for value, role := range c.OIDC.RoleMappings {
+		if strings.TrimSpace(value) == "" || strings.TrimSpace(role) == "" {
+			errs = append(errs, errors.New("oidc.role_mappings: must map a non-empty claim value to a non-empty role"))
+			break
+		}
+	}
+
 	// worker.interval must be positive: a zero or negative value would
 	// make the scheduler loop spin or never fire (WP-1a.10). Unparsable
 	// values are rejected at load time already, before Validate runs.
@@ -122,4 +155,29 @@ func isValidURL(s string) bool {
 		return false
 	}
 	return u.Scheme != "" && u.Host != ""
+}
+
+// isLoopbackAddr reports whether a host:port address binds a loopback
+// interface only (127.0.0.0/8 or ::1). An all-interfaces address ("host"
+// empty, e.g. ":8080") is not loopback: it would expose the bypass to the
+// network. A hostname other than "localhost" is not resolved (resolving
+// would make startup depend on the resolver) and counts as non-loopback.
+func isLoopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		return false
+	}
+	host = strings.TrimSpace(host)
+	// Strip an IPv6 zone id (e.g. "::1%lo0").
+	if i := strings.IndexByte(host, '%'); i >= 0 {
+		host = host[:i]
+	}
+	if host == "" {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

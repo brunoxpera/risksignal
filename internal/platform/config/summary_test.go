@@ -47,7 +47,7 @@ func TestJSONSummaryReportsProvenanceWithoutSecrets(t *testing.T) {
 	rendered := string(b)
 	// The secrecy contract: neither the database password nor any other
 	// secret-capable content may ever reach the machine-readable output.
-	for _, secret := range []string{"hunter2secret", "alice", "token-secret-path", "risksignal"} {
+	for _, secret := range []string{"hunter2secret", "alice", "token-secret-path", "db.internal.example"} {
 		if strings.Contains(rendered, secret) {
 			t.Errorf("JSONSummary leaks %q: %s", secret, rendered)
 		}
@@ -72,14 +72,24 @@ func TestJSONSummaryIsDeterministic(t *testing.T) {
 	}
 
 	// encoding/json renders struct fields in declaration order, so the key
-	// set can be pinned exactly: the fixed key set (schema, mode, the I4
-	// notify channels), no drift.
+	// set can be pinned exactly: the fixed key set (schema, mode, the I5a
+	// oidc/auth section, the I4 notify channels), no drift.
 	want := `{"schema_version":{"value":1,"source":"default"},` +
 		`"env":{"value":"local","source":"default"},` +
 		`"http.addr":{"set":true,"source":"default"},` +
 		`"database.url":{"set":true,"source":"env"},` +
 		`"oidc.issuer":{"set":true,"source":"env"},` +
+		`"oidc.client_id":{"value":"","source":"default"},` +
+		`"oidc.client_secret_ref":{"set":true,"source":"default"},` +
+		`"oidc.redirect_url":{"set":true,"source":"default"},` +
+		`"oidc.scopes":{"value":"openid profile email","source":"default"},` +
+		`"oidc.roles_claim":{"value":"roles","source":"default"},` +
+		`"oidc.role_mappings":{"value":"0 mapping(s)","source":"default"},` +
+		`"oidc.audience":{"value":"","source":"default"},` +
+		`"oidc.session_cookie_name":{"value":"risksignal_session","source":"default"},` +
+		`"oidc.session_ttl":{"value":"8h0m0s","source":"default"},` +
 		`"auth.bypass_enabled":{"value":false,"source":"default"},` +
+		`"auth.bypass_principal":{"value":"local-developer","source":"default"},` +
 		`"worker.interval":{"value":"30s","source":"default"},` +
 		`"worker.sla_evaluate_interval":{"value":"1m0s","source":"default"},` +
 		`"worker.sla_reminder_cadence":{"value":"1h0m0s","source":"default"},` +

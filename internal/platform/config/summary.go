@@ -48,7 +48,17 @@ func (c *Config) summaryRows() []summaryRow {
 		{key: "http.addr", state: "set", source: src("http.addr")},
 		{key: "database.url", state: "set", source: src("database.url")},
 		{key: "oidc.issuer", state: "set", source: src("oidc.issuer")},
+		{key: "oidc.client_id", state: c.OIDC.ClientID, source: src("oidc.client_id")},
+		{key: "oidc.client_secret_ref", state: "set", source: src("oidc.client_secret_ref")},
+		{key: "oidc.redirect_url", state: "set", source: src("oidc.redirect_url")},
+		{key: "oidc.scopes", state: strings.Join(c.OIDC.Scopes, " "), source: src("oidc.scopes")},
+		{key: "oidc.roles_claim", state: c.OIDC.RolesClaim, source: src("oidc.roles_claim")},
+		{key: "oidc.role_mappings", state: roleMappingsState(c.OIDC.RoleMappings), source: src("oidc.role_mappings")},
+		{key: "oidc.audience", state: c.OIDC.Audience, source: src("oidc.audience")},
+		{key: "oidc.session_cookie_name", state: c.OIDC.SessionCookieName, source: src("oidc.session_cookie_name")},
+		{key: "oidc.session_ttl", state: c.OIDC.SessionTTL.String(), source: src("oidc.session_ttl")},
 		{key: "auth.bypass_enabled", state: strconv.FormatBool(c.Auth.BypassEnabled), source: src("auth.bypass_enabled")},
+		{key: "auth.bypass_principal", state: c.Auth.BypassPrincipal, source: src("auth.bypass_principal")},
 		{key: "worker.interval", state: c.Worker.Interval.String(), source: src("worker.interval")},
 		{key: "worker.sla_evaluate_interval", state: c.Worker.SLAEvaluateInterval.String(), source: src("worker.sla_evaluate_interval")},
 		{key: "worker.sla_reminder_cadence", state: c.Worker.SLAReminderCadence.String(), source: src("worker.sla_reminder_cadence")},
@@ -69,15 +79,25 @@ func (c *Config) summaryRows() []summaryRow {
 // not drift; keys that can carry credentials report presence and source
 // only, never content.
 type JSONSummary struct {
-	SchemaVersion     ScalarSummary[int]    `json:"schema_version"`
-	Env               ScalarSummary[string] `json:"env"`
-	HTTPAddr          PresenceSummary       `json:"http.addr"`
-	DatabaseURL       PresenceSummary       `json:"database.url"`
-	OIDCIssuer        PresenceSummary       `json:"oidc.issuer"`
-	AuthBypassEnabled ScalarSummary[bool]   `json:"auth.bypass_enabled"`
-	WorkerInterval    ScalarSummary[string] `json:"worker.interval"`
-	WorkerSLAEval     ScalarSummary[string] `json:"worker.sla_evaluate_interval"`
-	WorkerSLAReminder ScalarSummary[string] `json:"worker.sla_reminder_cadence"`
+	SchemaVersion       ScalarSummary[int]    `json:"schema_version"`
+	Env                 ScalarSummary[string] `json:"env"`
+	HTTPAddr            PresenceSummary       `json:"http.addr"`
+	DatabaseURL         PresenceSummary       `json:"database.url"`
+	OIDCIssuer          PresenceSummary       `json:"oidc.issuer"`
+	OIDCClientID        ScalarSummary[string] `json:"oidc.client_id"`
+	OIDCClientSecret    PresenceSummary       `json:"oidc.client_secret_ref"`
+	OIDCRedirectURL     PresenceSummary       `json:"oidc.redirect_url"`
+	OIDCScopes          ScalarSummary[string] `json:"oidc.scopes"`
+	OIDCRolesClaim      ScalarSummary[string] `json:"oidc.roles_claim"`
+	OIDCRoleMappings    ScalarSummary[string] `json:"oidc.role_mappings"`
+	OIDCAudience        ScalarSummary[string] `json:"oidc.audience"`
+	OIDCSessionCookie   ScalarSummary[string] `json:"oidc.session_cookie_name"`
+	OIDCSessionTTL      ScalarSummary[string] `json:"oidc.session_ttl"`
+	AuthBypassEnabled   ScalarSummary[bool]   `json:"auth.bypass_enabled"`
+	AuthBypassPrincipal ScalarSummary[string] `json:"auth.bypass_principal"`
+	WorkerInterval      ScalarSummary[string] `json:"worker.interval"`
+	WorkerSLAEval       ScalarSummary[string] `json:"worker.sla_evaluate_interval"`
+	WorkerSLAReminder   ScalarSummary[string] `json:"worker.sla_reminder_cadence"`
 
 	NotifyP2Active    ScalarSummary[bool] `json:"notify.p2_active"`
 	NotifySMTPEnabled ScalarSummary[bool] `json:"notify.smtp.enabled"`
@@ -103,26 +123,43 @@ type PresenceSummary struct {
 	Source Source `json:"source"`
 }
 
+// roleMappingsState renders the roles-claim mapping as a stable, secret-free
+// descriptor: the number of mapped claim values (the mapping is configuration,
+// not a credential). An empty mapping (the default — fail closed) reports zero.
+func roleMappingsState(m map[string]string) string {
+	return strconv.Itoa(len(m)) + " mapping(s)"
+}
+
 // JSONSummary renders the provenance report for the CLI. A Configuration
 // built without Load reports every source as SourceDefault.
 func (c *Config) JSONSummary() JSONSummary {
 	return JSONSummary{
-		SchemaVersion:     ScalarSummary[int]{Value: c.SchemaVersion, Source: c.sourceOf("schema_version")},
-		Env:               ScalarSummary[string]{Value: c.Env, Source: c.sourceOf("env")},
-		HTTPAddr:          PresenceSummary{Set: true, Source: c.sourceOf("http.addr")},
-		DatabaseURL:       PresenceSummary{Set: true, Source: c.sourceOf("database.url")},
-		OIDCIssuer:        PresenceSummary{Set: true, Source: c.sourceOf("oidc.issuer")},
-		AuthBypassEnabled: ScalarSummary[bool]{Value: c.Auth.BypassEnabled, Source: c.sourceOf("auth.bypass_enabled")},
-		WorkerInterval:    ScalarSummary[string]{Value: c.Worker.Interval.String(), Source: c.sourceOf("worker.interval")},
-		WorkerSLAEval:     ScalarSummary[string]{Value: c.Worker.SLAEvaluateInterval.String(), Source: c.sourceOf("worker.sla_evaluate_interval")},
-		WorkerSLAReminder: ScalarSummary[string]{Value: c.Worker.SLAReminderCadence.String(), Source: c.sourceOf("worker.sla_reminder_cadence")},
-		NotifyP2Active:    ScalarSummary[bool]{Value: c.Notify.P2Active, Source: c.sourceOf("notify.p2_active")},
-		NotifySMTPEnabled: ScalarSummary[bool]{Value: c.Notify.SMTP.Enabled, Source: c.sourceOf("notify.smtp.enabled")},
-		NotifySMTPAddr:    PresenceSummary{Set: true, Source: c.sourceOf("notify.smtp.addr")},
-		NotifySMTPFrom:    PresenceSummary{Set: true, Source: c.sourceOf("notify.smtp.from")},
-		NotifySMTPTo:      PresenceSummary{Set: true, Source: c.sourceOf("notify.smtp.to")},
-		NotifyWebhookOn:   ScalarSummary[bool]{Value: c.Notify.Webhook.Enabled, Source: c.sourceOf("notify.webhook.enabled")},
-		NotifyWebhookURL:  PresenceSummary{Set: true, Source: c.sourceOf("notify.webhook.url")},
-		NotifyWebhookSec:  PresenceSummary{Set: true, Source: c.sourceOf("notify.webhook.secret")},
+		SchemaVersion:       ScalarSummary[int]{Value: c.SchemaVersion, Source: c.sourceOf("schema_version")},
+		Env:                 ScalarSummary[string]{Value: c.Env, Source: c.sourceOf("env")},
+		HTTPAddr:            PresenceSummary{Set: true, Source: c.sourceOf("http.addr")},
+		DatabaseURL:         PresenceSummary{Set: true, Source: c.sourceOf("database.url")},
+		OIDCIssuer:          PresenceSummary{Set: true, Source: c.sourceOf("oidc.issuer")},
+		OIDCClientID:        ScalarSummary[string]{Value: c.OIDC.ClientID, Source: c.sourceOf("oidc.client_id")},
+		OIDCClientSecret:    PresenceSummary{Set: true, Source: c.sourceOf("oidc.client_secret_ref")},
+		OIDCRedirectURL:     PresenceSummary{Set: true, Source: c.sourceOf("oidc.redirect_url")},
+		OIDCScopes:          ScalarSummary[string]{Value: strings.Join(c.OIDC.Scopes, " "), Source: c.sourceOf("oidc.scopes")},
+		OIDCRolesClaim:      ScalarSummary[string]{Value: c.OIDC.RolesClaim, Source: c.sourceOf("oidc.roles_claim")},
+		OIDCRoleMappings:    ScalarSummary[string]{Value: roleMappingsState(c.OIDC.RoleMappings), Source: c.sourceOf("oidc.role_mappings")},
+		OIDCAudience:        ScalarSummary[string]{Value: c.OIDC.Audience, Source: c.sourceOf("oidc.audience")},
+		OIDCSessionCookie:   ScalarSummary[string]{Value: c.OIDC.SessionCookieName, Source: c.sourceOf("oidc.session_cookie_name")},
+		OIDCSessionTTL:      ScalarSummary[string]{Value: c.OIDC.SessionTTL.String(), Source: c.sourceOf("oidc.session_ttl")},
+		AuthBypassEnabled:   ScalarSummary[bool]{Value: c.Auth.BypassEnabled, Source: c.sourceOf("auth.bypass_enabled")},
+		AuthBypassPrincipal: ScalarSummary[string]{Value: c.Auth.BypassPrincipal, Source: c.sourceOf("auth.bypass_principal")},
+		WorkerInterval:      ScalarSummary[string]{Value: c.Worker.Interval.String(), Source: c.sourceOf("worker.interval")},
+		WorkerSLAEval:       ScalarSummary[string]{Value: c.Worker.SLAEvaluateInterval.String(), Source: c.sourceOf("worker.sla_evaluate_interval")},
+		WorkerSLAReminder:   ScalarSummary[string]{Value: c.Worker.SLAReminderCadence.String(), Source: c.sourceOf("worker.sla_reminder_cadence")},
+		NotifyP2Active:      ScalarSummary[bool]{Value: c.Notify.P2Active, Source: c.sourceOf("notify.p2_active")},
+		NotifySMTPEnabled:   ScalarSummary[bool]{Value: c.Notify.SMTP.Enabled, Source: c.sourceOf("notify.smtp.enabled")},
+		NotifySMTPAddr:      PresenceSummary{Set: true, Source: c.sourceOf("notify.smtp.addr")},
+		NotifySMTPFrom:      PresenceSummary{Set: true, Source: c.sourceOf("notify.smtp.from")},
+		NotifySMTPTo:        PresenceSummary{Set: true, Source: c.sourceOf("notify.smtp.to")},
+		NotifyWebhookOn:     ScalarSummary[bool]{Value: c.Notify.Webhook.Enabled, Source: c.sourceOf("notify.webhook.enabled")},
+		NotifyWebhookURL:    PresenceSummary{Set: true, Source: c.sourceOf("notify.webhook.url")},
+		NotifyWebhookSec:    PresenceSummary{Set: true, Source: c.sourceOf("notify.webhook.secret")},
 	}
 }

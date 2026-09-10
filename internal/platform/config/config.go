@@ -56,9 +56,9 @@ const (
 
 // Config is the process configuration (schema v1).
 //
-// Keys that may carry credentials (database.url) or provider URLs
-// (oidc.issuer) are never rendered with their content — neither in
-// validation errors nor in Summary.
+// Keys that may carry credentials (database.url) or provider URLs/secrets
+// (oidc.issuer, oidc.client_secret_ref, oidc.redirect_url) are never rendered
+// with their content — neither in validation errors nor in Summary.
 type Config struct {
 	SchemaVersion int      `json:"schema_version"`
 	Env           string   `json:"env"` // local | demo | production
@@ -83,14 +83,48 @@ type Database struct {
 	URL string `json:"url"` // credentials are runtime-injected, never stored
 }
 
-// OIDC carries the OpenID Connect provider configuration.
+// OIDC carries the OpenID Connect provider configuration (ARCH-005 §2).
+//
+// Issuer, ClientSecretRef and RedirectURL are the URL/secret-capable members:
+// like oidc.issuer they are never rendered with their content — Summary and
+// JSONSummary report presence and provenance only. ClientID, Scopes,
+// RolesClaim, RoleMappings, Audience, SessionCookieName and SessionTTL are
+// non-secret descriptors and are rendered by value.
 type OIDC struct {
+	// Issuer is the OIDC issuer base URL (discovery root).
 	Issuer string `json:"issuer"`
+	// ClientID is the client registered at the issuer; the expected `aud`
+	// (unless Audience overrides) and the `azp` when present.
+	ClientID string `json:"client_id"`
+	// ClientSecretRef names the runtime-injected client secret (a reference,
+	// never the secret); presence-only in Summary.
+	ClientSecretRef string `json:"client_secret_ref"`
+	// RedirectURL is the browser callback URL registered at the issuer.
+	RedirectURL string `json:"redirect_url"`
+	// Scopes is the requested scope list; empty falls back to the default
+	// (openid profile email).
+	Scopes []string `json:"scopes"`
+	// RolesClaim is the token claim that carries external role values.
+	RolesClaim string `json:"roles_claim"`
+	// RoleMappings maps an external roles-claim value onto an internal role
+	// machine key. An unmapped value seeds no role (fail closed, ARCH-005 §2).
+	RoleMappings map[string]string `json:"role_mappings"`
+	// Audience is the expected `aud` claim value; empty defaults to ClientID.
+	Audience string `json:"audience"`
+	// SessionCookieName is the name of the browser session cookie.
+	SessionCookieName string `json:"session_cookie_name"`
+	// SessionTTL is the server-side session lifetime.
+	SessionTTL time.Duration `json:"session_ttl"`
 }
 
-// Auth carries authentication mode flags.
+// Auth carries authentication mode flags (ARCH-005 §4).
 type Auth struct {
-	BypassEnabled bool `json:"bypass_enabled"` // local dev principal, local mode only (TR-010)
+	// BypassEnabled activates the local dev principal. It is valid only in
+	// local mode and only on a loopback bind (TR-010, FR-029, ARCH-005 §4).
+	BypassEnabled bool `json:"bypass_enabled"`
+	// BypassPrincipal is the subject the bypass authenticates as
+	// (arch-005 §4.2); the seeded local multi-role user by default.
+	BypassPrincipal string `json:"bypass_principal"`
 }
 
 // Worker carries the background-worker configuration (WP-1a.10).
@@ -166,10 +200,17 @@ func Defaults() Config {
 			URL: "", // mandatory, no baked-in value
 		},
 		OIDC: OIDC{
-			Issuer: "", // mandatory, no baked-in value
+			Issuer:     "", // mandatory, no baked-in value
+			Scopes:     []string{"openid", "profile", "email"},
+			RolesClaim: "roles",
+			// A browser session lives a working day by default.
+			SessionCookieName: "risksignal_session",
+			SessionTTL:        8 * time.Hour,
 		},
 		Auth: Auth{
 			BypassEnabled: false, // secure default: bypass never on unless asked
+			// The seeded local multi-role user (migration 00009, ARCH-005 §4.2).
+			BypassPrincipal: "local-developer",
 		},
 		Worker: Worker{
 			// A fresh local worker reports a heartbeat and a completed
@@ -204,6 +245,42 @@ var envBindings = []struct {
 	{"http.addr", func(c *Config, v string) error { c.HTTP.Addr = strings.TrimSpace(v); return nil }},
 	{"database.url", func(c *Config, v string) error { c.Database.URL = strings.TrimSpace(v); return nil }},
 	{"oidc.issuer", func(c *Config, v string) error { c.OIDC.Issuer = strings.TrimSpace(v); return nil }},
+	{"oidc.client_id", func(c *Config, v string) error { c.OIDC.ClientID = strings.TrimSpace(v); return nil }},
+	{"oidc.client_secret_ref", func(c *Config, v string) error { c.OIDC.ClientSecretRef = strings.TrimSpace(v); return nil }},
+	{"oidc.redirect_url", func(c *Config, v string) error { c.OIDC.RedirectURL = strings.TrimSpace(v); return nil }},
+	{"oidc.audience", func(c *Config, v string) error { c.OIDC.Audience = strings.TrimSpace(v); return nil }},
+	{"oidc.roles_claim", func(c *Config, v string) error { c.OIDC.RolesClaim = strings.TrimSpace(v); return nil }},
+	{"oidc.session_cookie_name", func(c *Config, v string) error {
+		c.OIDC.SessionCookieName = strings.TrimSpace(v)
+		return nil
+	}},
+	{"oidc.scopes", func(c *Config, v string) error { c.OIDC.Scopes = splitCSV(v); return nil }},
+	{"oidc.role_mappings", func(c *Config, v string) error {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			c.OIDC.RoleMappings = nil
+			return nil
+		}
+		m := map[string]string{}
+		if err := json.Unmarshal([]byte(v), &m); err != nil {
+			// json.Unmarshal quotes content from the input; never surface it.
+			return fmt.Errorf("oidc.role_mappings: %s: must be a JSON object mapping a claim value to an internal role", envName("oidc.role_mappings"))
+		}
+		c.OIDC.RoleMappings = m
+		return nil
+	}},
+	{"oidc.session_ttl", func(c *Config, v string) error {
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("oidc.session_ttl: %s: must be a Go duration such as 8h", envName("oidc.session_ttl"))
+		}
+		c.OIDC.SessionTTL = d
+		return nil
+	}},
+	{"auth.bypass_principal", func(c *Config, v string) error {
+		c.Auth.BypassPrincipal = strings.TrimSpace(v)
+		return nil
+	}},
 	{"auth.bypass_enabled", func(c *Config, v string) error {
 		b, err := strconv.ParseBool(strings.TrimSpace(v))
 		if err != nil {
@@ -275,6 +352,23 @@ func envName(key string) string {
 	return envVarPrefix + strings.ToUpper(strings.ReplaceAll(key, ".", "_"))
 }
 
+// splitCSV splits a comma-separated list, trimming each element and dropping
+// the empty ones (the oidc.scopes env shape: "openid,profile,email").
+func splitCSV(s string) []string {
+	return trimEach(strings.Split(s, ","))
+}
+
+// trimEach trims every element and drops the empty ones.
+func trimEach(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // Load loads and validates the process configuration:
 // defaults -> optional JSON config file -> RISKSIGNAL_* environment
 // variables. It returns an error that joins every validation problem; each
@@ -282,20 +376,30 @@ func envName(key string) string {
 func Load() (*Config, error) {
 	cfg := Defaults()
 	prov := map[string]Source{
-		"schema_version":         SourceDefault,
-		"env":                    SourceDefault,
-		"http.addr":              SourceDefault,
-		"database.url":           SourceDefault,
-		"oidc.issuer":            SourceDefault,
-		"auth.bypass_enabled":    SourceDefault,
-		"notify.p2_active":       SourceDefault,
-		"notify.smtp.enabled":    SourceDefault,
-		"notify.smtp.addr":       SourceDefault,
-		"notify.smtp.from":       SourceDefault,
-		"notify.smtp.to":         SourceDefault,
-		"notify.webhook.enabled": SourceDefault,
-		"notify.webhook.url":     SourceDefault,
-		"notify.webhook.secret":  SourceDefault,
+		"schema_version":           SourceDefault,
+		"env":                      SourceDefault,
+		"http.addr":                SourceDefault,
+		"database.url":             SourceDefault,
+		"oidc.issuer":              SourceDefault,
+		"oidc.client_id":           SourceDefault,
+		"oidc.client_secret_ref":   SourceDefault,
+		"oidc.redirect_url":        SourceDefault,
+		"oidc.scopes":              SourceDefault,
+		"oidc.roles_claim":         SourceDefault,
+		"oidc.role_mappings":       SourceDefault,
+		"oidc.audience":            SourceDefault,
+		"oidc.session_cookie_name": SourceDefault,
+		"oidc.session_ttl":         SourceDefault,
+		"auth.bypass_enabled":      SourceDefault,
+		"auth.bypass_principal":    SourceDefault,
+		"notify.p2_active":         SourceDefault,
+		"notify.smtp.enabled":      SourceDefault,
+		"notify.smtp.addr":         SourceDefault,
+		"notify.smtp.from":         SourceDefault,
+		"notify.smtp.to":           SourceDefault,
+		"notify.webhook.enabled":   SourceDefault,
+		"notify.webhook.url":       SourceDefault,
+		"notify.webhook.secret":    SourceDefault,
 	}
 
 	if path := os.Getenv(envVarConfigFile); path != "" {
@@ -352,11 +456,21 @@ type fileDatabase struct {
 }
 
 type fileOIDC struct {
-	Issuer *string `json:"issuer"`
+	Issuer            *string            `json:"issuer"`
+	ClientID          *string            `json:"client_id"`
+	ClientSecretRef   *string            `json:"client_secret_ref"`
+	RedirectURL       *string            `json:"redirect_url"`
+	Scopes            *[]string          `json:"scopes"`
+	RolesClaim        *string            `json:"roles_claim"`
+	RoleMappings      *map[string]string `json:"role_mappings"`
+	Audience          *string            `json:"audience"`
+	SessionCookieName *string            `json:"session_cookie_name"`
+	SessionTTL        *string            `json:"session_ttl"` // Go duration, e.g. "8h"
 }
 
 type fileAuth struct {
-	BypassEnabled *bool `json:"bypass_enabled"`
+	BypassEnabled   *bool   `json:"bypass_enabled"`
+	BypassPrincipal *string `json:"bypass_principal"`
 }
 
 type fileWorker struct {
@@ -434,9 +548,55 @@ func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
 		cfg.OIDC.Issuer = strings.TrimSpace(*fc.OIDC.Issuer)
 		prov["oidc.issuer"] = SourceFile
 	}
+	if fc.OIDC != nil {
+		if fc.OIDC.ClientID != nil {
+			cfg.OIDC.ClientID = strings.TrimSpace(*fc.OIDC.ClientID)
+			prov["oidc.client_id"] = SourceFile
+		}
+		if fc.OIDC.ClientSecretRef != nil {
+			cfg.OIDC.ClientSecretRef = strings.TrimSpace(*fc.OIDC.ClientSecretRef)
+			prov["oidc.client_secret_ref"] = SourceFile
+		}
+		if fc.OIDC.RedirectURL != nil {
+			cfg.OIDC.RedirectURL = strings.TrimSpace(*fc.OIDC.RedirectURL)
+			prov["oidc.redirect_url"] = SourceFile
+		}
+		if fc.OIDC.Scopes != nil {
+			cfg.OIDC.Scopes = trimEach(*fc.OIDC.Scopes)
+			prov["oidc.scopes"] = SourceFile
+		}
+		if fc.OIDC.RolesClaim != nil {
+			cfg.OIDC.RolesClaim = strings.TrimSpace(*fc.OIDC.RolesClaim)
+			prov["oidc.roles_claim"] = SourceFile
+		}
+		if fc.OIDC.RoleMappings != nil {
+			cfg.OIDC.RoleMappings = *fc.OIDC.RoleMappings
+			prov["oidc.role_mappings"] = SourceFile
+		}
+		if fc.OIDC.Audience != nil {
+			cfg.OIDC.Audience = strings.TrimSpace(*fc.OIDC.Audience)
+			prov["oidc.audience"] = SourceFile
+		}
+		if fc.OIDC.SessionCookieName != nil {
+			cfg.OIDC.SessionCookieName = strings.TrimSpace(*fc.OIDC.SessionCookieName)
+			prov["oidc.session_cookie_name"] = SourceFile
+		}
+		if fc.OIDC.SessionTTL != nil {
+			d, err := time.ParseDuration(strings.TrimSpace(*fc.OIDC.SessionTTL))
+			if err != nil {
+				return fmt.Errorf("config file %s: oidc.session_ttl: invalid duration (expected a Go duration such as 8h)", path)
+			}
+			cfg.OIDC.SessionTTL = d
+			prov["oidc.session_ttl"] = SourceFile
+		}
+	}
 	if fc.Auth != nil && fc.Auth.BypassEnabled != nil {
 		cfg.Auth.BypassEnabled = *fc.Auth.BypassEnabled
 		prov["auth.bypass_enabled"] = SourceFile
+	}
+	if fc.Auth != nil && fc.Auth.BypassPrincipal != nil {
+		cfg.Auth.BypassPrincipal = strings.TrimSpace(*fc.Auth.BypassPrincipal)
+		prov["auth.bypass_principal"] = SourceFile
 	}
 	if fc.Worker != nil && fc.Worker.Interval != nil {
 		d, err := time.ParseDuration(strings.TrimSpace(*fc.Worker.Interval))

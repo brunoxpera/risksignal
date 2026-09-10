@@ -16,7 +16,17 @@ var envKeys = []string{
 	envName("http.addr"),
 	envName("database.url"),
 	envName("oidc.issuer"),
+	envName("oidc.client_id"),
+	envName("oidc.client_secret_ref"),
+	envName("oidc.redirect_url"),
+	envName("oidc.scopes"),
+	envName("oidc.roles_claim"),
+	envName("oidc.role_mappings"),
+	envName("oidc.audience"),
+	envName("oidc.session_cookie_name"),
+	envName("oidc.session_ttl"),
 	envName("auth.bypass_enabled"),
+	envName("auth.bypass_principal"),
 	envName("worker.interval"),
 }
 
@@ -504,4 +514,224 @@ func summaryLine(sum, key string) string {
 		}
 	}
 	return ""
+}
+
+// TestValidateBypassRequiresLoopback is the ARCH-005 §4.1 loopback-lock
+// matrix: with the bypass on in local mode, only a loopback http.addr may
+// start. An all-interfaces or non-loopback address is refused; a 127.0.0.0/8
+// or ::1 literal (and "localhost") is accepted.
+func TestValidateBypassRequiresLoopback(t *testing.T) {
+	cases := []struct {
+		addr string
+		ok   bool
+	}{
+		{"127.0.0.1:8080", true},
+		{"127.5.5.5:8080", true}, // any 127.0.0.0/8 address
+		{"[::1]:8080", true},
+		{"localhost:8080", true},
+		{"0.0.0.0:8080", false}, // all interfaces
+		{":8080", false},        // all interfaces
+		{"192.168.1.5:8080", false},
+		{"[2001:db8::1]:8080", false},
+		{"example.com:8080", false}, // hostname is not resolved
+	}
+	for _, tc := range cases {
+		t.Run(tc.addr, func(t *testing.T) {
+			cfg := Defaults()
+			cfg.Env = "local"
+			cfg.Auth.BypassEnabled = true
+			cfg.HTTP.Addr = tc.addr
+			cfg.Database.URL = "postgres://u@h/db"
+			cfg.OIDC.Issuer = "https://auth.local.example/"
+			errs := Validate(&cfg)
+			hasBypassErr := false
+			for _, e := range errs {
+				if strings.Contains(e.Error(), "auth.bypass_enabled") {
+					hasBypassErr = true
+				}
+			}
+			if !tc.ok && !hasBypassErr {
+				t.Errorf("Validate() accepted non-loopback %q with the bypass on, want rejection", tc.addr)
+			}
+			if tc.ok && hasBypassErr {
+				t.Errorf("Validate() rejected loopback %q with the bypass on: %v", tc.addr, errs)
+			}
+		})
+	}
+}
+
+// TestLoadBypassForbiddenOffLoopback proves the lock at the loader: local
+// mode + bypass on a non-loopback bind fails before the process binds.
+func TestLoadBypassForbiddenOffLoopback(t *testing.T) {
+	for _, addr := range []string{"0.0.0.0:8080", ":8080", "192.168.1.5:8080", "[2001:db8::1]:8080"} {
+		t.Run(addr, func(t *testing.T) {
+			env := validEnv()
+			env["auth.bypass_enabled"] = "true"
+			env["http.addr"] = addr
+			mustFail(t, "", env, "auth.bypass_enabled")
+		})
+	}
+}
+
+// TestLoadBypassAllowedOnLoopbackV6 proves a ::1 bind is accepted with the
+// bypass on in local mode.
+func TestLoadBypassAllowedOnLoopbackV6(t *testing.T) {
+	env := validEnv()
+	env["auth.bypass_enabled"] = "true"
+	env["http.addr"] = "[::1]:8080"
+	cfg := mustLoad(t, "", env)
+	if !cfg.Auth.BypassEnabled {
+		t.Error("Auth.BypassEnabled = false, want true")
+	}
+	if cfg.Auth.BypassPrincipal != "local-developer" {
+		t.Errorf("Auth.BypassPrincipal = %q, want the default local-developer", cfg.Auth.BypassPrincipal)
+	}
+}
+
+// TestLoadOIDCConfigExtension resolves every new oidc.* key from the
+// environment and asserts both the resolved values and the secrecy of the
+// provenance report (the secret reference and the provider URLs render as
+// presence only).
+func TestLoadOIDCConfigExtension(t *testing.T) {
+	secretRef := "vault://risksignal/oidc-client-secret"
+	env := validEnv()
+	env["oidc.client_id"] = "risksignal-web"
+	env["oidc.client_secret_ref"] = secretRef
+	env["oidc.redirect_url"] = "https://app.example/oidc/callback-secret"
+	env["oidc.scopes"] = "openid, profile ,email"
+	env["oidc.roles_claim"] = "realm_access.roles"
+	env["oidc.role_mappings"] = `{"sec":"security_analyst","adm":"administrator"}`
+	env["oidc.audience"] = "risksignal-api"
+	env["oidc.session_cookie_name"] = "rs_session"
+	env["oidc.session_ttl"] = "2h"
+
+	cfg := mustLoad(t, "", env)
+	if cfg.OIDC.ClientID != "risksignal-web" {
+		t.Errorf("OIDC.ClientID = %q", cfg.OIDC.ClientID)
+	}
+	if cfg.OIDC.ClientSecretRef != secretRef {
+		t.Errorf("OIDC.ClientSecretRef = %q", cfg.OIDC.ClientSecretRef)
+	}
+	if cfg.OIDC.RedirectURL != "https://app.example/oidc/callback-secret" {
+		t.Errorf("OIDC.RedirectURL = %q", cfg.OIDC.RedirectURL)
+	}
+	if strings.Join(cfg.OIDC.Scopes, ",") != "openid,profile,email" {
+		t.Errorf("OIDC.Scopes = %v, want [openid profile email]", cfg.OIDC.Scopes)
+	}
+	if cfg.OIDC.RolesClaim != "realm_access.roles" {
+		t.Errorf("OIDC.RolesClaim = %q", cfg.OIDC.RolesClaim)
+	}
+	if cfg.OIDC.RoleMappings["sec"] != "security_analyst" || cfg.OIDC.RoleMappings["adm"] != "administrator" {
+		t.Errorf("OIDC.RoleMappings = %v", cfg.OIDC.RoleMappings)
+	}
+	if cfg.OIDC.Audience != "risksignal-api" {
+		t.Errorf("OIDC.Audience = %q", cfg.OIDC.Audience)
+	}
+	if cfg.OIDC.SessionCookieName != "rs_session" {
+		t.Errorf("OIDC.SessionCookieName = %q", cfg.OIDC.SessionCookieName)
+	}
+	if cfg.OIDC.SessionTTL != 2*time.Hour {
+		t.Errorf("OIDC.SessionTTL = %s, want 2h", cfg.OIDC.SessionTTL)
+	}
+
+	sum := cfg.Summary()
+	for _, leak := range []string{secretRef, "callback-secret"} {
+		if strings.Contains(sum, leak) {
+			t.Errorf("Summary() leaks %q:\n%s", leak, sum)
+		}
+	}
+	for _, want := range []struct{ key, fragment string }{
+		{"oidc.client_id", "risksignal-web (source=env)"},
+		{"oidc.client_secret_ref", "set (source=env)"},
+		{"oidc.redirect_url", "set (source=env)"},
+		{"oidc.scopes", "openid profile email (source=env)"},
+		{"oidc.roles_claim", "realm_access.roles (source=env)"},
+		{"oidc.role_mappings", "2 mapping(s) (source=env)"},
+		{"oidc.audience", "risksignal-api (source=env)"},
+		{"oidc.session_cookie_name", "rs_session (source=env)"},
+		{"oidc.session_ttl", "2h0m0s (source=env)"},
+	} {
+		line := summaryLine(sum, want.key)
+		if !strings.Contains(line, want.fragment) {
+			t.Errorf("Summary() key %q line %q does not contain %q", want.key, line, want.fragment)
+		}
+	}
+}
+
+// TestLoadOIDCConfigFile proves the file layer carries the same keys,
+// including the role mapping object.
+func TestLoadOIDCConfigFile(t *testing.T) {
+	file := writeConfigFile(t, `{
+		"database": {"url": "postgres://file@127.0.0.1/db"},
+		"oidc": {
+			"issuer": "https://issuer.file.example/",
+			"client_id": "file-client",
+			"redirect_url": "https://file.example/cb",
+			"scopes": ["openid", "email"],
+			"roles_claim": "roles",
+			"role_mappings": {"analyst": "security_analyst"},
+			"session_cookie_name": "file_session",
+			"session_ttl": "1h"
+		}
+	}`)
+	cfg := mustLoad(t, file, nil)
+	if cfg.OIDC.ClientID != "file-client" {
+		t.Errorf("OIDC.ClientID = %q", cfg.OIDC.ClientID)
+	}
+	if cfg.OIDC.SessionTTL != time.Hour {
+		t.Errorf("OIDC.SessionTTL = %s, want 1h", cfg.OIDC.SessionTTL)
+	}
+	if cfg.OIDC.RoleMappings["analyst"] != "security_analyst" {
+		t.Errorf("OIDC.RoleMappings = %v", cfg.OIDC.RoleMappings)
+	}
+	if cfg.OIDC.SessionCookieName != "file_session" {
+		t.Errorf("OIDC.SessionCookieName = %q", cfg.OIDC.SessionCookieName)
+	}
+}
+
+// TestLoadInvalidRoleMappings rejects a non-object env value without echoing
+// it.
+func TestLoadInvalidRoleMappings(t *testing.T) {
+	env := validEnv()
+	env["oidc.role_mappings"] = "not-json"
+	err := mustFailErr(t, "", env, "oidc.role_mappings")
+	if strings.Contains(err.Error(), "not-json") {
+		t.Errorf("Load() error echoes the offending value: %v", err)
+	}
+}
+
+// TestValidateOIDCScopesAndSessionTTL is the pure-validation matrix for the
+// two non-secret oidc defaults: at least one scope, a positive session TTL.
+func TestValidateOIDCScopesAndSessionTTL(t *testing.T) {
+	t.Run("empty scopes", func(t *testing.T) {
+		cfg := Defaults()
+		cfg.Database.URL = "postgres://u@h/db"
+		cfg.OIDC.Issuer = "https://auth.local.example/"
+		cfg.OIDC.Scopes = nil
+		errs := Validate(&cfg)
+		if !errsContain(errs, "oidc.scopes") {
+			t.Errorf("Validate() errors %v do not reject empty oidc.scopes", errs)
+		}
+	})
+	t.Run("non-positive session ttl", func(t *testing.T) {
+		for _, ttl := range []time.Duration{0, -time.Minute} {
+			cfg := Defaults()
+			cfg.Database.URL = "postgres://u@h/db"
+			cfg.OIDC.Issuer = "https://auth.local.example/"
+			cfg.OIDC.SessionTTL = ttl
+			errs := Validate(&cfg)
+			if !errsContain(errs, "oidc.session_ttl") {
+				t.Errorf("Validate() errors %v do not reject oidc.session_ttl %s", errs, ttl)
+			}
+		}
+	})
+}
+
+func errsContain(errs []error, key string) bool {
+	for _, e := range errs {
+		if strings.Contains(e.Error(), key) {
+			return true
+		}
+	}
+	return false
 }
