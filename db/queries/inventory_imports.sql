@@ -33,17 +33,23 @@ SELECT *
 FROM inventory_imports
 WHERE id = @id;
 
--- MarkInventoryImportCommitted flips a staged record to 'committed' and
--- stamps committed_at from the injected clock — the terminal write of the
--- commit arm, run after the I3 CommitInventory transaction succeeded. The
--- `status = 'pending'` guard makes the mark idempotent at the statement
--- level: a second commit of an already-committed (or failed) record matches
--- zero rows and returns nothing, so the caller returns the stored result
--- without re-running the command (ARCH-006 §2.1: re-commit is a no-op).
+-- MarkInventoryImportCommitted flips a staged record to 'committed', stamps
+-- committed_at from the injected clock and — atomically with the mark, in one
+-- statement — populates the four commit-outcome counters (assets_/components_
+-- created/updated) from the I3 CommitInventoryResult (ARCH-006 §2.1; DEV-098
+-- review follow-up, wired by the WP-5b.03 commit arm). The `status = 'pending'`
+-- guard makes the mark idempotent at the statement level: a second commit of an
+-- already-committed (or failed) record matches zero rows and returns nothing
+-- (pgx.ErrNoRows), so the caller returns the stored result without re-running
+-- the command (ARCH-006 §2.1: re-commit is a no-op).
 -- name: MarkInventoryImportCommitted :one
 UPDATE inventory_imports
-SET status       = 'committed',
-    committed_at = @now
+SET status             = 'committed',
+    committed_at       = @now,
+    assets_created     = @assets_created,
+    assets_updated     = @assets_updated,
+    components_created = @components_created,
+    components_updated = @components_updated
 WHERE id = @id
   AND status = 'pending'
 RETURNING *;

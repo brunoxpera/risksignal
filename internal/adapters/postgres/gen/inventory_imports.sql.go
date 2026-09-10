@@ -159,27 +159,44 @@ func (q *Queries) ListInventoryImports(ctx context.Context) ([]InventoryImport, 
 
 const markInventoryImportCommitted = `-- name: MarkInventoryImportCommitted :one
 UPDATE inventory_imports
-SET status       = 'committed',
-    committed_at = $1
-WHERE id = $2
+SET status             = 'committed',
+    committed_at       = $1,
+    assets_created     = $2,
+    assets_updated     = $3,
+    components_created = $4,
+    components_updated = $5
+WHERE id = $6
   AND status = 'pending'
 RETURNING id, status, file, rows, error_count, warning_count, assets_created, assets_updated, components_created, components_updated, actor_id, correlation_id, created_at, committed_at
 `
 
 type MarkInventoryImportCommittedParams struct {
-	Now pgtype.Timestamptz
-	ID  pgtype.UUID
+	Now               pgtype.Timestamptz
+	AssetsCreated     int32
+	AssetsUpdated     int32
+	ComponentsCreated int32
+	ComponentsUpdated int32
+	ID                pgtype.UUID
 }
 
-// MarkInventoryImportCommitted flips a staged record to 'committed' and
-// stamps committed_at from the injected clock — the terminal write of the
-// commit arm, run after the I3 CommitInventory transaction succeeded. The
-// `status = 'pending'` guard makes the mark idempotent at the statement
-// level: a second commit of an already-committed (or failed) record matches
-// zero rows and returns nothing, so the caller returns the stored result
-// without re-running the command (ARCH-006 §2.1: re-commit is a no-op).
+// MarkInventoryImportCommitted flips a staged record to 'committed', stamps
+// committed_at from the injected clock and — atomically with the mark, in one
+// statement — populates the four commit-outcome counters (assets_/components_
+// created/updated) from the I3 CommitInventoryResult (ARCH-006 §2.1; DEV-098
+// review follow-up, wired by the WP-5b.03 commit arm). The `status = 'pending'`
+// guard makes the mark idempotent at the statement level: a second commit of an
+// already-committed (or failed) record matches zero rows and returns nothing
+// (pgx.ErrNoRows), so the caller returns the stored result without re-running
+// the command (ARCH-006 §2.1: re-commit is a no-op).
 func (q *Queries) MarkInventoryImportCommitted(ctx context.Context, arg MarkInventoryImportCommittedParams) (InventoryImport, error) {
-	row := q.db.QueryRow(ctx, markInventoryImportCommitted, arg.Now, arg.ID)
+	row := q.db.QueryRow(ctx, markInventoryImportCommitted,
+		arg.Now,
+		arg.AssetsCreated,
+		arg.AssetsUpdated,
+		arg.ComponentsCreated,
+		arg.ComponentsUpdated,
+		arg.ID,
+	)
 	var i InventoryImport
 	err := row.Scan(
 		&i.ID,
