@@ -129,7 +129,7 @@ const insertRiskSignal = `-- name: InsertRiskSignal :one
 
 INSERT INTO risk_signals (match_id, priority, owner, due_at, closed_at, rule_version, factors, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at
+RETURNING id, match_id, priority, status, owner, due_at, closed_at, version, rule_version, factors, created_at, auto_priority, override_reason, override_actor_id, override_at, escalated_at
 `
 
 type InsertRiskSignalParams struct {
@@ -175,6 +175,11 @@ func (q *Queries) InsertRiskSignal(ctx context.Context, arg InsertRiskSignalPara
 		&i.RuleVersion,
 		&i.Factors,
 		&i.CreatedAt,
+		&i.AutoPriority,
+		&i.OverrideReason,
+		&i.OverrideActorID,
+		&i.OverrideAt,
+		&i.EscalatedAt,
 	)
 	return i, err
 }

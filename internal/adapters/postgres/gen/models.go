@@ -72,6 +72,19 @@ type AuditEvent struct {
 	CorrelationID string
 }
 
+// Append-only signal timeline (ARCH-004 §2.2, ch. 12.3): no update/delete path; every comment is also an audit event (signal.commented) written in the same transaction
+type Comment struct {
+	ID pgtype.UUID
+	// The signal this comment belongs to
+	SignalID pgtype.UUID
+	// Author principal (opaque user id string until I5a resolves users)
+	ActorID string
+	// Length-limited free text (ch. 12.3); never edited or deleted
+	Body string
+	// Insert instant from the injected clock
+	CreatedAt pgtype.Timestamptz
+}
+
 // One component row per asset (ch. 6.1); vendor/product/version only in I1b (ARCH-001 §1), CPE/purl/digest arrive with I3
 type Component struct {
 	ID        pgtype.UUID
@@ -218,6 +231,27 @@ type Outbox struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+// Versioned, copy-on-write priority ruleset snapshot (ARCH-004 §1, ch. 7.1): a publish writes the whole P1..P4 snapshot at version = MAX(version)+1; a signal references exactly one snapshot via rule_version
+type PriorityRule struct {
+	ID pgtype.UUID
+	// Stable rule id, one of P1..P4 (the class the rule produces); UQ (rule_id, version) makes each snapshot row immutable
+	RuleID string
+	// Ruleset snapshot version, monotonic across all rules; the effective ruleset is MAX(version)
+	Version int32
+	// Bounded predicate tree (ARCH-004 §1.1): all_of / any_of groups over the closed op {eq,in,ge} · field {confidence,kev,cvss,epss,criticality,exposure} vocabulary — versioned data, never a scripting language
+	Definition []byte
+	// Disabled rules are inert (never deleted — audited config); a disabled P1 demotes to the next matching rule
+	Enabled bool
+	// Publish instant from the injected clock; the snapshot is effective from here on
+	EffectiveFrom pgtype.Timestamptz
+	// Why this ruleset changed (audited, ch. 13.2 "Konfigurationsänderung"); NULL allowed
+	Reason pgtype.Text
+	// Publisher principal (audited)
+	ActorID string
+	// Insert instant from the injected clock (publish time)
+	CreatedAt pgtype.Timestamptz
+}
+
 // Isolated parse/normalise failures (ch. 8.6 state machine, ARCH-002 §3): one row per offending record slice, positioned, attributed and re-addressable via payload_hash
 type Quarantine struct {
 	ID          pgtype.UUID
@@ -287,6 +321,16 @@ type RiskSignal struct {
 	// Contributing factors (confidence, method, cvss, kev, epss, criticality, exposure) so a recompute can detect changes (ch. 9.5)
 	Factors   []byte
 	CreatedAt pgtype.Timestamptz
+	// Computed priority preserved when a manual override moved priority (ADR-015 auto_* mirror); NULL = purely computed
+	AutoPriority pgtype.Text
+	// Mandatory reason of a manual override (ch. 9.3 "nur mit Begründung"); NULL = no override
+	OverrideReason pgtype.Text
+	// Actor of a manual override (audited); NULL = no override
+	OverrideActorID pgtype.Text
+	// Instant of a manual override (audited); NULL = no override
+	OverrideAt pgtype.Timestamptz
+	// First P1 escalation instant (ARCH-004 §4.4); NULL = never escalated
+	EscalatedAt pgtype.Timestamptz
 }
 
 // Checksum log of applied migrations (ADR-010): one row per applied migration, keyed by goose version
@@ -297,6 +341,25 @@ type SchemaMigrationLog struct {
 	AppliedAt pgtype.Timestamptz
 	// Duration of the migration run; NULL when the row was recovered after a crash
 	DurationMs pgtype.Int8
+}
+
+// Per-signal SLA reaction-time clocks (ARCH-004 §4.1, ch. 6.3): one clock per (signal_id, target); the effective deadline is deadline_at + paused_seconds + (now − paused_at while paused)
+type SlaClock struct {
+	ID pgtype.UUID
+	// The signal this clock tracks; UQ (signal_id, target) allows at most one live clock per target
+	SignalID pgtype.UUID
+	// Reaction-time target: notification | acknowledgement | assessment | decision (ch. 6.3)
+	Target string
+	// SLA start = commit time of new/upgraded/reopened signal (injected clock); reset on reopen
+	StartedAt pgtype.Timestamptz
+	// started_at + duration(priority, target), frozen at creation; tightened on a priority upgrade (ch. 9.4)
+	DeadlineAt pgtype.Timestamptz
+	// When the target was met; NULL = open — a fulfilled clock is never re-opened
+	FulfilledAt pgtype.Timestamptz
+	// Accumulated pause duration in seconds (pauses are not retroactive, ch. 9.4)
+	PausedSeconds int64
+	// Current pause start (non-NULL while paused) — needed to freeze remaining time during a pause; NULL while running
+	PausedAt pgtype.Timestamptz
 }
 
 // Configured sources feeding the pipeline; the I1b synthetic source is one row here (ARCH-001 §1)

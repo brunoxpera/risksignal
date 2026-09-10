@@ -362,7 +362,7 @@ func TestSignalContractAgainstSeededServer(t *testing.T) {
 	// seeded database is broken on purpose (risk_signals dropped) — nothing
 	// after this subtest reads, so it runs last.
 	t.Run("internal error renders 500 problem details", func(t *testing.T) {
-		if _, err := pool.Exec(ctx, "DROP TABLE risk_signals"); err != nil {
+		if _, err := pool.Exec(ctx, "DROP TABLE risk_signals CASCADE"); err != nil {
 			t.Fatalf("drop risk_signals to force an internal error: %v", err)
 		}
 		id := "00000000-0000-0000-0000-0000000000a1"
