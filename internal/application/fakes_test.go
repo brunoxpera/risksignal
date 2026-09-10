@@ -587,6 +587,18 @@ func (f *fakeOutboxRepo) Append(ctx context.Context, tx application.Tx, ev appli
 	return nil
 }
 
+// ExistsDedupeKey implements application.OutboxRepo on the fake store: the
+// pre-check of the exactly-once enqueuers — the key exists when the
+// committed store or the transaction's own staged rows already carry it
+// (mirroring the same-transaction visibility of the real EXISTS).
+func (f *fakeOutboxRepo) ExistsDedupeKey(ctx context.Context, tx application.Tx, dedupeKey string) (bool, error) {
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return false, err
+	}
+	return f.db.outboxEventExists(dedupeKey) || f.stagedOutboxEventExists(ftx, dedupeKey), nil
+}
+
 // stagedOutboxEventExists reports whether the transaction already staged an
 // outbox row with the dedupe key (the transaction's own uncommitted writes
 // are visible to itself, mirroring the unique index of the real schema).

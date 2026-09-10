@@ -40,6 +40,9 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/xpera/risksignal/internal/domain"
+	"github.com/xpera/risksignal/internal/platform/uuid"
 )
 
 // Full-import chunk vocabulary of the driver (ARCH-003 §6, DEV-067). The
@@ -66,24 +69,40 @@ const (
 // source (DEV-067, ARCH-003 §6): the resolved source row and its adapter,
 // like every other run use case. The driver is idempotent and resumable —
 // it opens from the source row's current cursor and stops when the cursor
-// reaches the clock's now.
+// reaches the clock's now. CorrelationID is the optional id linking the
+// matching.rebuild outbox row of the fan-in (empty generates one, like
+// the inventory commit).
 type FullImportSourceInput struct {
-	SourceID string
-	Adapter  SourcePort
+	SourceID      string
+	Adapter       SourcePort
+	CorrelationID string
 }
 
 // FullImportSourceResult reports one full-import run: Chunks is the number
 // of committed window steps, CursorAfter the watermark the last committed
-// step promoted into sources.cursor. Status failed with Meta.RateLimited
-// marks a rate-limited interruption (the run of the interrupted chunk is
-// recorded rate-limited, the cursor stays at the last committed chunk end
-// — re-invoke after RetryAfter); every other failure is returned as an
-// error.
+// step promoted into sources.cursor, MatchingJobsEnqueued the DEV-067
+// job-count metric — the number of matching jobs the fan-in enqueued.
+// Status failed with Meta.RateLimited marks a rate-limited interruption
+// (the run of the interrupted chunk is recorded rate-limited, the cursor
+// stays at the last committed chunk end — re-invoke after RetryAfter);
+// every other failure is returned as an error.
 type FullImportSourceResult struct {
-	Status      SourceRunStatus
-	Chunks      int
+	Status SourceRunStatus
+	// Chunks is the number of committed checkpointed windows of this run.
+	Chunks int
+	// CursorAfter is the watermark the last committed chunk promoted into
+	// sources.cursor (nil when no chunk committed).
 	CursorAfter json.RawMessage
 	Meta        FetchMeta
+	// MatchingJobsEnqueued is the matching-job count of the full import:
+	// exactly 1 when the single matching.rebuild fan-in appended its job,
+	// 0 when a rebuild for the current (rule_version, inventory_snapshot)
+	// pair was already in the outbox (the UQ dedupe — the rebuild is
+	// enqueued exactly once per pair, ADR-012). By construction ≤ 1 — one
+	// recomputation of the whole match set per full import, never one per
+	// CVE — which is the observable ≪-relationship of the DEV-067 metric
+	// against the imported CVE count.
+	MatchingJobsEnqueued int
 }
 
 // FullImportSource streams the whole history of an incremental source in
@@ -160,7 +179,94 @@ func (s *Service) FullImportSource(ctx context.Context, in FullImportSourceInput
 		result.Chunks++
 		result.CursorAfter = step.CursorAfter
 	}
+
+	if result.Status == SourceRunStatusSucceeded {
+		// Single-rebuild fan-in (ARCH-003 §6, DEV-067): when the walk
+		// reached the clock's now, the full import is complete and exactly
+		// one matching.rebuild is enqueued — the DEV-060/065 contract
+		// (payload MatchingRebuildPayload, dedupe key
+		// matching.rebuild:<rule_version>:<inventory_snapshot>), appended
+		// on its own transaction over the current inventory snapshot. The
+		// outbox UQ makes the append exactly-once per pair, so a resume
+		// that finalises an interrupted import re-appends nothing.
+		enqueued, err := s.appendFullImportRebuild(ctx, in.CorrelationID)
+		if err != nil {
+			return result, err
+		}
+		result.MatchingJobsEnqueued = enqueued
+	}
 	return result, nil
+}
+
+// appendFullImportRebuild enqueues the single matching.rebuild of a
+// completed full import (see FullImportSource): one transaction reads the
+// current inventory snapshot and the ruleset version counters, pre-checks
+// the ARCH-003 §5 dedupe key on the same transaction and appends the job —
+// a rebuild for the pair that is already in the outbox makes the append a
+// no-op, so the rebuild is enqueued exactly once per rule_version +
+// inventory_snapshot (ADR-012 point 4). It returns 1 when the append
+// inserted a row, 0 on the already-queued no-op.
+func (s *Service) appendFullImportRebuild(ctx context.Context, correlationID string) (int, error) {
+	const op = "full_import_source"
+
+	importID := uuid.New()
+	if correlationID == "" {
+		correlationID = uuid.New()
+	}
+	enqueued := 0
+	err := s.runTx(ctx, func(tx Tx) error {
+		now := s.clock.Now()
+		snap, err := s.inventory.InventorySnapshot(ctx, tx)
+		if err != nil {
+			return err
+		}
+		snapshotHash := inventorySnapshotHash(snap)
+		aliasVersion, decisionVersion, err := s.inventory.RuleVersions(ctx, tx)
+		if err != nil {
+			return err
+		}
+		ruleVersion, err := domain.RulesetVersion(aliasVersion, decisionVersion)
+		if err != nil {
+			return InfraError(op, err)
+		}
+		dedupeKey := MatchingRebuildDedupeKey(ruleVersion, snapshotHash)
+		// Exactly-once (ADR-012 point 4): a rebuild for the pair that is
+		// already in the outbox — committed earlier or staged by this very
+		// transaction — makes the append a pre-checked no-op, never a
+		// duplicate INSERT (which would raise the unique violation and
+		// abort the transaction).
+		alreadyQueued, err := s.outbox.ExistsDedupeKey(ctx, tx, dedupeKey)
+		if err != nil {
+			return err
+		}
+		if alreadyQueued {
+			return nil // the rebuild for this snapshot pair is already queued: exactly-once holds
+		}
+		payload, err := json.Marshal(MatchingRebuildPayload{
+			EventID:           uuid.New(),
+			Type:              EventTypeMatchingRebuild,
+			ImportID:          importID,
+			RuleVersion:       ruleVersion,
+			InventorySnapshot: snapshotHash,
+			OccurredAt:        now,
+			CorrelationID:     correlationID,
+		})
+		if err != nil {
+			return InfraError(op, err)
+		}
+		if err := s.outbox.Append(ctx, tx, OutboxEvent{
+			Type:        EventTypeMatchingRebuild,
+			Payload:     payload,
+			DedupeKey:   dedupeKey,
+			AvailableAt: now,
+			CreatedAt:   now,
+		}); err != nil {
+			return err
+		}
+		enqueued = 1
+		return nil
+	})
+	return enqueued, err
 }
 
 // fullImportLowerBound derives the window start of the first chunk

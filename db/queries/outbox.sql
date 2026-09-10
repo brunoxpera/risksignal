@@ -24,6 +24,18 @@ INSERT INTO outbox (type, payload, status, available_at, dedupe_key, created_at)
 VALUES (@type, @payload, 'pending', @available_at, @dedupe_key, @created_at)
 RETURNING *;
 
+-- OutboxDedupeKeyExists reports whether an outbox row with the dedupe key
+-- already exists — queued, claimed or terminal: the UQ (dedupe_key) spans
+-- the row's whole lifetime (ADR-012 point 4). The exactly-once enqueuers
+-- (the scheduler scan, the DEV-067 full-import fan-in) pre-check on the
+-- SAME transaction before they append: a duplicate INSERT would raise the
+-- unique violation and abort the whole transaction, so an idempotent
+-- re-enqueue is a pre-checked no-op, never a failed statement. The check
+-- runs on the caller's transaction and therefore sees the transaction's
+-- own uncommitted appends too.
+-- name: OutboxDedupeKeyExists :one
+SELECT EXISTS (SELECT 1 FROM outbox WHERE dedupe_key = @dedupe_key) AS exists;
+
 -- ClaimOutboxBatch claims the bounded batch of rows due for delivery and
 -- returns id, type, payload and the incremented attempts count of each
 -- claimed row. This is the ARCH-001 §2 drain statement: pending rows whose

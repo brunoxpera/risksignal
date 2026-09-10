@@ -315,6 +315,10 @@ func (f *jobOutboxRepo) Append(ctx context.Context, tx application.Tx, ev applic
 	return nil
 }
 
+func (f *jobOutboxRepo) ExistsDedupeKey(ctx context.Context, tx application.Tx, dedupeKey string) (bool, error) {
+	return f.db.outboxByDedupe(dedupeKey), nil
+}
+
 var _ application.OutboxRepo = (*jobOutboxRepo)(nil)
 
 type jobVulnRepo struct{ db *jobDB }

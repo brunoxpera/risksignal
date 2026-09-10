@@ -168,6 +168,26 @@ func (q *Queries) DeadLetterOutbox(ctx context.Context, arg DeadLetterOutboxPara
 	return result.RowsAffected(), nil
 }
 
+const outboxDedupeKeyExists = `-- name: OutboxDedupeKeyExists :one
+SELECT EXISTS (SELECT 1 FROM outbox WHERE dedupe_key = $1) AS exists
+`
+
+// OutboxDedupeKeyExists reports whether an outbox row with the dedupe key
+// already exists — queued, claimed or terminal: the UQ (dedupe_key) spans
+// the row's whole lifetime (ADR-012 point 4). The exactly-once enqueuers
+// (the scheduler scan, the DEV-067 full-import fan-in) pre-check on the
+// SAME transaction before they append: a duplicate INSERT would raise the
+// unique violation and abort the whole transaction, so an idempotent
+// re-enqueue is a pre-checked no-op, never a failed statement. The check
+// runs on the caller's transaction and therefore sees the transaction's
+// own uncommitted appends too.
+func (q *Queries) OutboxDedupeKeyExists(ctx context.Context, dedupeKey string) (bool, error) {
+	row := q.db.QueryRow(ctx, outboxDedupeKeyExists, dedupeKey)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const reclaimExpiredOutboxLeases = `-- name: ReclaimExpiredOutboxLeases :many
 UPDATE outbox SET
     status = 'claimed',

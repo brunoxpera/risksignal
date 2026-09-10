@@ -37,3 +37,21 @@ func (r *OutboxRepo) Append(ctx context.Context, tx application.Tx, ev applicati
 	})
 	return mapDBError(op, err)
 }
+
+// ExistsDedupeKey implements application.OutboxRepo: report whether an
+// outbox row with the dedupe key already exists on the caller's
+// transaction (queued, claimed or terminal — the UQ spans the row's whole
+// lifetime, ADR-012 point 4). The exactly-once enqueuers (the scheduler
+// scan, the DEV-067 full-import fan-in) pre-check on the same transaction
+// before appending: a duplicate INSERT would raise the unique violation
+// and abort the transaction, so an idempotent re-enqueue is a pre-checked
+// no-op.
+func (r *OutboxRepo) ExistsDedupeKey(ctx context.Context, tx application.Tx, dedupeKey string) (bool, error) {
+	const op = "outbox.exists_dedupe_key"
+
+	exists, err := r.q.WithTx(tx).OutboxDedupeKeyExists(ctx, dedupeKey)
+	if err != nil {
+		return false, mapDBError(op, err)
+	}
+	return exists, nil
+}

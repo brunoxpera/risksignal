@@ -77,7 +77,23 @@ type AuditRepo interface {
 // rollback proof. The UQ (dedupe_key) makes the append idempotent at the
 // schema level.
 type OutboxRepo interface {
+	// Append appends one pending outbox row on the caller's transaction.
+	// A row whose dedupe key already exists — committed earlier or staged
+	// by this very transaction — surfaces as a conflict Error (the schema
+	// raises the unique violation; the enqueuers that treat a duplicate as
+	// a no-op pre-check through ExistsDedupeKey on the same transaction,
+	// because a failed statement would abort the transaction).
 	Append(ctx context.Context, tx Tx, ev OutboxEvent) error
+
+	// ExistsDedupeKey reports whether an outbox row with the dedupe key
+	// already exists — queued, claimed or terminal (the UQ spans the
+	// row's whole lifetime, ADR-012 point 4). The check runs on the
+	// caller's transaction and sees its own uncommitted appends: the
+	// exactly-once enqueuers (the scheduler scan, the DEV-067 full-import
+	// fan-in) pre-check on the same transaction they would append on, so
+	// a duplicate re-enqueue is a no-op instead of a statement that fails
+	// and aborts the transaction.
+	ExistsDedupeKey(ctx context.Context, tx Tx, dedupeKey string) (bool, error)
 }
 
 // VulnerabilityRepo persists normalised vulnerabilities and their immutable
