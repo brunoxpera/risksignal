@@ -159,6 +159,24 @@ func (e Priority) Valid() bool {
 	}
 }
 
+// Defines values for SignalCommandRequestCommand.
+const (
+	Acknowledge      SignalCommandRequestCommand = "acknowledge"
+	OverridePriority SignalCommandRequestCommand = "override_priority"
+)
+
+// Valid indicates whether the value is a known member of the SignalCommandRequestCommand enum.
+func (e SignalCommandRequestCommand) Valid() bool {
+	switch e {
+	case Acknowledge:
+		return true
+	case OverridePriority:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SignalStatus.
 const (
 	Accepted      SignalStatus = "accepted"
@@ -321,6 +339,42 @@ type SignalAsset struct {
 	Type string `json:"type"`
 }
 
+// SignalCommandRequest One triage command on one signal (the I5a reference operation of the
+// API/CLI channel-parity proof). `acknowledge` moves a new signal to
+// in_review; `override_priority` replaces the effective priority and
+// requires a priority and a reason.
+type SignalCommandRequest struct {
+	// Command The command to apply.
+	Command SignalCommandRequestCommand `json:"command"`
+
+	// ExpectedVersion Optimistic-lock token the caller last read.
+	ExpectedVersion int `json:"expected_version"`
+
+	// Priority Urgency class of a signal (concept ch. 6.2, ch. 9.3); P1 is most urgent.
+	Priority *Priority `json:"priority,omitempty"`
+
+	// Reason Mandatory, non-blank justification for override_priority.
+	Reason *string `json:"reason,omitempty"`
+}
+
+// SignalCommandRequestCommand The command to apply.
+type SignalCommandRequestCommand string
+
+// SignalCommandResult The signal after a command was applied.
+type SignalCommandResult struct {
+	Command string `json:"command"`
+	Id      string `json:"id"`
+
+	// Priority Urgency class of a signal (concept ch. 6.2, ch. 9.3); P1 is most urgent.
+	Priority Priority `json:"priority"`
+
+	// Status Lifecycle state of a signal (ch. 6.2, ch. 6.3) — new, in_review, action_planned, resolved, accepted, not_affected.
+	Status SignalStatus `json:"status"`
+
+	// Version The optimistic-lock version after the command.
+	Version int `json:"version"`
+}
+
 // SignalList One page of the working-list read (ARCH-001 §4 listSignals).
 type SignalList struct {
 	// Data The signals of this page, priority ascending then created_at.
@@ -357,6 +411,9 @@ type ListSignalsParams struct {
 
 // RevealAuditEventActorJSONRequestBody defines body for RevealAuditEventActor for application/json ContentType.
 type RevealAuditEventActorJSONRequestBody = RevealActorRequest
+
+// SignalCommandJSONRequestBody defines body for SignalCommand for application/json ContentType.
+type SignalCommandJSONRequestBody = SignalCommandRequest
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -485,6 +542,38 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/signals/{signal_id} (the `GetSignal` operationId).
 	GetSignal(ctx context.Context, signalId string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SignalCommandWithBody Apply one triage command to a signal
+	//
+	// The I5a reference operation of the API/CLI channel-parity proof
+	// (ARCH-005 §8, NFR-013): one triage command on one signal. The
+	// authenticated identity resolved from the request context becomes the
+	// audit actor the use case authorises and stamps (actor_type = "user",
+	// actor_id = users.id); the permission gate lives inside the use case
+	// (signals.triage for acknowledge, signals.override for override_priority,
+	// deny-by-default), so a denied command writes nothing. Only these two
+	// commands are part of I5a; the full command surface is I5b.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/signals/{signal_id}/commands (the `SignalCommand` operationId).
+	SignalCommandWithBody(ctx context.Context, signalId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SignalCommand Apply one triage command to a signal
+	//
+	// The I5a reference operation of the API/CLI channel-parity proof
+	// (ARCH-005 §8, NFR-013): one triage command on one signal. The
+	// authenticated identity resolved from the request context becomes the
+	// audit actor the use case authorises and stamps (actor_type = "user",
+	// actor_id = users.id); the permission gate lives inside the use case
+	// (signals.triage for acknowledge, signals.override for override_priority,
+	// deny-by-default), so a denied command writes nothing. Only these two
+	// commands are part of I5a; the full command surface is I5b.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/signals/{signal_id}/commands (the `SignalCommand` operationId).
+	SignalCommand(ctx context.Context, signalId string, body SignalCommandJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // RevealAuditEventActorWithBody Reveal the actor identity of an audit event
@@ -571,6 +660,58 @@ func (c *Client) ListSignals(ctx context.Context, params *ListSignalsParams, req
 // Corresponds with GET /api/v1/signals/{signal_id} (the `GetSignal` operationId).
 func (c *Client) GetSignal(ctx context.Context, signalId string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetSignalRequest(c.Server, signalId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SignalCommandWithBody Apply one triage command to a signal
+//
+// The I5a reference operation of the API/CLI channel-parity proof
+// (ARCH-005 §8, NFR-013): one triage command on one signal. The
+// authenticated identity resolved from the request context becomes the
+// audit actor the use case authorises and stamps (actor_type = "user",
+// actor_id = users.id); the permission gate lives inside the use case
+// (signals.triage for acknowledge, signals.override for override_priority,
+// deny-by-default), so a denied command writes nothing. Only these two
+// commands are part of I5a; the full command surface is I5b.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/signals/{signal_id}/commands (the `SignalCommand` operationId).
+func (c *Client) SignalCommandWithBody(ctx context.Context, signalId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSignalCommandRequestWithBody(c.Server, signalId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SignalCommand Apply one triage command to a signal
+//
+// The I5a reference operation of the API/CLI channel-parity proof
+// (ARCH-005 §8, NFR-013): one triage command on one signal. The
+// authenticated identity resolved from the request context becomes the
+// audit actor the use case authorises and stamps (actor_type = "user",
+// actor_id = users.id); the permission gate lives inside the use case
+// (signals.triage for acknowledge, signals.override for override_priority,
+// deny-by-default), so a denied command writes nothing. Only these two
+// commands are part of I5a; the full command surface is I5b.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/signals/{signal_id}/commands (the `SignalCommand` operationId).
+func (c *Client) SignalCommand(ctx context.Context, signalId string, body SignalCommandJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSignalCommandRequest(c.Server, signalId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -752,6 +893,53 @@ func NewGetSignalRequest(server string, signalId string) (*http.Request, error) 
 	return req, nil
 }
 
+// NewSignalCommandRequest calls the generic SignalCommand builder with application/json body
+func NewSignalCommandRequest(server string, signalId string, body SignalCommandJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSignalCommandRequestWithBody(server, signalId, "application/json", bodyReader)
+}
+
+// NewSignalCommandRequestWithBody constructs an http.Request for the SignalCommand method, with any body, and a specified content type
+func NewSignalCommandRequestWithBody(server string, signalId string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "signal_id", signalId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/signals/%s/commands", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -853,6 +1041,38 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /api/v1/signals/{signal_id} (the `GetSignal` operationId).
 	GetSignalWithResponse(ctx context.Context, signalId string, reqEditors ...RequestEditorFn) (*GetSignalResponse, error)
+
+	// SignalCommandWithBodyWithResponse Apply one triage command to a signal
+	//
+	// The I5a reference operation of the API/CLI channel-parity proof
+	// (ARCH-005 §8, NFR-013): one triage command on one signal. The
+	// authenticated identity resolved from the request context becomes the
+	// audit actor the use case authorises and stamps (actor_type = "user",
+	// actor_id = users.id); the permission gate lives inside the use case
+	// (signals.triage for acknowledge, signals.override for override_priority,
+	// deny-by-default), so a denied command writes nothing. Only these two
+	// commands are part of I5a; the full command surface is I5b.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/signals/{signal_id}/commands (the `SignalCommand` operationId).
+	SignalCommandWithBodyWithResponse(ctx context.Context, signalId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SignalCommandResponse, error)
+
+	// SignalCommandWithResponse Apply one triage command to a signal
+	//
+	// The I5a reference operation of the API/CLI channel-parity proof
+	// (ARCH-005 §8, NFR-013): one triage command on one signal. The
+	// authenticated identity resolved from the request context becomes the
+	// audit actor the use case authorises and stamps (actor_type = "user",
+	// actor_id = users.id); the permission gate lives inside the use case
+	// (signals.triage for acknowledge, signals.override for override_priority,
+	// deny-by-default), so a denied command writes nothing. Only these two
+	// commands are part of I5a; the full command surface is I5b.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/signals/{signal_id}/commands (the `SignalCommand` operationId).
+	SignalCommandWithResponse(ctx context.Context, signalId string, body SignalCommandJSONRequestBody, reqEditors ...RequestEditorFn) (*SignalCommandResponse, error)
 }
 
 type RevealAuditEventActorResponse struct {
@@ -1041,6 +1261,82 @@ func (r GetSignalResponse) ContentType() string {
 	return ""
 }
 
+type SignalCommandResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SignalCommandResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SignalCommandResponse) GetJSON200() *SignalCommandResult {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r SignalCommandResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r SignalCommandResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r SignalCommandResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r SignalCommandResponse) GetJSON409() *ProblemDetails {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r SignalCommandResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r SignalCommandResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SignalCommandResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SignalCommandResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SignalCommandResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // RevealAuditEventActorWithBodyWithResponse Reveal the actor identity of an audit event
 //
 // The governed identity-reveal act of ADR-014 / ARCH-005 §7: resolve
@@ -1121,6 +1417,50 @@ func (c *ClientWithResponses) GetSignalWithResponse(ctx context.Context, signalI
 		return nil, err
 	}
 	return ParseGetSignalResponse(rsp)
+}
+
+// SignalCommandWithBodyWithResponse Apply one triage command to a signal
+//
+// The I5a reference operation of the API/CLI channel-parity proof
+// (ARCH-005 §8, NFR-013): one triage command on one signal. The
+// authenticated identity resolved from the request context becomes the
+// audit actor the use case authorises and stamps (actor_type = "user",
+// actor_id = users.id); the permission gate lives inside the use case
+// (signals.triage for acknowledge, signals.override for override_priority,
+// deny-by-default), so a denied command writes nothing. Only these two
+// commands are part of I5a; the full command surface is I5b.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/signals/{signal_id}/commands (the `SignalCommand` operationId).
+func (c *ClientWithResponses) SignalCommandWithBodyWithResponse(ctx context.Context, signalId string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SignalCommandResponse, error) {
+	rsp, err := c.SignalCommandWithBody(ctx, signalId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSignalCommandResponse(rsp)
+}
+
+// SignalCommandWithResponse Apply one triage command to a signal
+//
+// The I5a reference operation of the API/CLI channel-parity proof
+// (ARCH-005 §8, NFR-013): one triage command on one signal. The
+// authenticated identity resolved from the request context becomes the
+// audit actor the use case authorises and stamps (actor_type = "user",
+// actor_id = users.id); the permission gate lives inside the use case
+// (signals.triage for acknowledge, signals.override for override_priority,
+// deny-by-default), so a denied command writes nothing. Only these two
+// commands are part of I5a; the full command surface is I5b.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/signals/{signal_id}/commands (the `SignalCommand` operationId).
+func (c *ClientWithResponses) SignalCommandWithResponse(ctx context.Context, signalId string, body SignalCommandJSONRequestBody, reqEditors ...RequestEditorFn) (*SignalCommandResponse, error) {
+	rsp, err := c.SignalCommand(ctx, signalId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSignalCommandResponse(rsp)
 }
 
 // ParseRevealAuditEventActorResponse parses an HTTP response from a RevealAuditEventActorWithResponse call
@@ -1264,6 +1604,67 @@ func ParseGetSignalResponse(rsp *http.Response) (*GetSignalResponse, error) {
 	return response, nil
 }
 
+// ParseSignalCommandResponse parses an HTTP response from a SignalCommandWithResponse call
+func ParseSignalCommandResponse(rsp *http.Response) (*SignalCommandResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SignalCommandResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SignalCommandResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// RevealAuditEventActor Reveal the actor identity of an audit event
@@ -1275,6 +1676,9 @@ type ServerInterface interface {
 	// GetSignal Get a signal
 	// (GET /api/v1/signals/{signal_id})
 	GetSignal(w http.ResponseWriter, r *http.Request, signalId string)
+	// SignalCommand Apply one triage command to a signal
+	// (POST /api/v1/signals/{signal_id}/commands)
+	SignalCommand(w http.ResponseWriter, r *http.Request, signalId string)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -1410,6 +1814,32 @@ func (siw *ServerInterfaceWrapper) GetSignal(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// SignalCommand operation middleware
+func (siw *ServerInterfaceWrapper) SignalCommand(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "signal_id" -------------
+	var signalId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "signal_id", r.PathValue("signal_id"), &signalId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "signal_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SignalCommand(w, r, signalId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -1532,6 +1962,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/signals", wrapper.ListSignals)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/signals/{signal_id}", wrapper.GetSignal)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/signals/{signal_id}/commands", wrapper.SignalCommand)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/audit-events/{id}/reveal-actor", wrapper.RevealAuditEventActor)
 
 	return m
@@ -1730,6 +2161,99 @@ func (response GetSignal500JSONResponse) VisitGetSignalResponse(w http.ResponseW
 	return err
 }
 
+type SignalCommandRequestObject struct {
+	SignalId string `json:"signal_id"`
+	Body     *SignalCommandJSONRequestBody
+}
+
+type SignalCommandResponseObject interface {
+	VisitSignalCommandResponse(w http.ResponseWriter) error
+}
+
+type SignalCommand200JSONResponse SignalCommandResult
+
+func (response SignalCommand200JSONResponse) VisitSignalCommandResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SignalCommand400JSONResponse ProblemDetails
+
+func (response SignalCommand400JSONResponse) VisitSignalCommandResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SignalCommand403JSONResponse ProblemDetails
+
+func (response SignalCommand403JSONResponse) VisitSignalCommandResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SignalCommand404JSONResponse ProblemDetails
+
+func (response SignalCommand404JSONResponse) VisitSignalCommandResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SignalCommand409JSONResponse ProblemDetails
+
+func (response SignalCommand409JSONResponse) VisitSignalCommandResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SignalCommand500JSONResponse ProblemDetails
+
+func (response SignalCommand500JSONResponse) VisitSignalCommandResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// RevealAuditEventActor Reveal the actor identity of an audit event
@@ -1741,6 +2265,9 @@ type StrictServerInterface interface {
 	// GetSignal Get a signal
 	// (GET /api/v1/signals/{signal_id})
 	GetSignal(ctx context.Context, request GetSignalRequestObject) (GetSignalResponseObject, error)
+	// SignalCommand Apply one triage command to a signal
+	// (POST /api/v1/signals/{signal_id}/commands)
+	SignalCommand(ctx context.Context, request SignalCommandRequestObject) (SignalCommandResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -1867,70 +2394,114 @@ func (sh *strictHandler) GetSignal(w http.ResponseWriter, r *http.Request, signa
 	}
 }
 
+// SignalCommand operation middleware
+func (sh *strictHandler) SignalCommand(w http.ResponseWriter, r *http.Request, signalId string) {
+	var request SignalCommandRequestObject
+
+	request.SignalId = signalId
+
+	var body SignalCommandJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SignalCommand(ctx, request.(SignalCommandRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SignalCommand")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SignalCommandResponseObject); ok {
+		if err := validResponse.VisitSignalCommandResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
 // Stored as a slice of fixed-width chunks rather than one concatenated
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"7FpdbiNHkr5KoGYBS0CRolrqGZj9pGnbYwHttaDu3n1wGexkZZDMVlZkOTOLFMcgsIfYO/gePsqeZJF/",
-	"VUWxKHYPPPYuMC8CyfyLjPji70v9nJWqqhUhWZNNf85MucKK+Y+vFS0ERyrRfeNoSi1qKxRl0+wepWBz",
-	"IYXdglqAXSGsG0mo448jq0btxsCMEUuqkGwOHLVYI4eFVpVfVzFbrqBCu1Iczm6+uh9NLl+ej7M8Q2qq",
-	"bPpDthLLVZZnFXLRVFmeSbXJ8owUYfZjntltjdk0M1YLWma7PHuthRUlc2IcCv7XxghCY6DsZqUbMGPQ",
-	"wlmpqMTaQrkaw5/HL/ZESauyPElFSldMtlI19EBqQ4OCff1YK9PoAXWmkX1JrPJfBFnUdEqyNCvL40cv",
-	"lDBKMov8hGTfORt8501wKNy3anNoYNgwE0yHPAnaGbw14ys/sGikjBYeSeRg0PZFx0dW2pmDmhULgTrL",
-	"s1KRZYJQz7hYonG3YlIwMwtz16iNEy7PSkaKnEVmtVa8Ke1MM1pilmfpe0MlardZf5Uiq5WUyGdhW0Vy",
-	"G3bjgjOL3rAzf79Bhd1pofQgwN7rJVK5hVIyY5w9GTjwM3lgvtx/+HJ8df4K7i5BGKiUsdC4Dfb0c3eZ",
-	"5dndC/fnyv25PiKSmkusvkLLhDQDLvvNa/jy+uVfoA4TgfuZY7jHxrC5RGClVsYArlFv4ebuFlBrpafe",
-	"hNeTSUHuNgSC1kwKDhp/atDYPI5fQxiOOEu3ZsT9hCUSalEW9HIyaWfiY42lRQ4JsuHIHJiUUDKtt4KW",
-	"fnk8rKBSaY2SuUuB4PtKvXwxvjofFxSsX6O2Ar0meotmgg+FM787nNw8BynoIQmVNBnxb1CvUYNUSzPO",
-	"BiwUFD7gYE3FaKSRcW8GfKwloyCEqbEUC1GGI4QBVZaN1i4oDx4hyFg2GLHf39+CxgX6tRCdrVVve86J",
-	"/Y1lthkA17fv3t1BGIRS8WhuF3lgvu0rZ6H0MxdxMFiididZYeXANd6ulLY5rPZVZpqqYroN5K1dtvXw",
-	"NcIPn6ei/qavoMjYXDV2OpeMHooMNiskINUz2LZGYHUtBQ6hYZdnDtJCI3cu7kfTpVs150+B2/m9mn/E",
-	"0rq73OMambwprdIRxoc3e7dCmCveKmip1qgJnQ+7xS5yV85RY9y+Pp/G1EycWaW3BZGikb8rfGyMC9Nl",
-	"AGjcMCjLbkGjUbJxQ0N+qJEZRYfyfZcOyuHEQd3+r0BjqTRHXpCgiDG5GLGGiye58vLKJUsvz/NmiPId",
-	"VzNyr+hhDavGlqrCEPSDZsfwjdLAoDGogbml3S1cFZT0VtCZmzIT/MI0/kz3kQtTS7adEavwHIQBg9YH",
-	"VGFmfkdhwOoGX3m3YgWZrbFYXThfEyXGA3uTF0wazEGyOYb4KtB4gfzMLwyoDRUUhlPgbk27ECi5AaYR",
-	"qJFyyL5+m9mwdzkNWaaXaF2GIfuFSQpxnuKvn0O4ACgN8Q7nw5G0p5jhk1oNx6ngpsKZEzz4am2w4Yq2",
-	"lTDI3YFehR5+nbF6p/+Qjs8zt0n24y7P/D0GE0oQISAGAiLTpV1eaRrBh28WjXW443+u0K4wwCeqMajP",
-	"FWIJYMR9gk4Wc0NJEb3T5kpJZOSO86Y+POyrqDQ/PAV7XKER0EX23qAu6E9FM5lclcZF6ZHg/hsWmQOe",
-	"nLPyIfjGvu612pxH7XeazwuKWw9hOiA14lg5vWyEwUEPz7POoU5ARRjToB791DDp6lAO+BirkrhFxM8/",
-	"gJTo3KcESFWQm27GDin/2IFPwlqL07zvoR3YEg6G4t5bX8YdCv49IbT5VwvzEAu+HD4q4VLLRtgVCGti",
-	"M+OwGUvy8WHccFPch3/TuMim2Z8uuq70IrakF0GSGz9152v4Xnv63MJeI+vWaWTWFf52uEa+urr6Et6/",
-	"ew1+oks9VlRoLKtqOBP0MRSspVTlg7fBwjWANptmnFkcublDICzXeNT+oYUUf0f+pMfqWqIccLwcw+v/",
-	"+Hr0YvLiejSZTC6HI2ODp2/29s0NcGRcCsJXPphDQ1ZI72+3137cX9CcuOAQ1IduGUzXu89zIdB3XYPK",
-	"uu3Wx3LAzwW7YjaCC3koL1PP9cwxbbv7HHb6nfHOwbbr+55b1vaHu7YR/TR438XJe7X26WVvw1wf7Xwp",
-	"7JYdXDk1wIfOXFtRCWNFOXJmB6sekF6BsUw7B7Zw6f13qdXGgKLYIpYr12oPle9P4o+PPK1ZW2foqXOv",
-	"5G29tTVSp8Tugnue3N3teAy7SUHm0ANjyBLkAqXS2xiz9rr3m/vX344mk0v49ZfrMH5+GMjKfe7p2ajU",
-	"m+pqiR459NyylkQ64mr+lp/oaal8+sT+KGztxmI4Cj3dbF3l0BE2omJLhLO1Ktm8ka4rC7Dx+eD26vx0",
-	"M+Sh4WXLU2PU12tPV8eN/UYYO5y0aideDB8bpV0zP5LCWJ/NnpjZ/R72MwPG5syyYTwFzJhwjDD+zBwS",
-	"2oGZEonHxpKgw7E7Q1isPtHrO1NlTGvmcUT4aGdlo81Ql/J9zX5qEMJwUoJb4SWMqUCFZkoyE37+jELD",
-	"a2RfhuMmuuvi4lGPbK+eaodnfDLOGDBULwIPxETiSh8ZasPl84CNe/Sj1Olw9PYIlfJGLLDclhI9n4L7",
-	"F96jDv88vjqH//mv/wbCTQ6CZhrXwn1kpScMasmIkOdtgelGXFPsPpGyM7ZY+GqmTzYSbjyFHDcLJWNv",
-	"tyzP0nZ+LOzn+dJuwwGCcufZqYUaIt8Y9/FDs2Bfh757YR5i1bBh0jNu5gElWkVwdns5DwxFQQFlo5ot",
-	"BXm66dClUyNrBC0ljqIq3dAY3vk90tmpIyYFGy2c7mvUvgY0Xs9xabSyJwlD+/z6zW1BHzhW6gPUzK78",
-	"bHcuKXgbWlokXitB1ryCubIr30ZzlGLuTsAOygX9+st1IisCB5b1lHFzd9tD1zSbjC/HEwcqVSOxWmTT",
-	"7Mr/lGdOEI+vC1aLi/Xlhe9DR74ZMBc/C767CC3qiCVOo1bH2KOWMUrN5SishWizSBzBBcSLvIRff/nL",
-	"NEGvIEZP+uAeJcKWTJCxvdeO1AOBDcw08YI02kbTHicxhlvrbMBgwcqVFKXrkG8ebA7kShRgPoKPHJDB",
-	"CI4FoUeot4/bqGRSooaqMRZWSnL44IUch8vN0jkf4OzG/a40XBQUAxd8vyHU4J4O0nk3vBIkjNXMdWg5",
-	"sI5C64itggLN5ARPUSRvUdoRXAGDxvdQnpeJsiWhZolg+NDXLDCrKpcq5XYMN0+axoLO9tvpc1gxj/e0",
-	"KViVbOZFCkrvCeE7RbczRxKBOXnyIJDkJmVXgpYByq0n3XLv8p6zdFJ/7YQOpJqDrGYVWtQmm/5wUH70",
-	"LjlY3wg3y6E+lQ/TUEp0odrqBvP4xjkU1n8Mk9HYvyq+DS8HZJG8U3gyN7CRFx8jjdlt9Vy2HqBod7vd",
-	"U8H8D6ZWZELWejGZ/MYSJPbSH/4cD5HA4HNPj5SBQU4mMYZ+9j7gnPF3eXb9G17lyTvX0bsELAqPw5j3",
-	"QiwxsBRrpKn3Tum6W+QtrHJHo1bCuGRxEXjo6K1KhzermunwXOYIdfd6Rhw1crcvI7j/5nVBA89ssFkp",
-	"g+mLQ2fIHGqxiKXgmskGW31d/c76Yo0rRa07AjnUWlApaiahYluvQHxEXQqDbRQ6jJAcaTuab0ccF6yR",
-	"dgopZLo4EmNmQV3QPPfpN8WRLngoi/3Y4dVx/Tuq49/VXjzFR2Gs6R6uBB87mV7+rpB+f+ypFM6cYPjI",
-	"qtrnSWhIIytXHqGcWTZnzmjOCrBgIry+t68kPlLnsFmJcgXuQTyAcrNSMvHXBTneNtqqZI3BmOsksnUE",
-	"cegDp3vPZBHpwhTUe/5tpR8F6c2K1ehbQ9VYYGmVf2ooaO8R52V8w9n1SY6YSbo3jP3YtVdz+JWpFood",
-	"mrPMcogVeP2krsxhIaR11JwcbBv3npsm4xd5QfHj9fkYYg8JRmnrHkQHOsGzu0tYCG3seR66wvm2oK4z",
-	"BBZVHYKYFTjXyB6CWXxLi7RGqWoEJjdsa1IxWxCDXj82hZoZA8KCMys0FEgc/z8cCwxkWq8lzH1LWFCF",
-	"jMx+WxhfF5j7D5ChHP+m651PZfbvSW4Pe+ako7O7y9HddZfhf2rQ0z8xxfc5pE/0trhgt8uflURQ5BJ9",
-	"pzaG28t5O8Z0q+jC9UxFdky+ltj6NOn2+bxDCb9jj6JqqmACI/6Ox86VohJ279gYmLPpi4mj4/w+2fRy",
-	"Mhki8I5QB9EhhKLEIvh/5GJQu35RNYHr+ML0MXdMwjCanSzI/kk1UY8oGoi4Ny1RFE0+/j9cyJB7ex6p",
-	"xahj3QpqHcjFWY+nGMNy3xdVwrpVRnCEHy5zuJxMfgzVT1sUJZ5IAwNvu1CkhDifHBrmIkSwkhEpW/gC",
-	"CYcKIzhVFxV0tDB6wvVcTyZQsboWtDyPRcL/g4RcUMrIn51PC2oTKnx2Pi3IJ1T4hHzq3CEhfihhXvwc",
-	"PswE3x1Nnvft/+X4ucnUZ05wfBR2VGphUbsg4rJnDn3bnk9DxRDXPn1N9M8I+f5DWd7jCT1V4On5oaT0",
-	"N4w56VRKeu7FaqDPbJXy+e3mPzW6nYgqyKOa/6Dg1qotsGZdTEnRDjYo5SiGo84YBUVrfGKU+aP6iIjh",
-	"py1Ee+3xvwLXbxW4/oa25cndvXf/OwA=",
+	"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",
+	"+uoeI7sl2+Pj/w4A",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

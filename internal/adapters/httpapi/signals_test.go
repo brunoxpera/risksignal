@@ -92,7 +92,7 @@ func newSignalAPI(t *testing.T, query SignalsQuery) http.Handler {
 	t.Helper()
 	logger, _ := testLogger(t)
 	mux := http.NewServeMux()
-	RegisterAPIRoutes(mux, NewAPIHandler(query, nil, logger))
+	RegisterAPIRoutes(mux, NewAPIHandler(query, nil, nil, logger))
 	return NewHandler(mux, logger)
 }
 
@@ -456,7 +456,7 @@ func TestGetSignalInfraErrorIsGeneric500(t *testing.T) {
 	logger, logBuf := testLogger(t)
 	fake := &fakeSignals{getErr: errors.New("database connection refused")}
 	mux := http.NewServeMux()
-	RegisterAPIRoutes(mux, NewAPIHandler(fake, nil, logger))
+	RegisterAPIRoutes(mux, NewAPIHandler(fake, nil, nil, logger))
 	h := NewHandler(mux, logger)
 
 	rec := getWithRequestID(t, h, "/api/v1/signals/00000000-0000-0000-0000-0000000000a1", "infra-7")

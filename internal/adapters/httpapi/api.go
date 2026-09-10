@@ -22,6 +22,7 @@ import (
 type apiHandlers struct {
 	*signalsHandler
 	auditRevealHandler
+	signalCommandHandler
 }
 
 // Compile-time proof that the composed handler implements every generated
@@ -38,7 +39,7 @@ var _ gen.StrictServerInterface = (*apiHandlers)(nil)
 // is a programming error and panics here, at construction time, like
 // application.NewService does; a nil reveal leaves the reveal route answering
 // a 500 (a composition root that does not serve it).
-func NewAPIHandler(query SignalsQuery, reveal AuditReveal, logger *slog.Logger) gen.ServerInterface {
+func NewAPIHandler(query SignalsQuery, reveal AuditReveal, commands SignalCommands, logger *slog.Logger) gen.ServerInterface {
 	if query == nil {
 		panic("httpapi: NewAPIHandler: query must not be nil")
 	}
@@ -46,8 +47,9 @@ func NewAPIHandler(query SignalsQuery, reveal AuditReveal, logger *slog.Logger) 
 		panic("httpapi: NewAPIHandler: logger must not be nil")
 	}
 	h := &apiHandlers{
-		signalsHandler:     &signalsHandler{query: query, logger: logger},
-		auditRevealHandler: auditRevealHandler{reveal: reveal, logger: logger},
+		signalsHandler:       &signalsHandler{query: query, logger: logger},
+		auditRevealHandler:   auditRevealHandler{reveal: reveal, logger: logger},
+		signalCommandHandler: signalCommandHandler{commands: commands, logger: logger},
 	}
 	return gen.NewStrictHandlerWithOptions(h, []gen.StrictMiddlewareFunc{recordRequestPath},
 		gen.StrictHTTPServerOptions{

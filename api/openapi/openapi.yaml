@@ -142,6 +142,83 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/signals/{signal_id}/commands:
+    post:
+      operationId: signalCommand
+      summary: Apply one triage command to a signal
+      description: |
+        The I5a reference operation of the API/CLI channel-parity proof
+        (ARCH-005 §8, NFR-013): one triage command on one signal. The
+        authenticated identity resolved from the request context becomes the
+        audit actor the use case authorises and stamps (actor_type = "user",
+        actor_id = users.id); the permission gate lives inside the use case
+        (signals.triage for acknowledge, signals.override for override_priority,
+        deny-by-default), so a denied command writes nothing. Only these two
+        commands are part of I5a; the full command surface is I5b.
+      parameters:
+        - name: signal_id
+          in: path
+          required: true
+          description: Signal identifier (uuid).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignalCommandRequest'
+      responses:
+        '200':
+          description: The signal after the command was applied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignalCommandResult'
+        '400':
+          description: |
+            The request is not acceptable as given: an unknown command, a
+            missing/blank reason for an override, an out-of-vocabulary
+            priority or an unparsable body. Rendered as an RFC 9457 problem
+            detail; nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: |
+            The authenticated principal may not exercise the command's
+            permission (deny-by-default: the Administrator holds no triage or
+            override right). The denied request wrote nothing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No signal exists for this signal_id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: |
+            The command conflicts with the signal's current state: a stale
+            expected_version or a transition the current status does not
+            allow. Nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error (for example an unreachable database).
+            The cause never leaves the server: the problem detail is the
+            generic internal-error shape without a detail field (concept
+            ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v1/audit-events/{id}/reveal-actor:
     post:
       operationId: revealAuditEventActor
@@ -317,6 +394,53 @@ components:
         next_cursor:
           type: [string, 'null']
           description: Opaque cursor of the next page; null on the last page.
+    # --- I5a reference command (ARCH-005 §8 channel parity) ---------------
+    SignalCommandRequest:
+      type: object
+      description: |
+        One triage command on one signal (the I5a reference operation of the
+        API/CLI channel-parity proof). `acknowledge` moves a new signal to
+        in_review; `override_priority` replaces the effective priority and
+        requires a priority and a reason.
+      required:
+        - command
+        - expected_version
+      properties:
+        command:
+          type: string
+          description: The command to apply.
+          enum: [acknowledge, override_priority]
+        expected_version:
+          type: integer
+          minimum: 1
+          description: Optimistic-lock token the caller last read.
+        priority:
+          $ref: '#/components/schemas/Priority'
+        reason:
+          type: string
+          description: Mandatory, non-blank justification for override_priority.
+    SignalCommandResult:
+      type: object
+      description: The signal after a command was applied.
+      required:
+        - id
+        - command
+        - status
+        - priority
+        - version
+      properties:
+        id:
+          type: string
+        command:
+          type: string
+        status:
+          $ref: '#/components/schemas/SignalStatus'
+        priority:
+          $ref: '#/components/schemas/Priority'
+        version:
+          type: integer
+          description: The optimistic-lock version after the command.
+
     # --- Enum vocabularies (full domain sets since I4, ARCH-001 §4) --------
     Priority:
       type: string

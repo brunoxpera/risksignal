@@ -168,13 +168,19 @@ func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (ht
 	gate.Mount(mux, "GET /version", "", httpapi.VersionHandler(buildinfo.Current()))
 
 	svc := newSignalService(pool)
-	// The I1b signal reads require signals.read and the I5a identity reveal
-	// requires audit.reveal_identity (ARCH-005 §5, §7); each declaration is
+	// The I1b signal reads require signals.read, the I5a identity reveal
+	// requires audit.reveal_identity (ARCH-005 §5, §7) and the I5a reference
+	// command requires signals.triage/signals.override; each declaration is
 	// bound at registration through the gate.
 	gate.Declare("GET /api/v1/signals", domain.PermissionSignalsRead)
 	gate.Declare("GET /api/v1/signals/{signal_id}", domain.PermissionSignalsRead)
 	gate.Declare("POST /api/v1/audit-events/{id}/reveal-actor", domain.PermissionAuditRevealIdentity)
-	httpapi.RegisterAPIRoutes(gate.Decorate(mux), httpapi.NewAPIHandler(svc, svc, logger))
+	// The I5a reference command endpoint (ARCH-005 §8) serves acknowledge
+	// (signals.triage) and override_priority (signals.override); the
+	// declaration documents the triage permission, the finer override gate
+	// lives inside the use case (the gate of record).
+	gate.Declare("POST /api/v1/signals/{signal_id}/commands", domain.PermissionSignalsTriage)
+	httpapi.RegisterAPIRoutes(gate.Decorate(mux), httpapi.NewAPIHandler(svc, svc, svc, logger))
 
 	return httpapi.NewHandlerWithAuth(mux, logger, auth), nil
 }
@@ -262,7 +268,15 @@ func newSignalService(pool *pgxpool.Pool) *application.Service {
 		Components:      repo.NewComponentRepo(q),
 		Inventory:       repo.NewInventoryRepo(q),
 		Users:           repo.NewUserRepo(q),
-		Clock:           clock.RealClock{},
+		// The I5a reference command endpoint (ARCH-005 §8) drives the I4
+		// triage commands, so the server composition root wires the triage/
+		// SLA/priority ports the use cases author and persist through.
+		SignalTriage:  repo.NewSignalRepo(q),
+		Comments:      repo.NewCommentRepo(q),
+		SlaClocks:     repo.NewSlaClockRepo(q),
+		PriorityRules: repo.NewPriorityRuleRepo(q),
+		FactorSource:  repo.NewPriorityFactorRepo(q),
+		Clock:         clock.RealClock{},
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)
 		},

@@ -57,7 +57,7 @@ func newAuditAPI(t *testing.T, reveal AuditReveal, id domain.Identity) http.Hand
 	t.Helper()
 	logger, _ := testLogger(t)
 	mux := http.NewServeMux()
-	RegisterAPIRoutes(mux, NewAPIHandler(&fakeSignals{}, reveal, logger))
+	RegisterAPIRoutes(mux, NewAPIHandler(&fakeSignals{}, reveal, nil, logger))
 	auth := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			next.ServeHTTP(w, r.WithContext(WithIdentity(r.Context(), id)))
@@ -200,7 +200,7 @@ func TestRevealEndpointResolveActorForbidden(t *testing.T) {
 func TestRevealEndpointMissingIdentityForbidden(t *testing.T) {
 	logger, _ := testLogger(t)
 	mux := http.NewServeMux()
-	RegisterAPIRoutes(mux, NewAPIHandler(&fakeSignals{}, &fakeReveal{}, logger))
+	RegisterAPIRoutes(mux, NewAPIHandler(&fakeSignals{}, &fakeReveal{}, nil, logger))
 	h := NewHandler(mux, logger) // no identity middleware
 
 	rec := postReveal(t, h, "/api/v1/audit-events/audit-1/reveal-actor", `{"reason":"x"}`, "reveal-anon")
