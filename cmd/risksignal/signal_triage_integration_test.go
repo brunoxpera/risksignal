@@ -60,6 +60,8 @@ func newTriageService(pool *pgxpool.Pool, clk clock.Clock) *application.Service 
 		SignalTriage:    repo.NewSignalRepo(q),
 		Comments:        repo.NewCommentRepo(q),
 		SlaClocks:       repo.NewSlaClockRepo(q),
+		PriorityRules:   repo.NewPriorityRuleRepo(q),
+		FactorSource:    repo.NewPriorityFactorRepo(q),
 		Clock:           clk,
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)
