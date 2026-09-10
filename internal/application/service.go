@@ -89,6 +89,21 @@ type Service struct {
 	// infrastructure error rather than panicking.
 	exports     ExportRepo
 	exportStore ExportArtifactStore
+	// retention is the I6 retention port (ARCH-007 §2/§3, WP-6.05 / DEV-116):
+	// the candidate scan, the run lifecycle, the legal holds and the in-place
+	// pseudonymisation/deletion primitives the retention use cases program
+	// against. It is optional at construction like the other I6/I5b ports — a
+	// composition root that never drives the retention use cases leaves it nil;
+	// the I6 root wires the postgres *repo.RetentionRepo. A use case invoked
+	// without it returns an infrastructure error rather than panicking.
+	retention RetentionRepo
+	// retentionYears is the retention period in years
+	// (retention.closed_signal_years, default 5) and retentionBatchSize the
+	// bounded batch size (retention.batch_size, default 500) of the execute
+	// path. Both come from ServiceDeps and keep the use cases clock-driven and
+	// deterministic (NFR-015).
+	retentionYears     int
+	retentionBatchSize int
 	// slaProfile is the injected (priority, target) → reaction-time duration
 	// profile (ARCH-004 §4.2/§4.3). The triage commands read it to decide
 	// which SLA clocks a transition fulfils or resets; it defaults to the
@@ -170,6 +185,19 @@ type ServiceDeps struct {
 	// postgres *repo.ExportRepo and the export.Spool).
 	Exports     ExportRepo
 	ExportStore ExportArtifactStore
+	// Retention is the I6 retention port (ARCH-007 §2/§3, WP-6.05 / DEV-116):
+	// the candidate scan, the run lifecycle, the legal holds and the in-place
+	// pseudonymisation/deletion primitives. It is optional at construction like
+	// the other I6/I5b ports; a Service whose retention use cases run must carry
+	// it (the I6 root wires the postgres *repo.RetentionRepo).
+	Retention RetentionRepo
+	// RetentionClosedSignalYears is the retention period in years
+	// (retention.closed_signal_years); zero/negative takes
+	// DefaultRetentionClosedSignalYears. RetentionBatchSize is the bounded
+	// batch size (retention.batch_size); zero/negative takes
+	// DefaultRetentionBatchSize.
+	RetentionClosedSignalYears int
+	RetentionBatchSize         int
 	// SlaTimeProfile is the injectable (priority, target) → reaction-time
 	// duration profile the I4 triage commands read to decide which SLA
 	// clocks a status change fulfils or resets (ARCH-004 §4.2/§4.3,
@@ -244,6 +272,17 @@ func NewService(deps ServiceDeps) *Service {
 	if slaReminderCadence <= 0 {
 		slaReminderCadence = DefaultSLAReminderCadence
 	}
+	// The retention period and batch size are optional: absent means the built-in
+	// defaults (ARCH-007 §2.4), so a Service keeps a defined retention vocabulary
+	// even without a configured value.
+	retentionYears := deps.RetentionClosedSignalYears
+	if retentionYears <= 0 {
+		retentionYears = DefaultRetentionClosedSignalYears
+	}
+	retentionBatchSize := deps.RetentionBatchSize
+	if retentionBatchSize <= 0 {
+		retentionBatchSize = DefaultRetentionBatchSize
+	}
 	return &Service{
 		signals:            deps.Signals,
 		audit:              deps.Audit,
@@ -270,6 +309,9 @@ func NewService(deps ServiceDeps) *Service {
 		sourceMonitor:      deps.SourceMonitor,
 		exports:            deps.Exports,
 		exportStore:        deps.ExportStore,
+		retention:          deps.Retention,
+		retentionYears:     retentionYears,
+		retentionBatchSize: retentionBatchSize,
 		slaProfile:         slaProfile,
 		slaReminderCadence: slaReminderCadence,
 		clock:              deps.Clock,
