@@ -24,17 +24,19 @@ import (
 func runMaintenance(e *cmdEnv, args []string) int {
 	if len(args) < 1 {
 		return e.emit("maintenance", e.fail(exitValidation, classValidation,
-			"missing subcommand (supported: migrate, retention, recompute)"))
+			"missing subcommand (supported: migrate, identity-lookup, retention, recompute)"))
 	}
 	command := "maintenance " + args[0]
 	switch args[0] {
 	case "migrate":
 		return e.emit(command, e.cmdMigrate(args[1:]))
+	case "identity-lookup":
+		return e.emit(command, e.cmdIdentityLookup(args[1:]))
 	case "retention", "recompute":
 		return e.emit(command, e.cmdNotImplemented(args[1:]))
 	default:
 		return e.emit(command, e.fail(exitValidation, classValidation,
-			"unknown subcommand (supported: migrate, retention, recompute)"))
+			"unknown subcommand (supported: migrate, identity-lookup, retention, recompute)"))
 	}
 }
 

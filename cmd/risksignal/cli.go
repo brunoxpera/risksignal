@@ -266,6 +266,12 @@ func printUsage(w io.Writer) {
 commands:
   maintenance migrate [--dry-run]   apply pending schema migrations
                                     (checksum-guarded, ADR-010)
+  maintenance identity-lookup       resolve the user actor of one audit event
+        --event <id> --reason <t>    (the governed audit.reveal_identity act,
+        [--as <subject>]             ADR-014: mandatory reason, self-audited,
+                                    permission-gated; --as selects the acting
+                                    identity, default local::<bypass>
+                                    principal)
   maintenance retention             delete expired data (not yet implemented)
   maintenance recompute             recompute derived signals (not yet implemented)
   diagnose config                   print the configuration provenance report

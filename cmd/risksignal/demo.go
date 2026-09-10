@@ -321,6 +321,9 @@ func newAppService(pool *pgxpool.Pool, clk clock.Clock) *application.Service {
 		Quarantine:      repo.NewQuarantineRepo(q),
 		Components:      repo.NewComponentRepo(q),
 		Inventory:       repo.NewInventoryRepo(q),
+		// The I5a identity read port backs the authorizer and the
+		// maintenance identity-lookup reveal (ARCH-005 §5/§7).
+		Users: repo.NewUserRepo(q),
 		// CreateSignal creates the SLA clocks of the signal's priority
 		// (ARCH-004 §4.3), so the demo chain wires the clock repository.
 		SlaClocks: repo.NewSlaClockRepo(q),
