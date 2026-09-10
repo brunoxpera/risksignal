@@ -1,0 +1,138 @@
+{
+  "_comment": "Reference-matrix vulnerability fixture (ARCH-003 §8a, WP-3.11 / DEV-054). Versioned, synthetic, network-free: one cell per MatchMethod of the ADR-015 mapping, keyed to the inventory.csv component that realises it. Together with inventory.csv it drives the all-asset-types × all-methods reference matrix. The expected method/confidence/score are the ADR-015 mapping values; score 16 for candidate is domain.CandidateSimilarity(\"apache http server\", \"apache httpd\"). alias_rules seed the controlled aliases the alias cells need.",
+  "alias_rules": [
+    {
+      "scope": "product",
+      "from": "weblogic",
+      "to": "weblogic server",
+      "version": 1,
+      "reason": "reference-matrix controlled product alias"
+    },
+    {
+      "scope": "vendor",
+      "from": "sun microsystems",
+      "to": "oracle",
+      "version": 1,
+      "reason": "reference-matrix controlled vendor alias"
+    }
+  ],
+  "cells": [
+    {
+      "component_fx": "cpe",
+      "cve_id": "CVE-2026-1001",
+      "method": "exact_identifier",
+      "confidence": "high",
+      "score": 100,
+      "reason_contains": "matches the affected CPE",
+      "statements": [
+        {
+          "cpe": "cpe:2.3:a:acme:widget:*:*:*:*:*:*:*:*",
+          "ranges": [{ "start": "1.0", "start_including": true, "end": "2.0", "end_including": false }]
+        }
+      ]
+    },
+    {
+      "component_fx": "purl",
+      "cve_id": "CVE-2026-1002",
+      "method": "exact_identifier",
+      "confidence": "high",
+      "score": 100,
+      "reason_contains": "matches the affected purl",
+      "statements": [
+        { "purl": "pkg:golang/github.com/acme/portal@2.4.0" }
+      ]
+    },
+    {
+      "component_fx": "digest",
+      "cve_id": "CVE-2026-1003",
+      "method": "container_digest",
+      "confidence": "high",
+      "score": 95,
+      "reason_contains": "container image",
+      "statements": [
+        {
+          "repository": "registry.example.com/acme/widget",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    {
+      "component_fx": "alias",
+      "cve_id": "CVE-2026-1004",
+      "method": "alias_exact_version",
+      "confidence": "high",
+      "score": 90,
+      "reason_contains": "controlled alias",
+      "statements": [
+        { "vendor": "oracle", "product": "weblogic", "exact_versions": ["12.2.1.4"] }
+      ]
+    },
+    {
+      "component_fx": "range",
+      "cve_id": "CVE-2026-1005",
+      "method": "canonical_product_range",
+      "confidence": "high",
+      "score": 80,
+      "reason_contains": "matches the affected product",
+      "statements": [
+        {
+          "vendor": "acme",
+          "product": "widget",
+          "ranges": [{ "start": "1.0", "start_including": true, "end": "2.0", "end_including": false }]
+        }
+      ]
+    },
+    {
+      "component_fx": "uncertain",
+      "cve_id": "CVE-2026-1006",
+      "method": "product_uncertain_version",
+      "confidence": "medium",
+      "score": 65,
+      "reason_contains": "unconfirmed",
+      "statements": [
+        {
+          "vendor": "acme",
+          "product": "widget",
+          "ranges": [{ "start": "1.0", "start_including": true, "end": "2.0", "end_including": false }]
+        }
+      ]
+    },
+    {
+      "component_fx": "alias",
+      "cve_id": "CVE-2026-1007",
+      "method": "controlled_alias_only",
+      "confidence": "medium",
+      "score": 55,
+      "reason_contains": "controlled alias",
+      "statements": [
+        { "vendor": "sun microsystems", "product": "weblogic server" }
+      ]
+    },
+    {
+      "component_fx": "candidate",
+      "cve_id": "CVE-2026-1008",
+      "method": "candidate",
+      "confidence": "low",
+      "score": 16,
+      "reason_contains": "candidate",
+      "statements": [
+        { "vendor": "apache", "product": "apache http server" }
+      ]
+    },
+    {
+      "component_fx": "nomatch",
+      "cve_id": "CVE-2026-1009",
+      "method": "no_match",
+      "confidence": "none",
+      "score": 0,
+      "reason_contains": "provably not affected",
+      "statements": [
+        {
+          "vendor": "acme",
+          "product": "widget",
+          "ranges": [{ "start": "1.0", "start_including": true, "end": "2.0", "end_including": false }]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+source,external_id,type,name,environment,criticality,exposure,owner,vendor,product,version,cpe,purl,image,digest,fx_key
+reference,asset-server,server_vm,Reference Server,production,high,internet,,acme,widget,1.2.3,cpe:2.3:a:acme:widget:1.2.3:*:*:*:*:*:*:*,,,,cpe
+reference,asset-server,server_vm,Reference Server,production,high,internet,,acme,portal,2.4.0,,pkg:golang/github.com/acme/portal@2.4.0,,,purl
+reference,asset-server,server_vm,Reference Server,production,high,internet,,,,1.2.3,,,registry.example.com/acme/widget:1.2.3@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,digest
+reference,asset-server,server_vm,Reference Server,production,high,internet,,oracle,weblogic server,12.2.1.4,,,,,alias
+reference,asset-server,server_vm,Reference Server,production,high,internet,,acme,widget,1.5.0,,,,,range
+reference,asset-server,server_vm,Reference Server,production,high,internet,,acme,widget,,,,,,uncertain
+reference,asset-server,server_vm,Reference Server,production,high,internet,,apache,apache httpd,2.4.62,,,,,candidate
+reference,asset-server,server_vm,Reference Server,production,high,internet,,acme,widget,3.0.0,,,,,nomatch
+reference,asset-app,application_framework,Reference App,production,high,internet,,acme,widget,1.2.3,cpe:2.3:a:acme:widget:1.2.3:*:*:*:*:*:*:*,,,,cpe
+reference,asset-app,application_framework,Reference App,production,high,internet,,acme,portal,2.4.0,,pkg:golang/github.com/acme/portal@2.4.0,,,purl
+reference,asset-app,application_framework,Reference App,production,high,internet,,,,1.2.3,,,registry.example.com/acme/widget:1.2.3@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,digest
+reference,asset-app,application_framework,Reference App,production,high,internet,,oracle,weblogic server,12.2.1.4,,,,,alias
+reference,asset-app,application_framework,Reference App,production,high,internet,,acme,widget,1.5.0,,,,,range
+reference,asset-app,application_framework,Reference App,production,high,internet,,acme,widget,,,,,,uncertain
+reference,asset-app,application_framework,Reference App,production,high,internet,,apache,apache httpd,2.4.62,,,,,candidate
+reference,asset-app,application_framework,Reference App,production,high,internet,,acme,widget,3.0.0,,,,,nomatch
+reference,asset-container,container_image,Reference Container,production,high,internet,,acme,widget,1.2.3,cpe:2.3:a:acme:widget:1.2.3:*:*:*:*:*:*:*,,,,cpe
+reference,asset-container,container_image,Reference Container,production,high,internet,,acme,portal,2.4.0,,pkg:golang/github.com/acme/portal@2.4.0,,,purl
+reference,asset-container,container_image,Reference Container,production,high,internet,,,,1.2.3,,,registry.example.com/acme/widget:1.2.3@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,digest
+reference,asset-container,container_image,Reference Container,production,high,internet,,oracle,weblogic server,12.2.1.4,,,,,alias
+reference,asset-container,container_image,Reference Container,production,high,internet,,acme,widget,1.5.0,,,,,range
+reference,asset-container,container_image,Reference Container,production,high,internet,,acme,widget,,,,,,uncertain
+reference,asset-container,container_image,Reference Container,production,high,internet,,apache,apache httpd,2.4.62,,,,,candidate
+reference,asset-container,container_image,Reference Container,production,high,internet,,acme,widget,3.0.0,,,,,nomatch
+reference,asset-network,network_security,Reference Network,production,high,internet,,acme,widget,1.2.3,cpe:2.3:a:acme:widget:1.2.3:*:*:*:*:*:*:*,,,,cpe
+reference,asset-network,network_security,Reference Network,production,high,internet,,acme,portal,2.4.0,,pkg:golang/github.com/acme/portal@2.4.0,,,purl
+reference,asset-network,network_security,Reference Network,production,high,internet,,,,1.2.3,,,registry.example.com/acme/widget:1.2.3@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,digest
+reference,asset-network,network_security,Reference Network,production,high,internet,,oracle,weblogic server,12.2.1.4,,,,,alias
+reference,asset-network,network_security,Reference Network,production,high,internet,,acme,widget,1.5.0,,,,,range
+reference,asset-network,network_security,Reference Network,production,high,internet,,acme,widget,,,,,,uncertain
+reference,asset-network,network_security,Reference Network,production,high,internet,,apache,apache httpd,2.4.62,,,,,candidate
+reference,asset-network,network_security,Reference Network,production,high,internet,,acme,widget,3.0.0,,,,,nomatch
+reference,asset-cloud,cloud_saas,Reference Cloud,production,high,internet,,acme,widget,1.2.3,cpe:2.3:a:acme:widget:1.2.3:*:*:*:*:*:*:*,,,,cpe
+reference,asset-cloud,cloud_saas,Reference Cloud,production,high,internet,,acme,portal,2.4.0,,pkg:golang/github.com/acme/portal@2.4.0,,,purl
+reference,asset-cloud,cloud_saas,Reference Cloud,production,high,internet,,,,1.2.3,,,registry.example.com/acme/widget:1.2.3@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,digest
+reference,asset-cloud,cloud_saas,Reference Cloud,production,high,internet,,oracle,weblogic server,12.2.1.4,,,,,alias
+reference,asset-cloud,cloud_saas,Reference Cloud,production,high,internet,,acme,widget,1.5.0,,,,,range
+reference,asset-cloud,cloud_saas,Reference Cloud,production,high,internet,,acme,widget,,,,,,uncertain
+reference,asset-cloud,cloud_saas,Reference Cloud,production,high,internet,,apache,apache httpd,2.4.62,,,,,candidate
+reference,asset-cloud,cloud_saas,Reference Cloud,production,high,internet,,acme,widget,3.0.0,,,,,nomatch
