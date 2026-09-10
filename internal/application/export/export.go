@@ -23,6 +23,16 @@ const (
 	FormatJSON Format = "json"
 )
 
+// Valid reports whether f is a supported export format (ARCH-007 §1.1): the
+// exports.format vocabulary of the exports row (csv | json).
+func (f Format) Valid() bool {
+	switch f {
+	case FormatCSV, FormatJSON:
+		return true
+	}
+	return false
+}
+
 // SchemaVersion is the export document schema version stamped on every
 // artifact (exports.schema_version, ARCH-007 §1.2/§1.3). It names the
 // exported field set of this package; bump it whenever a column is added,
