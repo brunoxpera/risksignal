@@ -1,0 +1,87 @@
+-- users: the I5a identity statements (ARCH-005 §1/§5, WP-5a.03 / DEV-089).
+--
+-- The users table is the minimal internal identity record (migration 00009,
+-- ARCH-005 §1): the issuer-qualified OIDC subject_id is the login key and UQ,
+-- display_name is denormalised into audit rows at event time, email is an
+-- optional notification recipient. Users are deactivated, never deleted
+-- (ADR-014) — the internal id stays permanently referenceable so the audit
+-- actor_id remains resolvable. This file persists the login path
+-- (create-or-read by subject, touch last login) and the deactivation; the
+-- role grants live in user_roles.sql. The injected clock supplies every
+-- instant; the adapter maps the stored rows, the application maps to
+-- domain.Principal (WP-5a.06).
+
+-- UpsertUserBySubject is the first-login create-or-read (ARCH-005 §1/§2): the
+-- verified token's subject resolves the internal user, inserting the row on
+-- the first login or refreshing the denormalised profile fields and the
+-- last-login instant on every later login. subject_id is the UQ login key, so
+-- the second login of the same subject matches the existing row and returns
+-- its stable id — never a second row (the whole point of the upsert over an
+-- unconditional insert). display_name/email follow the IdP's current claim;
+-- created_at keeps the first-registration instant while updated_at advances
+-- with the login mutation (its column contract is "last mutation instant",
+-- the same stamp the touch/deactivate writes below apply). The injected clock
+-- supplies last_login_at, created_at and updated_at — all three are the login
+-- instant (the first login creates and logs in at once). RETURNING * hands
+-- the stored row (with the database-assigned id on the create branch) back.
+-- name: UpsertUserBySubject :one
+INSERT INTO users (subject_id, display_name, email, last_login_at, created_at, updated_at)
+VALUES (@subject_id, @display_name, @email, @now, @now, @now)
+ON CONFLICT (subject_id) DO UPDATE SET
+    last_login_at = @now,
+    display_name  = @display_name,
+    email         = @email,
+    updated_at    = @now
+RETURNING *;
+
+-- GetUserByID reads one user by its stable internal id — the read the
+-- authorizer's resolvePrincipal takes to re-check deactivated_at at authorise
+-- time (ARCH-005 §5), and the read audit.reveal_identity resolves an
+-- actor_id on (ADR-014). A missing id is pgx.ErrNoRows (mapped to not-found
+-- by the adapter); a deactivated user still resolves (the deactivated record
+-- is the identity key) — the caller decides what to do with the state. The
+-- current roles are a separate read (ListRolesByUser in user_roles.sql) so
+-- the two reads reflect the same authorise-time snapshot without a join.
+-- name: GetUserByID :one
+SELECT *
+FROM users
+WHERE id = @id;
+
+-- DeactivateUser soft-deactivates one user (ARCH-005 §1, ADR-014): the
+-- deactivated_at and updated_at instants come from the injected clock. The
+-- `deactivated_at IS NULL` guard makes the transition idempotent at the
+-- statement level — a user already deactivated (or an unknown id) matches
+-- zero rows, so a concurrent or repeated deactivation cannot race a second
+-- write. The adapter surfaces the zero-row outcome (deactivation was not
+-- applied); nothing is ever deleted (deactivate, never delete).
+-- name: DeactivateUser :one
+UPDATE users
+SET deactivated_at = @now,
+    updated_at     = @now
+WHERE id = @id
+  AND deactivated_at IS NULL
+RETURNING *;
+
+-- TouchLastLogin stamps the last successful login/session/token resolution
+-- on an existing user (ARCH-005 §1): last_login_at and updated_at come from
+-- the injected clock. It is the post-first-login counterpart of
+-- UpsertUserBySubject when the principal is already resolved (a session or
+-- token refresh does not re-run the create-or-read). An unknown id matches
+-- zero rows (pgx.ErrNoRows → not-found).
+-- name: TouchLastLogin :one
+UPDATE users
+SET last_login_at = @now,
+    updated_at    = @now
+WHERE id = @id
+RETURNING *;
+
+-- ListUsers is the administration read (the I5b users screen binds it):
+-- every user, active and deactivated alike (a deactivated user is shown, not
+-- hidden — deactivate, never delete, ADR-014), ordered by display_name with
+-- the stable id as the deterministic tiebreaker (display_name is not
+-- unique). No filter: the caller renders the full list and reads each row's
+-- state.
+-- name: ListUsers :many
+SELECT *
+FROM users
+ORDER BY display_name, id;
