@@ -3,8 +3,9 @@ package application
 // Service is the application service: it owns the use cases (CreateSignal,
 // ListSignals, GetSignal, RunSyntheticSource, the I2 source use cases
 // FetchSource / NormalizeSource / RunSource / QuarantineList / Ack /
-// Reprocess, the WP-3.05 inventory import CommitInventory and the WP-3.08
-// matching-run core RunMatching) and depends only on ports — repository
+// Reprocess, the WP-3.09b NVD full-import driver FullImportSource, the
+// WP-3.05 inventory import CommitInventory and the WP-3.08 matching-run
+// core RunMatching) and depends only on ports — repository
 // interfaces, the clock and the transaction runner. The composition root
 // (cmd/*) wires the postgres repositories and postgres.WithTx behind those
 // ports (WP-1b.05 and later composition roots).

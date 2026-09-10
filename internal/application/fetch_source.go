@@ -243,8 +243,10 @@ func (s *Service) appendNormalizeJob(ctx context.Context, tx Tx, rawID, sourceID
 // overlap (config.overlap, in hours) so window boundaries never gap.
 // Full-set and cursor-less sources return the zero window the adapter
 // ignores; an incremental source without a stored cursor yet (its first
-// run) gets an open From — the WP-2.05 NVD adapter defines the first-run
-// window. A malformed stored cursor is a validation error of the caller.
+// run — the NVD full import, DEV-067) gets an open From and the adapter
+// derives the lower bound itself (config.full_import_since or the epoch;
+// the checkpointed full import bounds To per window instead). A malformed
+// stored cursor is a validation error of the caller.
 func fetchWindow(plan SourcePlan, desc SourceDescriptor, now time.Time) (TimeWindow, error) {
 	if plan.CursorKind != CursorKindLastModified {
 		return TimeWindow{}, nil

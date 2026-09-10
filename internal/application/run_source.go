@@ -3,15 +3,22 @@ package application
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // RunSourceInput drives one full source cycle (fetch then normalise,
 // ARCH-002 §1/§5 as the inline orchestration; the worker composes the
 // FetchSource and NormalizeSource jobs of the same split): the resolved
 // source row and the adapter implementing its port.
+//
+// WindowTo optionally bounds the fetch window's To of this run (the
+// full-import driver of DEV-067 caps every checkpointed window at the
+// next chunk boundary). Zero — the ordinary scheduled runs — fetches to
+// the injected clock's now.
 type RunSourceInput struct {
 	SourceID string
 	Adapter  SourcePort
+	WindowTo time.Time
 }
 
 // RunSourceResult reports one full cycle. Status succeeded means the run
@@ -56,7 +63,14 @@ func (s *Service) RunSource(ctx context.Context, in RunSourceInput) (RunSourceRe
 	}
 
 	now := s.clock.Now()
-	window, err := fetchWindow(in.Adapter.Plan(), desc, now)
+	windowTo := now
+	if !in.WindowTo.IsZero() {
+		// DEV-067 full-import step: the run fetches one bounded checkpoint
+		// window [cursor, WindowTo] instead of the open run to now — the
+		// next step resumes from the committed window end.
+		windowTo = in.WindowTo
+	}
+	window, err := fetchWindow(in.Adapter.Plan(), desc, windowTo)
 	if err != nil {
 		return RunSourceResult{}, Validationf(op, "malformed source cursor: %v", err)
 	}

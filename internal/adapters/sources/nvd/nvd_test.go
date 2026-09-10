@@ -198,8 +198,10 @@ func TestFetchRateLimited(t *testing.T) {
 }
 
 // TestFetchWindow derives the window from the stored cursor minus the
-// configured overlap, and bounds the first run by the look-back window —
-// all from the injected clock (never the wall clock).
+// configured overlap, and opens a cursor-less first run (the NVD full
+// import, ARCH-003 §6) at the full-import lower bound — the epoch, or
+// config.full_import_since when the operator pinned it — all from the
+// injected clock (never the wall clock).
 func TestFetchWindow(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -219,13 +221,13 @@ func TestFetchWindow(t *testing.T) {
 			wantStart: "2026-09-09T05:00:00Z",
 		},
 		{
-			name:      "first run bounded by default window",
-			wantStart: "2026-09-08T09:30:00Z",
+			name:      "first run opens at the epoch",
+			wantStart: "0001-01-01T00:00:00Z",
 		},
 		{
-			name:      "first run bounded by configured window",
-			config:    map[string]any{"window": "2h"},
-			wantStart: "2026-09-09T07:30:00Z",
+			name:      "first run opens at config full_import_since",
+			config:    map[string]any{"full_import_since": "2020-01-01T00:00:00Z"},
+			wantStart: "2020-01-01T00:00:00Z",
 		},
 	}
 

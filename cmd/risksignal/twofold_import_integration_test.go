@@ -7,8 +7,8 @@ package main
 // for the fetch dates) are each imported twice through RunSource with the
 // real adapters, their endpoints pointed at in-process httptest servers.
 //
-// NVD leg (incremental window): the source is configured with a 24 h
-// window and a 24 h overlap, so the second run re-fetches the identical
+// NVD leg (incremental window): the source's cursor is pinned at the clock
+// instant with a 24 h overlap, so the second run re-fetches the identical
 // window [from, to] the first run committed (the cursor advanced to the
 // same clock instant — the injected clock does not move). The re-fetch
 // dedupes on the raw-record natural key (UQ (source_id, external_id,
@@ -50,14 +50,17 @@ import (
 	"github.com/xpera/risksignal/internal/platform/clock"
 )
 
-// twofoldNvdConfig fixes the window and the overlap to 24 h (ARCH-002
-// §2.1 config keys): the first run opens [now−24h, now], commits the
-// cursor at now, and the second run — the injected clock does not move —
-// re-opens [now−24h, now] (the cursor minus the 24 h overlap). The
+// twofoldNvdConfig fixes the overlap to 24 h (ARCH-002 §2.1 config key)
+// and the test seeds the source cursor at the clock instant, so both runs
+// open the identical window [now−24h, now] and commit the cursor at now —
+// the injected clock does not move, and the second run re-opens
+// [now−24h, now] (the promoted cursor minus the 24 h overlap). The
 // identical window makes the twofold re-import of the same reference
 // deterministic: same external id, same content hash, and therefore the
-// same raw record.
-const twofoldNvdConfig = `{"window": 24.0, "overlap": 24.0}`
+// same raw record. (DEV-067 widened the cursor-less first window of NVD
+// to the full-import lower bound, so a twofold window proof must pin the
+// cursor instead of relying on the first-run look-back.)
+const twofoldNvdConfig = `{"overlap": 24.0}`
 
 // readFixture loads one versioned reference fixture of this test set
 // (testdata/, documented fetch dates in testdata/README.md).
@@ -140,7 +143,11 @@ func TestTwofoldNvdImportProducesNoDuplicateRows(t *testing.T) {
 		Endpoint: pgtype.Text{String: srv.URL, Valid: true},
 		Schedule: pgtype.Text{String: "@hourly", Valid: true},
 		Enabled:  true,
-		Config:   []byte(twofoldNvdConfig),
+		// Pinned cursor (see twofoldNvdConfig): the twofold proof needs
+		// two runs over the identical window, not the open-ended
+		// full-import window of a cursor-less source.
+		Cursor: []byte(`{"last_modified":"2026-09-09T09:30:00Z"}`),
+		Config: []byte(twofoldNvdConfig),
 	})
 	if err != nil {
 		t.Fatalf("UpsertSource: %v", err)

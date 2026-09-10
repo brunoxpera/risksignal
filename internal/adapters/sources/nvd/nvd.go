@@ -32,12 +32,17 @@ const apiPath = "/rest/json/cves/2.0"
 const resultsPerPage = 2000
 
 // Config defaults (ARCH-002 §2.1): overlap guards window boundaries
-// against gaps, the first-run look-back bounds a cursor-less first fetch.
+// against gaps; a cursor-less first fetch opens at the full-import lower
+// bound — config.full_import_since when the operator pinned it, the epoch
+// otherwise (ARCH-003 §6, DEV-067).
 const (
-	defaultOverlapHours     = 2.0
-	defaultFirstRunWindowH  = 24.0
-	overlapConfigKey        = "overlap"
-	firstRunWindowConfigKey = "window"
+	defaultOverlapHours = 2.0
+	overlapConfigKey    = "overlap"
+	// fullImportSinceConfigKey is the optional lower bound of the full
+	// import: config.full_import_since, an RFC 3339 instant. A first fetch
+	// without a stored cursor opens its window there; without it the
+	// window opens at the epoch — the whole history of the source.
+	fullImportSinceConfigKey = "full_import_since"
 	// #nosec G101 — api_key_ref is the config member *name* that holds a
 	// secret reference ("env:VAR", ch. 3.3), never a credential literal.
 	apiKeyRefConfigKey = "api_key_ref"
@@ -254,8 +259,11 @@ func apiURL(endpoint string, from, to time.Time, startIndex int, apiKey string) 
 
 // windowFrom derives the window start of one fetch (ARCH-002 §2.1): the
 // stored last-modified cursor minus the configured overlap (2 h default),
-// or — on the first run without a cursor — the bounded look-back floor
-// (config.window, 24 h default) below the injected clock's now.
+// or — on the first run without a stored cursor (the NVD full import,
+// ARCH-003 §6/DEV-067) — the open lower bound: config.full_import_since
+// (RFC 3339) when the operator pinned the import start, the epoch
+// otherwise. The fetch then walks every page of the source's whole history
+// and stops on the empty page past the last modified CVE.
 func windowFrom(in application.FetchInput, to time.Time) (time.Time, error) {
 	if len(in.Source.Cursor) > 0 {
 		var c struct {
@@ -278,11 +286,30 @@ func windowFrom(in application.FetchInput, to time.Time) (time.Time, error) {
 		return from, nil
 	}
 
-	from := to.Add(-durationHours(in.Source.Config, firstRunWindowConfigKey, defaultFirstRunWindowH))
-	if !from.Before(to) {
-		return time.Time{}, fmt.Errorf("nvd: first-run window of %s is not positive", to.UTC().Format(time.RFC3339))
+	// Cursor-less first run: open at the full-import lower bound. The
+	// epoch is the unbound default (a real deployment pins
+	// full_import_since — its history does not reach back to year 1); the
+	// window is always positive because the epoch precedes every bounded
+	// To. A malformed full_import_since is an operator-data mistake and
+	// fails the fetch like a malformed cursor.
+	if since, ok := in.Source.Config[fullImportSinceConfigKey]; ok && since != nil {
+		s, isString := since.(string)
+		if !isString {
+			return time.Time{}, fmt.Errorf("nvd: config full_import_since %v is not an RFC 3339 string", since)
+		}
+		if s == "" {
+			return time.Time{}, fmt.Errorf("nvd: config full_import_since is empty")
+		}
+		lower, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("nvd: config full_import_since %q is not an RFC 3339 instant: %w", s, err)
+		}
+		if !lower.Before(to) {
+			return time.Time{}, fmt.Errorf("nvd: full-import lower bound %s is not before now %s", lower.UTC().Format(time.RFC3339), to.UTC().Format(time.RFC3339))
+		}
+		return lower, nil
 	}
-	return from, nil
+	return time.Time{}, nil // the epoch: an open lower bound
 }
 
 // durationHours reads a config duration that may be expressed in hours (a
