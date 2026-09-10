@@ -24,8 +24,15 @@ type Service struct {
 	comps      ComponentRepo
 	inventory  InventoryWriter
 	epssHist   EpssHistoryAppender // optional: nil appends no epss_history (see ServiceDeps.EpssHistory)
-	clock      Clock
-	runTx      TxRunner
+	// I4 triage/SLA ports (WP-4.04a / DEV-075). They are optional at
+	// construction — the I1b–I3 composition roots (server, worker, demo)
+	// wire a Service without them and never invoke a triage command; the
+	// I5b root wires all three.
+	signalTriage SignalTriageRepo
+	comments     CommentRepo
+	slaClocks    SlaClockRepo
+	clock        Clock
+	runTx        TxRunner
 }
 
 // ServiceDeps are the port implementations the service runs on. RunTx is
@@ -51,8 +58,16 @@ type ServiceDeps struct {
 	// whose EPSS runs need no history (or a unit test that does not exercise
 	// it) leaves it nil and the run loads epss_current unchanged.
 	EpssHistory EpssHistoryAppender
-	Clock       Clock
-	RunTx       TxRunner
+	// SignalTriage/Comments/SlaClocks are the I4 triage/SLA ports (WP-4.04a /
+	// DEV-075). They are optional at construction so the I1b–I3 composition
+	// roots (server, worker, demo) that do not drive the triage commands keep
+	// wiring unchanged; a Service whose triage use cases are invoked must
+	// carry them (the I5b root wires the postgres implementations).
+	SignalTriage SignalTriageRepo
+	Comments     CommentRepo
+	SlaClocks    SlaClockRepo
+	Clock        Clock
+	RunTx        TxRunner
 }
 
 // NewService assembles the service from its port implementations. A nil
@@ -99,19 +114,22 @@ func NewService(deps ServiceDeps) *Service {
 		panic("application: NewService: RunTx must not be nil")
 	}
 	return &Service{
-		signals:    deps.Signals,
-		audit:      deps.Audit,
-		outbox:     deps.Outbox,
-		vulns:      deps.Vulnerabilities,
-		matches:    deps.Matches,
-		runs:       deps.SourceRuns,
-		raws:       deps.RawRecords,
-		sources:    deps.Sources,
-		quarantine: deps.Quarantine,
-		comps:      deps.Components,
-		inventory:  deps.Inventory,
-		epssHist:   deps.EpssHistory,
-		clock:      deps.Clock,
-		runTx:      deps.RunTx,
+		signals:      deps.Signals,
+		audit:        deps.Audit,
+		outbox:       deps.Outbox,
+		vulns:        deps.Vulnerabilities,
+		matches:      deps.Matches,
+		runs:         deps.SourceRuns,
+		raws:         deps.RawRecords,
+		sources:      deps.Sources,
+		quarantine:   deps.Quarantine,
+		comps:        deps.Components,
+		inventory:    deps.Inventory,
+		epssHist:     deps.EpssHistory,
+		signalTriage: deps.SignalTriage,
+		comments:     deps.Comments,
+		slaClocks:    deps.SlaClocks,
+		clock:        deps.Clock,
+		runTx:        deps.RunTx,
 	}
 }
