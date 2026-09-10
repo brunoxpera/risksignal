@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
 
 // This file owns the I4 priority_rules model of ARCH-004 §1: the versioned,
 // copy-on-write ruleset snapshot that replaces the hard-coded I1b
@@ -182,6 +185,160 @@ func seedExposedOrCritical() RuleDefinition {
 		{Op: RuleOpIn, Field: FieldCriticality, Values: []string{string(CriticalityCritical), string(CriticalityHigh)}},
 		{Op: RuleOpEq, Field: FieldExposure, Value: StringValue(string(ExposureInternet))},
 	}}
+}
+
+// ValidateRuleset validates an operator-supplied priority ruleset before it
+// is published (ARCH-004 §1, DEV-086): an operator may document different
+// thresholds and combinations (ch. 9.3 "Schwellenwerte und Kombinationen
+// werden konfigurierbar dokumentiert"), but the published ruleset must stay a
+// well-formed, non-degenerate instance of the closed rule language.
+//
+// It enforces, in order:
+//
+//   - exactly the four stable rule ids P1..P4, in first-match-wins order
+//     (a duplicated, missing, reordered or unknown id is rejected);
+//   - every rule's Definition passes the closed-vocabulary predicate
+//     validation (validateRuleNode — the same gate EvaluateRule applies, so
+//     the ruleset round-trips through RuleDefinition and never a raw jsonb
+//     passthrough);
+//   - the set actually distinguishes the classes: each of P1..P4 must be the
+//     winning rule of at least one probe factor cell (see
+//     rulesetProbeFactors). A degenerate ruleset — an always-matching rule
+//     that shadows the rules below it, two identical predicates, a rule that
+//     can never fire, or a set that collapses two classes — is rejected.
+//
+// Reason, actor and version are deliberately not checked here: the publish
+// command stamps them on every row (PriorityRule.Validate is the value-level
+// gate for a fully assembled row). P4 being the terminal rule is expressed by
+// the order check (P4 is the fourth and last rule).
+func ValidateRuleset(rules []PriorityRule) error {
+	if len(rules) != 4 {
+		return fmt.Errorf("domain: a priority ruleset must carry exactly the four rules P1..P4, got %d", len(rules))
+	}
+	wantOrder := []Priority{PriorityP1, PriorityP2, PriorityP3, PriorityP4}
+	seen := make(map[Priority]bool, len(rules))
+	for i, r := range rules {
+		if !r.RuleID.Valid() {
+			return fmt.Errorf("domain: ruleset rule %d has an invalid rule id %q", i, r.RuleID)
+		}
+		if seen[r.RuleID] {
+			return fmt.Errorf("domain: ruleset carries the rule id %s more than once", r.RuleID)
+		}
+		seen[r.RuleID] = true
+		if r.RuleID != wantOrder[i] {
+			return fmt.Errorf("domain: ruleset rule %d is %s, want %s (first-match-wins order P1..P4)", i, r.RuleID, wantOrder[i])
+		}
+		if err := validateRuleNode(r.Definition); err != nil {
+			return fmt.Errorf("domain: ruleset rule %s: %w", r.RuleID, err)
+		}
+	}
+	return validateRulesetDistinct(rules)
+}
+
+// validateRulesetDistinct rejects a degenerate ruleset whose four rules do
+// not actually distinguish the classes: over the probe factor grid every one
+// of P1..P4 must be the winning (first enabled match, P4 terminal) class for
+// at least one cell. The seed ruleset satisfies this; an always-matching
+// rule (which shadows the ones below it), two identical predicates, an
+// unreachable rule and a set that collapses two classes do not.
+func validateRulesetDistinct(rules []PriorityRule) error {
+	winners := make(map[Priority]bool, 4)
+	for _, f := range rulesetProbeFactors(rules) {
+		p, err := EvaluatePriority(rules, f)
+		if err != nil {
+			return fmt.Errorf("domain: ruleset evaluation failed on a probe cell: %w", err)
+		}
+		winners[p] = true
+	}
+	for _, id := range []Priority{PriorityP1, PriorityP2, PriorityP3, PriorityP4} {
+		if !winners[id] {
+			return fmt.Errorf("domain: degenerate ruleset: no probe factor cell resolves to %s (the four classes P1..P4 must all be distinguishable)", id)
+		}
+	}
+	return nil
+}
+
+// rulesetProbeFactors enumerates a bounded probe grid of PriorityFactors for
+// the class-distinction check. The closed vocabulary makes it complete: the
+// enum fields (confidence, criticality, exposure) contribute every value,
+// kev both booleans, and the numeric fields (cvss, epss) contribute one probe
+// per region delimited by the >= thresholds the ruleset itself uses — so no
+// rule can be reachable on a factor cell the grid misses.
+func rulesetProbeFactors(rules []PriorityRule) []PriorityFactors {
+	var cvssThresholds, epssThresholds []float64
+	for _, r := range rules {
+		collectRuleThresholds(r.Definition, &cvssThresholds, &epssThresholds)
+	}
+	cvssProbes := numericProbes(cvssThresholds, 10)
+	epssProbes := numericProbes(epssThresholds, 1)
+	confs := []Confidence{ConfidenceHigh, ConfidenceMedium, ConfidenceLow, ConfidenceNone}
+	crits := []Criticality{CriticalityCritical, CriticalityHigh, CriticalityNormal, CriticalityLow, CriticalityUnknown}
+	exps := []Exposure{ExposureInternet, ExposureInternal, ExposureIsolated, ExposureUnknown}
+	out := make([]PriorityFactors, 0, len(confs)*2*len(cvssProbes)*len(epssProbes)*len(crits)*len(exps))
+	for _, conf := range confs {
+		for _, kev := range []bool{false, true} {
+			for _, c := range cvssProbes {
+				for _, e := range epssProbes {
+					for _, crit := range crits {
+						for _, exp := range exps {
+							out = append(out, PriorityFactors{Confidence: conf, KEV: kev, CVSS: c, EPSS: e, Criticality: crit, Exposure: exp})
+						}
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+// collectRuleThresholds walks a predicate tree and gathers the numeric >=
+// thresholds it uses, per field (cvss, epss) — the breakpoints of the probe
+// grid.
+func collectRuleThresholds(n RuleDefinition, cvss, epss *[]float64) {
+	if n.Op == RuleOpGe && n.Value != nil {
+		if v, ok := n.Value.AsNumber(); ok {
+			switch n.Field {
+			case FieldCVSS:
+				*cvss = append(*cvss, v)
+			case FieldEPSS:
+				*epss = append(*epss, v)
+			}
+		}
+	}
+	for _, c := range n.AllOf {
+		collectRuleThresholds(c, cvss, epss)
+	}
+	for _, c := range n.AnyOf {
+		collectRuleThresholds(c, cvss, epss)
+	}
+}
+
+// numericProbes returns one representative value per region of [0, upper]
+// delimited by the sorted, de-duplicated thresholds: 0, each threshold and the
+// midpoint on either side of it. The set is complete for the monotone >=
+// comparisons of the bounded language, so a >= threshold is always probeable
+// both at and below its breakpoint.
+func numericProbes(thresholds []float64, upper float64) []float64 {
+	ts := make([]float64, 0, len(thresholds))
+	for _, t := range thresholds {
+		if t > 0 && t <= upper {
+			ts = append(ts, t)
+		}
+	}
+	sort.Float64s(ts)
+	probes := []float64{0}
+	prev := 0.0
+	for _, t := range ts {
+		if t == prev {
+			continue
+		}
+		probes = append(probes, t, (prev+t)/2)
+		prev = t
+	}
+	if prev < upper {
+		probes = append(probes, (prev+upper)/2)
+	}
+	return probes
 }
 
 // EvaluatePriority evaluates an ordered ruleset against the factors and

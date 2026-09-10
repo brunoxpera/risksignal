@@ -98,12 +98,19 @@ func PriorityInputHash(ruleVersion string, f domain.PriorityFactors) (string, er
 }
 
 // PublishPriorityRulesInput is the PublishPriorityRules command (ARCH-004 §1):
-// publish a new ruleset snapshot at version = MAX(version)+1 from the domain
-// seed definitions. Reason and Actor are mandatory and are stamped on every
-// row and on the audit event.
+// publish a new ruleset snapshot at version = MAX(version)+1. Reason and
+// Actor are mandatory and are stamped on every row and on the audit event.
+//
+// Rules is the optional operator-supplied ruleset (DEV-086): when it carries
+// rules the command validates it (domain.ValidateRuleset) and publishes it
+// verbatim — after stamping reason/actor on every row — so an operator can
+// document different thresholds and combinations (ch. 9.3). An empty/absent
+// Rules keeps the backward-compatible default: the ch. 9.3 seed ruleset is
+// published (the seed is also the initial ruleset).
 type PublishPriorityRulesInput struct {
 	Reason        string
 	Actor         Actor
+	Rules         []domain.PriorityRule
 	CorrelationID string
 }
 
@@ -152,10 +159,14 @@ type priorityRulesPublishedPayload struct {
 }
 
 // PublishPriorityRules publishes a new ruleset snapshot (ARCH-004 §1): it
-// builds the P1–P4 snapshot from the domain seed definitions, then — inside
-// one transaction — writes the whole snapshot at version = MAX(version)+1,
+// resolves the ruleset to publish — the operator-supplied in.Rules when
+// present (validated against the closed predicate vocabulary), else the
+// ch. 9.3 seed — stamps the reason and actor on every row, then — inside one
+// transaction — writes the whole snapshot at version = MAX(version)+1,
 // appends the audit event and enqueues the outbox event. The command is
-// admin/audited; reason and actor are mandatory.
+// admin/audited; reason and actor are mandatory. A rejected ruleset is
+// refused before any transaction: nothing is published and no audit is
+// written.
 func (s *Service) PublishPriorityRules(ctx context.Context, in PublishPriorityRulesInput) (PublishPriorityRulesResult, error) {
 	const op = "publish_priority_rules"
 
@@ -167,7 +178,16 @@ func (s *Service) PublishPriorityRules(ctx context.Context, in PublishPriorityRu
 		return PublishPriorityRulesResult{}, err
 	}
 
-	rules := publishSeedRules(in.Reason, actor.ID)
+	// Resolve and validate the ruleset before opening a transaction: an
+	// operator-supplied ruleset must round-trip through the domain validation
+	// (no raw jsonb passthrough), and a rejected one publishes nothing.
+	rules := in.Rules
+	if len(rules) == 0 {
+		rules = domain.SeedPriorityRules()
+	} else if err := domain.ValidateRuleset(rules); err != nil {
+		return PublishPriorityRulesResult{}, ValidationError(op, err)
+	}
+	rules = stampRules(rules, in.Reason, actor.ID)
 	correlationID := correlationOrNew(in.CorrelationID)
 	now := s.clock.Now()
 
@@ -425,14 +445,18 @@ func (s *Service) proposeReopen(ctx context.Context, current domain.RiskSignal, 
 	return proposed, nil
 }
 
-// publishSeedRules returns the four ch. 9.3 seed rules (P1..P4) with the
-// published reason and actor stamped on every row; the repository stamps the
-// snapshot version (MAX+1). The definitions are the domain seed — the single
-// source of the ruleset's predicates.
-func publishSeedRules(reason, actorID string) []domain.PriorityRule {
-	seed := domain.SeedPriorityRules()
-	out := make([]domain.PriorityRule, len(seed))
-	for i, r := range seed {
+// stampRules returns a copy of rules with the published reason and actor
+// stamped on every row (and a defensive default version for a row that
+// arrives without one — the repository stamps the snapshot version, so the
+// value only has to satisfy the value-level validation). It is the single
+// place the publish path applies the caller's reason/actor to the resolved
+// ruleset, whether it came from the seed or the operator.
+func stampRules(rules []domain.PriorityRule, reason, actorID string) []domain.PriorityRule {
+	out := make([]domain.PriorityRule, len(rules))
+	for i, r := range rules {
+		if r.Version < 1 {
+			r.Version = domain.SeedPriorityRulesVersion
+		}
 		r.Reason = reason
 		r.ActorID = actorID
 		out[i] = r
