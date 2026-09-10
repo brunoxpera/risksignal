@@ -82,7 +82,7 @@ SBOM_DIR := $(ARTIFACT_DIR)/sbom
 SCAN_DIR := $(ARTIFACT_DIR)/scan
 
 .PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
-	verify-connectivity ci-lint ci-test test-contract ci-build demo check-gofmt vet lint-golangci \
+	verify-connectivity ci-lint ci-test test-exit-criteria test-contract ci-build demo check-gofmt vet lint-golangci \
 	lint-licenses lint-secrets lint-openapi-validate lint-openapi-diff up-db image sbom scan sign
 
 ## build: compile all three binaries into bin/ with build metadata injected
@@ -123,9 +123,24 @@ ci-lint: check-gofmt vet lint-golangci lint-arch lint-licenses lint-secrets \
 ##          scratch database through the demo-seed chain and run the
 ##          generated OpenAPI client against the real handler; without a
 ##          reachable database they skip cleanly like every other
-##          integration test.
+##          integration test. The suite also includes the I4 exit-criteria
+##          proofs (WP-4.07 / DEV-082, ARCH-004 §8): the P1–P4 reference
+##          matrix with audit evidence (cmd/risksignal), the accelerated SLA
+##          lifecycle (cmd/risksignal-worker) and the triage-command
+##          atomicity fault injection (cmd/risksignal) — run standalone with
+##          `make test-exit-criteria`.
 ci-test: up-db
 	$(GO) test -race ./...
+
+## test-exit-criteria: run only the I4 exit-criteria suite (WP-4.07 /
+##          DEV-082, ARCH-004 §8) — the P1–P4 reference matrix + audit
+##          evidence, the accelerated SLA lifecycle and the atomicity
+##          fault-injection proofs — race-enabled against the compose
+##          database. A focused subset of `make ci-test`, which runs the same
+##          tests as part of `go test ./...`; without a reachable database the
+##          tests skip cleanly.
+test-exit-criteria: up-db
+	$(GO) test -race ./cmd/risksignal ./cmd/risksignal-worker -run 'TestI4ExitCriteria'
 
 ## test-contract: run only the WP-1b.09 contract suite (ADR-011 gate 3,
 ##          DEV-023) — the OpenAPI 3.1 document validation and the generated
