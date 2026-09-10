@@ -82,7 +82,7 @@ SBOM_DIR := $(ARTIFACT_DIR)/sbom
 SCAN_DIR := $(ARTIFACT_DIR)/scan
 
 .PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
-	verify-connectivity ci-lint ci-test test-exit-criteria test-contract ci-build demo check-gofmt vet lint-golangci \
+	verify-connectivity ci-lint ci-test test-exit-criteria test-i5a-exit-criteria test-contract ci-build demo check-gofmt vet lint-golangci \
 	lint-licenses lint-secrets lint-openapi-validate lint-openapi-diff up-db image sbom scan sign
 
 ## build: compile all three binaries into bin/ with build metadata injected
@@ -128,9 +128,26 @@ ci-lint: check-gofmt vet lint-golangci lint-arch lint-licenses lint-secrets \
 ##          matrix with audit evidence (cmd/risksignal), the accelerated SLA
 ##          lifecycle (cmd/risksignal-worker) and the triage-command
 ##          atomicity fault injection (cmd/risksignal) — run standalone with
-##          `make test-exit-criteria`.
+##          `make test-exit-criteria`. The suite also includes the I5a
+##          identity/authorisation exit-criteria proofs (WP-5a.08 / DEV-096,
+##          ARCH-005 §8): the role matrix, object scope and actor fault
+##          injection (internal/application), the bypass lock (config), the
+##          token/claim hardening (oidc) and the API/CLI channel-parity proof
+##          (cmd/risksignal) — run standalone with
+##          `make test-i5a-exit-criteria`.
 ci-test: up-db
 	$(GO) test -race ./...
+
+## test-i5a-exit-criteria: run only the I5a exit-criteria suite (WP-5a.08 /
+##          DEV-096, ARCH-005 §8) — the role matrix + object scope + actor
+##          fault injection, the negative-startup bypass lock, the token/claim
+##          hardening and the API/CLI channel-parity proof — race-enabled
+##          against the compose database. A focused subset of `make ci-test`,
+##          which runs the same tests as part of `go test ./...`; the
+##          database-free proofs run regardless, the integration proofs skip
+##          cleanly without a reachable database.
+test-i5a-exit-criteria: up-db
+	$(GO) test -race -count=1 -run 'I5aExitCriteria' ./internal/application ./internal/platform/config ./internal/adapters/oidc ./cmd/risksignal
 
 ## test-exit-criteria: run only the I4 exit-criteria suite (WP-4.07 /
 ##          DEV-082, ARCH-004 §8) — the P1–P4 reference matrix + audit

@@ -286,6 +286,25 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
       RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
         bin/risksignal maintenance identity-lookup --event <id> \
           --reason "support ticket 4711" --as local::auditor --output json
+- `signal acknowledge --signal <id> --version <n> [--as <subject>]` and
+  `signal override --signal <id> --priority <P1..P4> --reason <text>
+  --version <n> [--as <subject>]` — the I5a reference triage operation
+  (WP-5a.08 / DEV-096, ARCH-005 §8): the CLI twins of the API endpoint
+  `POST /api/v1/signals/{signal_id}/commands`, driving the same application
+  use cases with the same in-command permission gates (acknowledge →
+  `signals.triage`; override → `signals.override`, Analyst only) and the same
+  audit — the application layer is the single gate of record, so both
+  channels produce the same state, the same denials and the same audit
+  evidence (NFR-013 channel parity). `--as` names the acting identity's
+  issuer-qualified subject (default `local::<auth.bypass_principal>`). The
+  commands are strictly non-interactive and map the use-case error classes
+  onto the exit-code contract: a missing/blank argument or other validation
+  mistake exits 2, a denied permission exits 4 (authorisation) and a stale
+  `--version` (or an illegal transition) exits 5 (conflict). Example:
+
+      RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
+        bin/risksignal signal acknowledge --signal <id> --version 1 \
+          --as local::security-analyst --output json
 - `maintenance retention`, `maintenance recompute` — recognised but not yet
   implemented; they print "not yet implemented" and exit 1.
 - `diagnose config` — the WP-1a.02 provenance report: source of every
