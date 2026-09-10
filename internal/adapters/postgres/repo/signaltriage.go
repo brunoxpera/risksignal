@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -164,6 +165,44 @@ func (r *SignalRepo) AssignOwner(ctx context.Context, tx application.Tx, id, own
 	})
 	if err != nil {
 		return domain.RiskSignal{}, guardedSignalError(op, id, err)
+	}
+	return riskSignalFromRow(op, row)
+}
+
+// RecomputePriority persists the outcome of a targeted priority recompute
+// (ARCH-004 §5, ch. 9.5) on the caller's transaction: the freshly rebuilt
+// factor set, the rule version the recompute ran under and the recomputed
+// computed priority. The override-survival mirror of §3 (ADR-015) is
+// enforced in the SQL SET list — a purely computed signal updates the
+// effective priority, an overridden one updates auto_priority only and keeps
+// the human decision. The statement is not version-guarded (the command's
+// changed-only comparison keeps an identical recompute from reaching it) and
+// bumps version. The updated row is returned.
+func (r *SignalRepo) RecomputePriority(ctx context.Context, tx application.Tx, id string, priority domain.Priority, ruleVersion string, factors domain.PriorityFactors) (domain.RiskSignal, error) {
+	const op = "signals.recompute_priority"
+
+	if !priority.Valid() {
+		return domain.RiskSignal{}, application.Validationf(op, "invalid priority %q", priority)
+	}
+	if ruleVersion == "" {
+		return domain.RiskSignal{}, application.Validationf(op, "rule_version must not be empty")
+	}
+	factorsJSON, err := json.Marshal(factors)
+	if err != nil {
+		return domain.RiskSignal{}, application.InfraError(op, err)
+	}
+	uid, err := toUUID(id)
+	if err != nil {
+		return domain.RiskSignal{}, application.ValidationError(op, err)
+	}
+	row, err := r.q.WithTx(tx).RecomputeRiskSignalPriority(ctx, gen.RecomputeRiskSignalPriorityParams{
+		Priority:    string(priority),
+		RuleVersion: ruleVersion,
+		Factors:     factorsJSON,
+		ID:          uid,
+	})
+	if err != nil {
+		return domain.RiskSignal{}, mapDBError(op, err)
 	}
 	return riskSignalFromRow(op, row)
 }

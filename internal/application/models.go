@@ -262,3 +262,14 @@ type Notification struct {
 	OutboxEventID string
 	CreatedAt     time.Time
 }
+
+// PriorityFactorRebuild is the result of one fresh priority-factor rebuild
+// (ARCH-004 §5, ch. 9.5): the recomputed factor set of one signal and the
+// CVE id of the vulnerability it was rebuilt from. The CVE id is carried for
+// the recompute's audit and outbox payloads (the reopen proposal names the
+// vulnerability); the factors are exactly the PriorityFactors a signal
+// stores.
+type PriorityFactorRebuild struct {
+	CVEID   string
+	Factors domain.PriorityFactors
+}

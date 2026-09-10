@@ -167,6 +167,11 @@ type fakeDB struct {
 	nextAssetID     int
 	aliasVersion    int
 	decisionVersion int
+	// priorityRulesets is the committed copy-on-write priority_rules store
+	// (WP-4.04b / DEV-077): version -> the full P1..P4 snapshot at it. The
+	// fake PriorityRuleRepo reads it (effective = MAX version) and stages
+	// publishes into it on commit.
+	priorityRulesets map[int][]domain.PriorityRule
 }
 
 func (d *fakeDB) hasSignalForMatch(matchID string) bool {
@@ -383,6 +388,15 @@ type fakeStaged struct {
 	// published on commit.
 	comments  []domain.Comment
 	slaClocks []domain.SlaClock
+	// priorityRulesets are the staged priority-rules snapshot publishes
+	// (WP-4.04b), applied to the committed store on commit.
+	priorityRulesets []storedRuleset
+}
+
+// storedRuleset is one staged priority-rules snapshot publish.
+type storedRuleset struct {
+	version int
+	rules   []domain.PriorityRule
 }
 
 func (t *fakeTx) record(op string) { t.log = append(t.log, op) }
@@ -435,6 +449,12 @@ func (t *fakeTx) commit() {
 	t.db.comments = append(t.db.comments, t.staged.comments...)
 	for _, c := range t.staged.slaClocks {
 		t.db.applySlaClock(c)
+	}
+	if len(t.staged.priorityRulesets) > 0 && t.db.priorityRulesets == nil {
+		t.db.priorityRulesets = make(map[int][]domain.PriorityRule)
+	}
+	for _, s := range t.staged.priorityRulesets {
+		t.db.priorityRulesets[s.version] = s.rules
 	}
 	t.committed = true
 }
@@ -1163,6 +1183,39 @@ func (f *fakeSignalTriageRepo) AssignOwner(ctx context.Context, tx application.T
 	return next, nil
 }
 
+// RecomputePriority mirrors the DEV-077 adapter: it applies the
+// override-survival mirror of ARCH-004 §5 in memory and stages the updated
+// row. It is not version-guarded (the command's changed-only comparison
+// keeps an identical recompute from reaching it); a missing row is not-found.
+func (f *fakeSignalTriageRepo) RecomputePriority(ctx context.Context, tx application.Tx, id string, priority domain.Priority, ruleVersion string, factors domain.PriorityFactors) (domain.RiskSignal, error) {
+	const op = "signals.recompute_priority"
+	ftx, err := fakeTxOf(tx)
+	if err != nil {
+		return domain.RiskSignal{}, err
+	}
+	ftx.record("signal.recompute")
+	base, ok := f.resolve(ftx, id)
+	if !ok {
+		return domain.RiskSignal{}, application.NotFoundError(op, fmt.Errorf("signal %s not found", id))
+	}
+	var closedAt *time.Time
+	if row, ok := f.db.signalRowByID(id); ok {
+		closedAt = row.closedAt
+	}
+	next := base
+	if base.AutoPriority == nil {
+		next.Priority = priority
+	} else {
+		auto := priority
+		next.AutoPriority = &auto
+	}
+	next.RuleVersion = ruleVersion
+	next.Factors = factors
+	next.Version = base.Version + 1
+	ftx.staged.signalMutations = append(ftx.staged.signalMutations, storedSignal{sig: next, closedAt: closedAt})
+	return next, nil
+}
+
 // fakeCommentRepo is the in-memory application.CommentRepo: append-only, the
 // committed timeline read back in insertion order.
 type fakeCommentRepo struct{ db *fakeDB }
@@ -1306,6 +1359,9 @@ type harness struct {
 	comments     *fakeCommentRepo
 	slaClocks    *fakeSlaClockRepo
 
+	priorityRules *fakePriorityRuleRepo
+	factorSource  *fakePriorityFactorRepo
+
 	svc *application.Service
 }
 
@@ -1330,6 +1386,8 @@ func newHarness(t *testing.T) *harness {
 	h.signalTriage = &fakeSignalTriageRepo{db: h.db}
 	h.comments = &fakeCommentRepo{db: h.db}
 	h.slaClocks = &fakeSlaClockRepo{db: h.db}
+	h.priorityRules = &fakePriorityRuleRepo{db: h.db}
+	h.factorSource = &fakePriorityFactorRepo{rebuilds: map[string]application.PriorityFactorRebuild{}}
 	h.svc = application.NewService(application.ServiceDeps{
 		Signals:         h.signals,
 		Audit:           h.audit,
@@ -1345,6 +1403,8 @@ func newHarness(t *testing.T) *harness {
 		SignalTriage:    h.signalTriage,
 		Comments:        h.comments,
 		SlaClocks:       h.slaClocks,
+		PriorityRules:   h.priorityRules,
+		FactorSource:    h.factorSource,
 		Clock:           h.clock,
 		RunTx:           h.runner.Run,
 	})

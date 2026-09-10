@@ -351,6 +351,21 @@ type SignalTriageRepo interface {
 	// optimistic lock; "" clears the owner. A stale expectedVersion is a
 	// conflict Error.
 	AssignOwner(ctx context.Context, tx Tx, id, owner string, expectedVersion int) (domain.RiskSignal, error)
+
+	// RecomputePriority persists the outcome of a targeted priority
+	// recompute (ARCH-004 §5, ch. 9.5) on the caller's transaction: the
+	// freshly rebuilt factor set, the rule version the recompute ran under
+	// and the recomputed computed priority. The override-survival mirror of
+	// §3 (ADR-015) is enforced in the write: for a purely computed signal
+	// (auto_priority IS NULL) the effective priority is updated; for an
+	// overridden signal the computed value updates auto_priority only and
+	// the effective priority — the human decision — is left untouched. It
+	// is deliberately not version-guarded: the command's changed-only
+	// comparison keeps an identical recompute from reaching it at all, and
+	// the background recompute computes from the row it read (a concurrent
+	// guarded write bumps version afterwards, never silently). The updated
+	// row is returned.
+	RecomputePriority(ctx context.Context, tx Tx, id string, priority domain.Priority, ruleVersion string, factors domain.PriorityFactors) (domain.RiskSignal, error)
 }
 
 // PriorityRuleRepo is the versioned priority_rules snapshot port (ARCH-004
@@ -381,6 +396,23 @@ type PriorityRuleRepo interface {
 	// disabled rule is inert; the evaluator skips it). An empty ruleset
 	// yields an empty slice, never an error.
 	Effective(ctx context.Context) ([]domain.PriorityRule, error)
+}
+
+// PriorityFactorRepo is the minimal read port of the priority factor rebuild
+// (ARCH-004 §5, ch. 9.5): the fresh PriorityFactors of one signal, sourced
+// from the linked match's method/confidence (ADR-015), the vulnerability's
+// latest KEV/CVSS/EPSS evidence and the owning asset's criticality/exposure.
+// It is read-only and transaction-free — the recompute use case reads it
+// before it decides whether anything changed (changed-only persist), so an
+// unchanged recompute opens no transaction at all. The DEV-077 adapter
+// *repo.PriorityFactorRepo (priorityfactor.go) implements it; the read port
+// exists because no other port exposes the signal's joined factor context.
+type PriorityFactorRepo interface {
+	// Rebuild returns the freshly sourced factors of one signal and the CVE
+	// id of its vulnerability. The confidence is re-derived from the
+	// authoritative match method (ADR-015), never trusted from a stored
+	// copy. A missing signal is a not-found Error.
+	Rebuild(ctx context.Context, signalID string) (PriorityFactorRebuild, error)
 }
 
 // CommentRepo is the append-only signal-timeline port (ARCH-004 §2.2): the

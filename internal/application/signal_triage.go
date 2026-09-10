@@ -159,6 +159,14 @@ type signalCommandPayload struct {
 	AutoPriority string `json:"auto_priority,omitempty"`
 	Target       string `json:"target,omitempty"`
 	CommentID    string `json:"comment_id,omitempty"`
+
+	// The priority-recompute detail (ARCH-004 §5, DEV-077): the
+	// vulnerability the recompute read, and the rule version/input hash the
+	// recomputed priority was derived under. Carried by the
+	// signal.reopen_proposed proposal — identity/enum only, never free text.
+	CveID       string `json:"cve_id,omitempty"`
+	RuleVersion string `json:"rule_version,omitempty"`
+	InputHash   string `json:"input_hash,omitempty"`
 }
 
 // TransitionSignal moves a signal along the ch. 6.3 state machine (ARCH-004

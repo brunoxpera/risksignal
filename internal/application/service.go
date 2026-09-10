@@ -33,6 +33,16 @@ type Service struct {
 	signalTriage SignalTriageRepo
 	comments     CommentRepo
 	slaClocks    SlaClockRepo
+	// priorityRules is the versioned priority_rules snapshot port and
+	// factorSource the read port of the priority factor rebuild (WP-4.04b /
+	// DEV-077): PublishPriorityRules writes the next snapshot through the
+	// former, RecomputePriority evaluates the effective snapshot and rebuilds
+	// the factors through the latter. Like the triage/SLA ports they are
+	// optional at construction — the I1b–I3 composition roots wire a Service
+	// without them and never invoke these use cases; the I5b root wires all
+	// five.
+	priorityRules PriorityRuleRepo
+	factorSource  PriorityFactorRepo
 	// slaProfile is the injected (priority, target) → reaction-time duration
 	// profile (ARCH-004 §4.2/§4.3). The triage commands read it to decide
 	// which SLA clocks a transition fulfils or resets; it defaults to the
@@ -73,6 +83,14 @@ type ServiceDeps struct {
 	SignalTriage SignalTriageRepo
 	Comments     CommentRepo
 	SlaClocks    SlaClockRepo
+	// PriorityRules/FactorSource are the I4 priority-rules and
+	// priority-factor rebuild ports (WP-4.04b / DEV-077). They are optional
+	// at construction so the composition roots that do not drive
+	// PublishPriorityRules/RecomputePriority keep wiring unchanged; a
+	// Service whose use cases are invoked must carry them (the I5b root
+	// wires the postgres implementations).
+	PriorityRules PriorityRuleRepo
+	FactorSource  PriorityFactorRepo
 	// SlaTimeProfile is the injectable (priority, target) → reaction-time
 	// duration profile the I4 triage commands read to decide which SLA
 	// clocks a status change fulfils or resets (ARCH-004 §4.2/§4.3,
@@ -135,23 +153,25 @@ func NewService(deps ServiceDeps) *Service {
 		slaProfile = *deps.SlaTimeProfile
 	}
 	return &Service{
-		signals:      deps.Signals,
-		audit:        deps.Audit,
-		outbox:       deps.Outbox,
-		vulns:        deps.Vulnerabilities,
-		matches:      deps.Matches,
-		runs:         deps.SourceRuns,
-		raws:         deps.RawRecords,
-		sources:      deps.Sources,
-		quarantine:   deps.Quarantine,
-		comps:        deps.Components,
-		inventory:    deps.Inventory,
-		epssHist:     deps.EpssHistory,
-		signalTriage: deps.SignalTriage,
-		comments:     deps.Comments,
-		slaClocks:    deps.SlaClocks,
-		slaProfile:   slaProfile,
-		clock:        deps.Clock,
-		runTx:        deps.RunTx,
+		signals:       deps.Signals,
+		audit:         deps.Audit,
+		outbox:        deps.Outbox,
+		vulns:         deps.Vulnerabilities,
+		matches:       deps.Matches,
+		runs:          deps.SourceRuns,
+		raws:          deps.RawRecords,
+		sources:       deps.Sources,
+		quarantine:    deps.Quarantine,
+		comps:         deps.Components,
+		inventory:     deps.Inventory,
+		epssHist:      deps.EpssHistory,
+		signalTriage:  deps.SignalTriage,
+		comments:      deps.Comments,
+		slaClocks:     deps.SlaClocks,
+		priorityRules: deps.PriorityRules,
+		factorSource:  deps.FactorSource,
+		slaProfile:    slaProfile,
+		clock:         deps.Clock,
+		runTx:         deps.RunTx,
 	}
 }
