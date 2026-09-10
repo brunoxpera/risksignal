@@ -240,3 +240,25 @@ type MatchRecord struct {
 	AutoConfidence *domain.Confidence
 	AutoScore      *int
 }
+
+// Notification is one row of the notifications delivery-state table
+// (ARCH-004 §6.2): the delivery state and idempotency of one outbox-driven
+// notification. It is defined at the application layer so the
+// NotificationRepo port never leaks the generated row type into the
+// application layer (the application must not import the adapters' gen
+// package, .go-arch-lint.yml); the postgres adapter maps its stored row onto
+// this type. The outbox_event_id + channel pair is the channel idempotency
+// key (ch. 14.3); status is pending | delivered | failed.
+type Notification struct {
+	ID            string
+	SignalID      string
+	Channel       string // "in_app" | "smtp" | "webhook"
+	Kind          string // "signal.created" | "signal.escalated" | "signal.reopen_proposed" | "reminder"
+	Recipient     string // SMTP/webhook target; "" for in-app
+	Status        string // "pending" | "delivered" | "failed"
+	Attempts      int
+	LastError     string
+	DeliveredAt   *time.Time
+	OutboxEventID string
+	CreatedAt     time.Time
+}

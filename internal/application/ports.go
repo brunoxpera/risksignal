@@ -302,3 +302,172 @@ type ComponentNormLister interface {
 	// deactivated component may still match).
 	ListByVendorProductNorm(ctx context.Context, vendorNorm, productNorm string) ([]Component, error)
 }
+
+// ---------------------------------------------------------------------------
+// I4 ports — signals, priority & SLA (ARCH-004, WP-4.04a / DEV-075)
+
+// SignalTriageRepo is the guarded-command port over risk_signals of the I4
+// triage commands (ARCH-004 §2.1/§2.3 and §3): the plain by-id row read the
+// command layer takes before a guarded write, the status transition, the
+// manual priority override and its revert, and the owner assignment. Every
+// mutating method runs on the caller's transaction and is guarded on the
+// optimistic-lock version the client read: a stale version matches zero rows
+// and surfaces as a conflict Error (HTTP 409, ch. 7.3), never a silent
+// overwrite, and the updated row is mapped back to the domain aggregate. It
+// is declared separately from SignalRepo so the unchanged I1b read/creation
+// surface is untouched; the DEV-073 concrete adapter *repo.SignalRepo
+// (signaltriage.go) implements both.
+//
+// It is a port only for now: the I5b composition root wires it alongside the
+// other ports (no composition root constructs a Service with it before the
+// triage HTTP/CLI surface lands).
+type SignalTriageRepo interface {
+	// GetRiskSignal returns the plain stored signal row (no joins) — the
+	// read a command takes before its guarded write. A missing row is a
+	// not-found Error.
+	GetRiskSignal(ctx context.Context, id string) (domain.RiskSignal, error)
+
+	// Transition applies the ch. 6.3 status change under the optimistic
+	// lock: it writes the new status and the closed_at stamp (the entry
+	// instant of a closed state; nil clears it on a non-closed target or
+	// on a reopen) and bumps version. A stale expectedVersion is a
+	// conflict Error. The domain state machine (domain.Transition) rules
+	// which edges are legal before the write is attempted.
+	Transition(ctx context.Context, tx Tx, id string, to domain.SignalStatus, closedAt *time.Time, expectedVersion int) (domain.RiskSignal, error)
+
+	// OverridePriority is the manual re-prioritisation (ADR-015 mirror,
+	// ARCH-004 §3): it sets the effective priority, preserves the computed
+	// value in auto_priority and stamps the mandatory reason/actor/time.
+	// The four override columns are all-set together. A stale
+	// expectedVersion is a conflict Error.
+	OverridePriority(ctx context.Context, tx Tx, id string, priority, autoPriority domain.Priority, reason, actorID string, at time.Time, expectedVersion int) (domain.RiskSignal, error)
+
+	// RevertPriority restores priority = auto_priority and clears the four
+	// override columns in one guarded write. A stale expectedVersion is a
+	// conflict Error.
+	RevertPriority(ctx context.Context, tx Tx, id string, expectedVersion int) (domain.RiskSignal, error)
+
+	// AssignOwner assigns the (opaque until I5a) owner principal under the
+	// optimistic lock; "" clears the owner. A stale expectedVersion is a
+	// conflict Error.
+	AssignOwner(ctx context.Context, tx Tx, id, owner string, expectedVersion int) (domain.RiskSignal, error)
+}
+
+// PriorityRuleRepo is the versioned priority_rules snapshot port (ARCH-004
+// §1): the effective-version read the create path stamps a signal with, the
+// copy-on-write snapshot publish, and the effective-snapshot read the
+// evaluator runs against. The ruleset is a versioned data snapshot — the
+// effective version is MAX(version), a publish writes the whole P1..P4 rows
+// at MAX(version)+1, and a signal references exactly one snapshot through
+// its rule_version. The DEV-073 adapter *repo.PriorityRuleRepo
+// (priorityrule.go) implements it; its effective-snapshot read is called
+// Effective there (the ListEffectivePriorityRules query), so the port
+// mirrors that name.
+type PriorityRuleRepo interface {
+	// EffectiveVersion returns the current effective ruleset version
+	// (MAX(version)). An empty table reads 0 — the "no ruleset published
+	// yet" sentinel (the create path then keeps the I1b stamp).
+	EffectiveVersion(ctx context.Context) (int, error)
+
+	// Publish writes one full ruleset snapshot — the four rules P1..P4 of
+	// the passed slice, in order — at next = MAX(version)+1, all sharing
+	// one effectiveFrom/reason/actorID, and returns the new effective
+	// version. reason and actorID are mandatory; the snapshot must carry
+	// exactly the four rules.
+	Publish(ctx context.Context, tx Tx, rules []domain.PriorityRule, effectiveFrom time.Time, reason, actorID string, createdAt time.Time) (int, error)
+
+	// Effective returns the whole effective snapshot — the rules at
+	// MAX(version) — ordered P1→P4. Disabled rules are returned too (a
+	// disabled rule is inert; the evaluator skips it). An empty ruleset
+	// yields an empty slice, never an error.
+	Effective(ctx context.Context) ([]domain.PriorityRule, error)
+}
+
+// CommentRepo is the append-only signal-timeline port (ARCH-004 §2.2): the
+// insert and the ordered per-signal read. There is no update or delete path
+// — a comment is never edited or deleted; the command layer writes the
+// signal.commented audit event in the same transaction as the insert. The
+// DEV-073 adapter *repo.CommentRepo (comment.go) implements it.
+type CommentRepo interface {
+	// Add appends one comment to a signal on the caller's transaction and
+	// returns it. createdAt is the injected clock instant; the id is the
+	// database default.
+	Add(ctx context.Context, tx Tx, signalID, actorID, body string, createdAt time.Time) (domain.Comment, error)
+
+	// ListBySignal returns the signal's comments ordered by created_at then
+	// id. A signal without comments yields an empty slice, never an error.
+	ListBySignal(ctx context.Context, signalID string) ([]domain.Comment, error)
+}
+
+// SlaClockRepo is the SLA-clock persistence port (ARCH-004 §4): the
+// natural-key (signal_id, target) upsert, the fulfil/pause/resume guarded
+// writes, the reopen reset and the due-deadline breach scan. The command
+// layer and the worker supply the injected clock instants; the port only
+// persists and maps the stored rows back to the domain value object. The
+// DEV-073 adapter *repo.SlaClockRepo (slaclock.go) implements it; its
+// breach scan is called Due there (the ScanDueSlaClocks query), so the port
+// mirrors that name.
+type SlaClockRepo interface {
+	// Upsert writes one clock's full state by its natural key: a fresh
+	// insert, or the full-state replacement of an existing clock (the
+	// create path and the reopen reset in one statement). The stored row is
+	// returned.
+	Upsert(ctx context.Context, tx Tx, clock domain.SlaClock) (domain.SlaClock, error)
+
+	// Fulfil marks the target met at the instant, returning the stored
+	// clock and whether the fulfil changed it. Idempotent: an
+	// already-fulfilled clock reports changed = false (a fulfilled clock is
+	// never re-opened).
+	Fulfil(ctx context.Context, tx Tx, signalID string, target domain.SLATarget, at time.Time) (domain.SlaClock, bool, error)
+
+	// Pause starts a pause at the instant (paused_at is set). A fulfilled
+	// or already-paused clock (or a missing one) is a conflict Error.
+	Pause(ctx context.Context, tx Tx, signalID string, target domain.SLATarget, at time.Time) (domain.SlaClock, error)
+
+	// Resume ends the active pause at the instant: the elapsed pause
+	// accumulates into paused_seconds and paused_at is cleared. A clock
+	// that is not paused (or missing) is a conflict Error.
+	Resume(ctx context.Context, tx Tx, signalID string, target domain.SLATarget, at time.Time) (domain.SlaClock, error)
+
+	// Reset restarts one clock on a reopen: started_at = now, deadline_at =
+	// now + duration, fulfilled_at cleared and the pause counters zeroed. A
+	// clock that does not exist is a not-found Error.
+	Reset(ctx context.Context, tx Tx, signalID string, target domain.SLATarget, startedAt, deadlineAt time.Time) (domain.SlaClock, error)
+
+	// Due returns the open clocks whose effective deadline has passed —
+	// the sla.evaluate breach scan. The effective deadline accounts for
+	// accumulated and running pauses. No due clock yields an empty slice,
+	// never an error.
+	Due(ctx context.Context) ([]domain.SlaClock, error)
+}
+
+// NotificationRepo is the notification delivery-state port (ARCH-004 §6.2):
+// the idempotent insert keyed on (outbox_event_id, channel), the
+// delivery-state update and the per-signal read. The relay handler and the
+// NotifyPort adapters that drive it land with WP-4.06; this port owns the
+// persistence shape the application layer programs against. It returns the
+// application-level Notification (models.go), not the generated row type:
+// the application layer never imports the adapters' gen package
+// (.go-arch-lint.yml). The DEV-073 adapter *repo.NotificationRepo
+// (notification.go) currently returns gen.Notification; aligning it onto
+// this port is WP-4.06's read-model work.
+type NotificationRepo interface {
+	// Insert stores one notification row on the caller's transaction and
+	// reports whether it was newly inserted. The UQ (outbox_event_id,
+	// channel) makes the insert idempotent: a redelivery stores nothing and
+	// reports inserted = false — exactly one notification per (event,
+	// channel) (FR-023). status is the initial delivery state ('pending' on
+	// the create path), createdAt the injected clock.
+	Insert(ctx context.Context, tx Tx, signalID, channel, kind, recipient, status, outboxEventID string, createdAt time.Time) (Notification, bool, error)
+
+	// UpdateDelivery records the delivery receipt of one notification by
+	// its id: the new status, the attempt count, the last error text (""
+	// clears it) and the delivered instant (nil clears it). A missing
+	// notification is a not-found Error.
+	UpdateDelivery(ctx context.Context, tx Tx, id, status string, attempts int, lastError string, deliveredAt *time.Time) (Notification, error)
+
+	// ListBySignal returns a signal's notifications ordered by created_at
+	// then id. A signal without notifications yields an empty slice, never
+	// an error.
+	ListBySignal(ctx context.Context, signalID string) ([]Notification, error)
+}
