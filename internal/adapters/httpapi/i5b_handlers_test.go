@@ -523,7 +523,7 @@ func TestI5BRoutePermissionsBound(t *testing.T) {
 		httptest.NewRequest(http.MethodPost, "/api/v1/users/u-2/deactivate", nil),
 	}
 	for _, req := range reqs {
-		rec := do(h, req)
+		rec := do(h, authed(req))
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("%s %s status = %d, want 403 (the gate must deny)", req.Method, req.URL.Path, rec.Code)
 		}

@@ -162,15 +162,21 @@ func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (ht
 		return nil, err
 	}
 
+	svc := newSignalService(pool)
+
 	mux := http.NewServeMux()
-	gate := httpapi.NewPermissionGate(nil, logger) // declarations bind; the WP-5a.06 principal checker activates the early gate
+	// The per-route declaration gate runs the real checker (ARCH-005 §5): it
+	// resolves the request's identity through the application's principal
+	// resolution (the same authorise-time re-read the use case performs) and
+	// applies the coarse permission decision. It is defense-in-depth — the
+	// use-case authoriser remains the gate of record.
+	gate := httpapi.NewPermissionGate(httpapi.NewIdentityPermissionChecker(svc, logger), logger)
 
 	// Public routes (no identity): the operational probes, the build metadata.
 	gate.Mount(mux, "GET /health/live", "", httpapi.LiveHandler())
 	gate.Mount(mux, "GET /health/ready", "", httpapi.ReadyHandler(readinessProbes(cfg, pool)))
 	gate.Mount(mux, "GET /version", "", httpapi.VersionHandler(buildinfo.Current()))
 
-	svc := newSignalService(pool)
 	// The I1b signal reads require signals.read, the I5a identity reveal
 	// requires audit.reveal_identity (ARCH-005 §5, §7) and the I5a reference
 	// command requires signals.triage/signals.override; each declaration is

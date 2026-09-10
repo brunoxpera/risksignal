@@ -98,6 +98,23 @@ func (s *Service) authorizeObject(op string, p domain.Principal, perm domain.Per
 	return nil
 }
 
+// RoutePrincipal resolves an authenticated identity into the domain.Principal
+// the HTTP route-level permission gate consults (ARCH-005 §5). It performs the
+// same authorise-time re-read the in-use-case authoriser performs — the
+// internal users.id by subject and the current roles from user_roles (never
+// from the token) — and denies a missing subject, an unknown user or a
+// deactivated principal (deny-by-default). It is the defense-in-depth
+// pre-gate: it decides no permission and no object scope, and the use case
+// remains the gate of record.
+func (s *Service) RoutePrincipal(ctx context.Context, id domain.Identity) (domain.Principal, error) {
+	const op = "route_principal"
+	actor, err := s.ResolveActor(ctx, id)
+	if err != nil {
+		return domain.Principal{}, err
+	}
+	return s.resolvePrincipal(ctx, op, actor)
+}
+
 // authorize is the one-shot form of the seam: resolve the actor, then apply
 // the object-aware decision. A non-user actor is a no-op (see principalFor).
 func (s *Service) authorize(ctx context.Context, op string, a Actor, perm domain.Permission, scope domain.Scope, ownerID string) (domain.Principal, error) {

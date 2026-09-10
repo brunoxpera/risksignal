@@ -339,6 +339,34 @@ func TestWriteCommandGates(t *testing.T) {
 	})
 }
 
+// TestRoutePrincipalResolvesAndDenies asserts the route-level principal
+// resolution the HTTP PermissionGate consults (ARCH-005 §5): a known active
+// user resolves with its current roles, while a missing subject, an unknown
+// subject and a deactivated user all deny (fail closed). It decides no
+// permission and no object scope — the use case remains the gate of record.
+func TestRoutePrincipalResolvesAndDenies(t *testing.T) {
+	h := newHarness(t)
+	h.users.addWithSubject("u1", "local::analyst", "Analyst", domain.RoleSecurityAnalyst)
+
+	p, err := h.svc.RoutePrincipal(context.Background(), domain.Identity{SubjectID: "local::analyst"})
+	if err != nil {
+		t.Fatalf("RoutePrincipal: %v", err)
+	}
+	if p.InternalID != "u1" || len(p.Roles) != 1 || p.Roles[0] != domain.RoleSecurityAnalyst {
+		t.Fatalf("principal = %+v, want u1 holding security_analyst", p)
+	}
+
+	_, err = h.svc.RoutePrincipal(context.Background(), domain.Identity{})
+	assertForbidden(t, err)
+
+	_, err = h.svc.RoutePrincipal(context.Background(), domain.Identity{SubjectID: "local::ghost"})
+	assertForbidden(t, err)
+
+	h.users.deactivate("u1", fixedNow.Add(time.Hour))
+	_, err = h.svc.RoutePrincipal(context.Background(), domain.Identity{SubjectID: "local::analyst"})
+	assertForbidden(t, err)
+}
+
 // TestSystemActorNotGated asserts the internal boundary: a gated use case
 // invoked by a system actor (the trusted worker/CLI process) is not
 // user-authorised and proceeds (ARCH-005 §5).

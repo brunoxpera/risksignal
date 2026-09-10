@@ -32,6 +32,70 @@ type PermissionChecker interface {
 	HasPermission(ctx context.Context, perm domain.Permission) bool
 }
 
+// PrincipalResolver resolves an authenticated identity into the principal's
+// current authorisation state for the route-level permission check
+// (ARCH-005 §5). It is the narrow seam httpapi depends on; the composition
+// root wires it to the application's principal resolution
+// (application.Service.RoutePrincipal), so the route check re-reads the same
+// roles the use case does — never the token — and denies an unknown or
+// deactivated principal.
+type PrincipalResolver interface {
+	RoutePrincipal(ctx context.Context, id domain.Identity) (domain.Principal, error)
+}
+
+// IdentityPermissionChecker is the production PermissionChecker (ARCH-005 §5):
+// it reads the request's authenticated identity from the context, resolves it
+// into a domain.Principal and applies the pure domain.Authorize decision
+// (deny-by-default).
+//
+// It is the coarse per-route pre-gate: it decides the permission only, at any
+// scope — object scope is NOT decided here (an object-scoped grant passes; the
+// use case decides the concrete object and remains the gate of record). A
+// request with no identity, an unknown/deactivated principal or no granting
+// role denies.
+type IdentityPermissionChecker struct {
+	principals PrincipalResolver
+	logger     *slog.Logger
+}
+
+// NewIdentityPermissionChecker builds the checker. Both arguments are
+// required; a nil one is a construction error (caught at startup).
+func NewIdentityPermissionChecker(principals PrincipalResolver, logger *slog.Logger) *IdentityPermissionChecker {
+	if principals == nil {
+		panic("httpapi: NewIdentityPermissionChecker: principals must not be nil")
+	}
+	if logger == nil {
+		panic("httpapi: NewIdentityPermissionChecker: logger must not be nil")
+	}
+	return &IdentityPermissionChecker{principals: principals, logger: logger}
+}
+
+// HasPermission reports whether the authenticated request may exercise perm at
+// the route level (ARCH-005 §5).
+func (c *IdentityPermissionChecker) HasPermission(ctx context.Context, perm domain.Permission) bool {
+	id, ok := IdentityFromContext(ctx)
+	if !ok {
+		return false // no identity: the gate answers 401
+	}
+	p, err := c.principals.RoutePrincipal(ctx, id)
+	if err != nil {
+		c.logger.WarnContext(ctx, "route permission check could not resolve principal",
+			slog.String("permission", string(perm)), slog.Any("error", err))
+		return false
+	}
+	// Scope-agnostic membership: ScopeOwn is the narrowest scope, so any grant
+	// for perm is at least as broad; ownerID == the principal's own id
+	// satisfies the object-scoped ownership clause. Object scope is not decided
+	// here — the use case does (the gate of record).
+	granted, err := domain.Authorize(p.Roles, perm, domain.ScopeOwn, p.InternalID, p.InternalID)
+	if err != nil {
+		c.logger.WarnContext(ctx, "route permission check failed",
+			slog.String("permission", string(perm)), slog.Any("error", err))
+		return false
+	}
+	return granted
+}
+
 // RoutePermissions is the per-route permission declaration table (ARCH-005
 // §5): every protected route's required permission, keyed by its ServeMux
 // pattern ("GET /api/v1/signals"). An empty permission declares a
@@ -97,6 +161,18 @@ func (g *PermissionGate) wrap(pattern string, next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// HTTP-semantic split: a request that carries no authenticated identity
+		// is unauthenticated (401); an authenticated identity that lacks the
+		// declared permission is forbidden (403). In the live chain the auth
+		// middleware already answers 401 before the gate — this is the gate's
+		// own defensive contract with an unauthenticated request.
+		if _, ok := IdentityFromContext(r.Context()); !ok {
+			g.logger.WarnContext(r.Context(), "permission gate denied route: no identity",
+				slog.String("pattern", pattern),
+				slog.String("permission", string(perm)))
+			unauthorized(w, r)
+			return
+		}
 		if !g.checker.HasPermission(r.Context(), perm) {
 			g.logger.WarnContext(r.Context(), "permission gate denied route",
 				slog.String("pattern", pattern),
