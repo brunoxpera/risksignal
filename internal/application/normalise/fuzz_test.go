@@ -45,7 +45,7 @@ func randomASCII(t *testing.T, seed int) string {
 	alphabet := "cpe2.3:aohvndrbiw*+-~_@?#&=/%. \t\x01"
 	n := 1 + seed%40
 	b := make([]byte, n)
-	x := uint64(seed)*6364136223846793005 + 1442695040888963407
+	x := uint64(seed&0x7fffffff)*6364136223846793005 + 1442695040888963407
 	for i := range b {
 		x = x*2862933555777941757 + 3037000493
 		b[i] = alphabet[(x>>33)%uint64(len(alphabet))]

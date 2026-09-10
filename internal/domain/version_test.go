@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"math"
 	"testing"
 )
 
@@ -613,7 +614,12 @@ func (r *xorshift64) intn(n int) int {
 	if n <= 0 {
 		return 0
 	}
-	return int(r.next() % uint64(n))
+	// r.next()%uint64(n) is in [0, n) and n is a positive int, so the value
+	// fits in int; the bound check keeps the conversion provably safe.
+	if v := r.next() % uint64(n); v <= math.MaxInt {
+		return int(v)
+	}
+	return 0
 }
 
 func (r *xorshift64) pick(xs []string) string { return xs[r.intn(len(xs))] }
@@ -622,7 +628,7 @@ func (r *xorshift64) digits(maxLen int) string {
 	n := 1 + r.intn(maxLen)
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = byte('0' + r.intn(10))
+		b[i] = "0123456789"[r.intn(10)]
 	}
 	return string(b)
 }

@@ -79,7 +79,7 @@ func inventoryITVendorRow(external, name, vendor, product, version string) strin
 func TestInventoryCLIValidatePreviewImportLifecycle(t *testing.T) {
 	dbURL := newTestDB(t)
 	env := cliDBEnv(dbURL)
-	code, stdout, stderr := runCLI(t, env, "maintenance", "migrate", "--output", "json")
+	code, _, stderr := runCLI(t, env, "maintenance", "migrate", "--output", "json")
 	if code != exitOK {
 		t.Fatalf("migrate exit code = %d (stderr: %s)", code, stderr)
 	}
@@ -92,7 +92,7 @@ func TestInventoryCLIValidatePreviewImportLifecycle(t *testing.T) {
 	file := writeInventoryITFile(t, rows...)
 
 	// validate: positioned report, no database state touched, exit 0.
-	code, stdout, stderr = runCLI(t, env, "inventory", "validate", file, "--output", "json")
+	code, stdout, stderr := runCLI(t, env, "inventory", "validate", file, "--output", "json")
 	if code != exitOK {
 		t.Fatalf("validate exit code = %d (stderr: %s)", code, stderr)
 	}

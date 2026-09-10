@@ -190,10 +190,10 @@ func TestDecisionRuleApplicability(t *testing.T) {
 		in.DecisionRules = []domain.DecisionRule{wildcard}
 		in.Now = now
 		var want domain.MatchMethod
-		switch {
-		case comp.Product == "widget":
+		switch comp.Product {
+		case "widget":
 			want = domain.MatchMethodNoMatch // the product-scoped exclusion applies
-		case comp.Product == "gadget":
+		case "gadget":
 			want = domain.MatchMethodCandidate // unrelated product: no relation, rule not applicable
 		}
 		if out, err := matching.Evaluate(in); err != nil || out.Method != want {
