@@ -8,7 +8,9 @@ package application
 // core RunMatching) and depends only on ports — repository
 // interfaces, the clock and the transaction runner. The composition root
 // (cmd/*) wires the postgres repositories and postgres.WithTx behind those
-// ports (WP-1b.05 and later composition roots).
+// ports (WP-1b.05 and later composition roots). The EPSS run additionally
+// drives the optional epss_history feeder (WP-3.10, ServiceDeps.EpssHistory)
+// on the pass transaction, after the daily-set swap.
 type Service struct {
 	signals    SignalRepo
 	audit      AuditRepo
@@ -21,6 +23,7 @@ type Service struct {
 	quarantine QuarantineRepo
 	comps      ComponentRepo
 	inventory  InventoryWriter
+	epssHist   EpssHistoryAppender // optional: nil appends no epss_history (see ServiceDeps.EpssHistory)
 	clock      Clock
 	runTx      TxRunner
 }
@@ -41,8 +44,15 @@ type ServiceDeps struct {
 	Quarantine      QuarantineRepo
 	Components      ComponentRepo
 	Inventory       InventoryWriter
-	Clock           Clock
-	RunTx           TxRunner
+	// EpssHistory is the optional feeder of epss_history (WP-3.10/DEV-053,
+	// ARCH-003 §7): the EPSS run appends the observed history of the
+	// inventory-relevant CVEs on the pass transaction after the daily-set
+	// swap. The dependency is additive and nil-safe — a composition root
+	// whose EPSS runs need no history (or a unit test that does not exercise
+	// it) leaves it nil and the run loads epss_current unchanged.
+	EpssHistory EpssHistoryAppender
+	Clock       Clock
+	RunTx       TxRunner
 }
 
 // NewService assembles the service from its port implementations. A nil
@@ -100,6 +110,7 @@ func NewService(deps ServiceDeps) *Service {
 		quarantine: deps.Quarantine,
 		comps:      deps.Components,
 		inventory:  deps.Inventory,
+		epssHist:   deps.EpssHistory,
 		clock:      deps.Clock,
 		runTx:      deps.RunTx,
 	}

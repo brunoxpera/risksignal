@@ -13,7 +13,10 @@ import (
 // The EPSS pass (adapter type "epss") receives the BulkRowWriter over the
 // pass transaction, and the returned finish runs its TRUNCATE + COPY load
 // after the adapter's Normalize succeeded — so the daily-set swap commits
-// atomically with the run (ADR-013). The KEV pass (adapter type "kev")
+// atomically with the run (ADR-013) — and then, on the same transaction,
+// the relevant-only epss_history append of the run through the optional
+// ServiceDeps.EpssHistory feeder (WP-3.10/DEV-053, ARCH-003 §7; a nil feeder
+// appends nothing). The KEV pass (adapter type "kev")
 // receives the CVE ids of the source's previously stored catalog, which
 // activates removal historisation (kev_removed evidence, ch. 8.3).
 // NVD/synthetic passes never read the fields and keep them nil, and finish
@@ -70,6 +73,17 @@ func (s *Service) sourcePassInput(
 		}
 		if _, err := bulk.load(ctx); err != nil {
 			return err
+		}
+		// The relevant-only epss_history append of the run (WP-3.10/DEV-053,
+		// ARCH-003 §7): after the daily-set swap, append the observed
+		// score/percentile of the CVEs with inventory relevance — the
+		// candidate pre-filter's set — on the very same transaction, so the
+		// history commits atomically with the swap. A nil appender (a
+		// composition root without the feeder) leaves epss_history alone.
+		if s.epssHist != nil {
+			if _, err := s.epssHist.AppendRelevant(ctx, tx, bulk.historyObservations(), now, bulk.modelVersion); err != nil {
+				return err
+			}
 		}
 		return nil
 	}

@@ -67,6 +67,11 @@ var sourceRunClockStart = time.Date(2026, 9, 9, 9, 30, 0, 0, time.UTC)
 // the time source.
 func newSourceRunService(pool *pgxpool.Pool, clk clock.Clock) *application.Service {
 	q := gen.New(pool)
+	epssHistory, err := application.NewEpssHistoryLoader(
+		repo.NewRuleRepo(q), repo.NewComponentRepo(q), repo.NewVulnerabilityMatchRepo(q), repo.NewEpssHistoryRepo(q))
+	if err != nil {
+		panic("configure epss history loader: " + err.Error())
+	}
 	return application.NewService(application.ServiceDeps{
 		Signals:         repo.NewSignalRepo(q),
 		Audit:           repo.NewAuditRepo(q),
@@ -79,6 +84,7 @@ func newSourceRunService(pool *pgxpool.Pool, clk clock.Clock) *application.Servi
 		Quarantine:      repo.NewQuarantineRepo(q),
 		Components:      repo.NewComponentRepo(q),
 		Inventory:       repo.NewInventoryRepo(q),
+		EpssHistory:     epssHistory,
 		Clock:           clk,
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)

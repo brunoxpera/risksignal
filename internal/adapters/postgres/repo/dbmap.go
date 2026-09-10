@@ -68,6 +68,14 @@ func toTS(t time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: t, Valid: true}
 }
 
+// toDate wraps a time into the date-only column type (epss_history.
+// observed_on). The stored calendar day is the one of the instant in UTC,
+// so a run's clock instant maps onto its UTC run date (ch. 7.2: the
+// observed day is the run date, injected clock, UTC).
+func toDate(t time.Time) pgtype.Date {
+	return pgtype.Date{Time: t.UTC(), Valid: true}
+}
+
 // toTSPtr maps a time onto a timestamptz; the zero time means NULL (used for
 // the nullable modified_at of the I1b vulnerability upsert).
 func toTSPtr(t time.Time) pgtype.Timestamptz {

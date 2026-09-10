@@ -124,6 +124,16 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	// a database that is down at startup must not stop the worker — the
 	// heartbeat needs no database and every database-touching step fails
 	// per cycle until the pool recovers on its own.
+	//
+	// The epss_history feeder (WP-3.10/DEV-053, ARCH-003 §7) runs on the
+	// matching read surface (the rule state, the component walk and the
+	// reverse pair read) so the EPSS run appends the observed history of the
+	// inventory-relevant CVEs on the pass transaction.
+	epssHistory, err := application.NewEpssHistoryLoader(
+		repo.NewRuleRepo(q), repo.NewComponentRepo(q), repo.NewVulnerabilityMatchRepo(q), repo.NewEpssHistoryRepo(q))
+	if err != nil {
+		return fmt.Errorf("configure epss history loader: %w", err)
+	}
 	svc := application.NewService(application.ServiceDeps{
 		Signals:         repo.NewSignalRepo(q),
 		Audit:           repo.NewAuditRepo(q),
@@ -136,6 +146,7 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 		Quarantine:      repo.NewQuarantineRepo(q),
 		Components:      repo.NewComponentRepo(q),
 		Inventory:       repo.NewInventoryRepo(q),
+		EpssHistory:     epssHistory,
 		Clock:           clock.RealClock{},
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)

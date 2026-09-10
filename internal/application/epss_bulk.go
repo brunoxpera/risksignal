@@ -137,6 +137,19 @@ func (w *epssBulkWriter) load(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
+// historyObservations returns the pass's buffered rows as the
+// epss_history observations of the run (WP-3.10/DEV-053): the natural key
+// plus the COPY-ready decimals, in stream order. observed_on and
+// model_version are run context — the loader stamps them, the writer holds
+// only the file date (modelVersion).
+func (w *epssBulkWriter) historyObservations() []EpssHistoryObservation {
+	out := make([]EpssHistoryObservation, 0, len(w.rows))
+	for _, row := range w.rows {
+		out = append(out, EpssHistoryObservation{CVEID: row.cveID, Score: row.score, Percentile: row.percentile})
+	}
+	return out
+}
+
 // epssRowsCopySource drives the pgx COPY of one pass: each buffered row
 // yields one epss_current tuple with the writer's model_version/loaded_at
 // stamps.
