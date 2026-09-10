@@ -80,9 +80,9 @@ func testConfig(dbURL string) *config.Config {
 		Database:      config.Database{URL: dbURL},
 		OIDC:          config.OIDC{Issuer: "http://127.0.0.1:9000/oidc"},
 		// The worker section is part of schema v1; readiness re-validates
-		// the whole configuration, so the interval must be positive even
-		// though the server never runs the scheduler.
-		Worker: config.Worker{Interval: 30 * time.Second},
+		// the whole configuration, so every worker duration must be positive
+		// even though the server never runs the scheduler.
+		Worker: config.Worker{Interval: 30 * time.Second, SLAEvaluateInterval: time.Minute, SLAReminderCadence: time.Hour},
 	}
 }
 

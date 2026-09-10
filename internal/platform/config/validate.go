@@ -73,6 +73,17 @@ func Validate(c *Config) []error {
 		errs = append(errs, errors.New("worker.interval: must be a positive duration (set it via a config file or RISKSIGNAL_WORKER_INTERVAL)"))
 	}
 
+	// worker.sla_evaluate_interval and worker.sla_reminder_cadence must be
+	// positive: a non-positive SLA cadence would make the breach scheduler
+	// spin or never fire (ARCH-004 §4.4). Unparsable values are rejected at
+	// load time already.
+	if c.Worker.SLAEvaluateInterval <= 0 {
+		errs = append(errs, errors.New("worker.sla_evaluate_interval: must be a positive duration (set it via a config file or RISKSIGNAL_WORKER_SLA_EVALUATE_INTERVAL)"))
+	}
+	if c.Worker.SLAReminderCadence <= 0 {
+		errs = append(errs, errors.New("worker.sla_reminder_cadence: must be a positive duration (set it via a config file or RISKSIGNAL_WORKER_SLA_REMINDER_CADENCE)"))
+	}
+
 	return errs
 }
 

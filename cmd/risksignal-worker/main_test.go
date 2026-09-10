@@ -34,7 +34,7 @@ func workerTestConfig(interval time.Duration) *config.Config {
 		HTTP:          config.HTTP{Addr: "127.0.0.1:0"},
 		Database:      config.Database{URL: "postgres://risksignal:risksignal@127.0.0.1:1/risksignal?sslmode=disable"},
 		OIDC:          config.OIDC{Issuer: "http://127.0.0.1:9000/oidc"},
-		Worker:        config.Worker{Interval: interval},
+		Worker:        config.Worker{Interval: interval, SLAEvaluateInterval: time.Minute, SLAReminderCadence: time.Hour},
 	}
 }
 

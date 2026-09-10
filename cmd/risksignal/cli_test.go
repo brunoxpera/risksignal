@@ -482,6 +482,14 @@ const goldenDiagnoseConfigJSON = `{
     "worker.interval": {
       "value": "30s",
       "source": "default"
+    },
+    "worker.sla_evaluate_interval": {
+      "value": "1m0s",
+      "source": "default"
+    },
+    "worker.sla_reminder_cadence": {
+      "value": "1h0m0s",
+      "source": "default"
     }
   },
   "error": null

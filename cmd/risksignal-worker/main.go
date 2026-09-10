@@ -148,6 +148,16 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 		Inventory:       repo.NewInventoryRepo(q),
 		EpssHistory:     epssHistory,
 		Clock:           clock.RealClock{},
+		// The I4 triage/SLA + priority use cases (ARCH-004) run on the
+		// postgres I4 repositories; the sla.evaluate scheduler reads the
+		// injected reminder cadence (config, not table state). The worker
+		// wires the triage/priority ports so the sla.evaluate scheduler and
+		// the priority.recompute handler can drive them.
+		SignalTriage:       repo.NewSignalRepo(q),
+		SlaClocks:          repo.NewSlaClockRepo(q),
+		PriorityRules:      repo.NewPriorityRuleRepo(q),
+		FactorSource:       repo.NewPriorityFactorRepo(q),
+		SLAReminderCadence: cfg.Worker.SLAReminderCadence,
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)
 		},
@@ -189,12 +199,40 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	if err != nil {
 		return fmt.Errorf("configure matching runner: %w", err)
 	}
+	// The ARCH-004 §5 fan-in: a matching.recompute run enqueues a per-signal
+	// priority.recompute for the affected signals through the application
+	// service (the run commits its matches first, then the enqueue).
+	matchingRunner.SetPriorityRecomputeFanIn(svc.EnqueuePriorityRecomputeForVulnerabilities)
 	matchingJobs, err := worker.NewMatchingJobs(matchingRunner, logger)
 	if err != nil {
 		return fmt.Errorf("configure matching jobs: %w", err)
 	}
 	if err := matchingJobs.RegisterHandlers(relay); err != nil {
 		return fmt.Errorf("configure matching jobs: %w", err)
+	}
+
+	// The priority.recompute job handler (ARCH-004 §5, WP-4.05) drives the
+	// targeted recompute use case: the factors are rebuilt fresh, the effective
+	// ruleset is evaluated and the changed-only persist writes nothing when
+	// the input is unchanged. Registering it makes the rows the §5 fan-in
+	// enqueues (a ruleset publish, a matching.recompute run) consumable.
+	priorityJobs, err := worker.NewPriorityRecomputeJobs(svc, logger)
+	if err != nil {
+		return fmt.Errorf("configure priority recompute jobs: %w", err)
+	}
+	if err := priorityJobs.RegisterHandlers(relay); err != nil {
+		return fmt.Errorf("configure priority recompute jobs: %w", err)
+	}
+
+	// The sla.evaluate scheduler (ARCH-004 §4.4, WP-4.05) runs the breach
+	// evaluation on its configured cadence through the injected clock. The
+	// cycle invokes Tick every worker cycle; the scheduler itself gates the
+	// cadence on the clock, so a production worker evaluates once per
+	// worker.sla_evaluate_interval minute and a test drives it with a
+	// FakeClock without real waiting.
+	slaSchedule, err := worker.NewSlaSchedule(svc, clock.RealClock{}, cfg.Worker.SLAEvaluateInterval, logger)
+	if err != nil {
+		return fmt.Errorf("configure sla scheduler: %w", err)
 	}
 
 	health := worker.NewHealth()
@@ -218,6 +256,13 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 			logger.Debug("source scheduling cycle",
 				slog.Int("enqueued", res.Enqueued),
 				slog.Int("already_queued", res.AlreadyQueued))
+		}
+		// The SLA breach evaluation runs before the drain so the escalation/
+		// reminder events it enqueues this very cycle are claimed and delivered
+		// by the same drain. Its own cadence gate makes the call a no-op on the
+		// cycles that are not due.
+		if err := slaSchedule.Tick(ctx); err != nil {
+			return err
 		}
 		return relay.Drain(ctx)
 	}

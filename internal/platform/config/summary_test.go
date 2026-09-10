@@ -72,14 +72,16 @@ func TestJSONSummaryIsDeterministic(t *testing.T) {
 	}
 
 	// encoding/json renders struct fields in declaration order, so the key
-	// set can be pinned exactly: seven fixed keys, no drift.
+	// set can be pinned exactly: nine fixed keys, no drift.
 	want := `{"schema_version":{"value":1,"source":"default"},` +
 		`"env":{"value":"local","source":"default"},` +
 		`"http.addr":{"set":true,"source":"default"},` +
 		`"database.url":{"set":true,"source":"env"},` +
 		`"oidc.issuer":{"set":true,"source":"env"},` +
 		`"auth.bypass_enabled":{"value":false,"source":"default"},` +
-		`"worker.interval":{"value":"30s","source":"default"}}`
+		`"worker.interval":{"value":"30s","source":"default"},` +
+		`"worker.sla_evaluate_interval":{"value":"1m0s","source":"default"},` +
+		`"worker.sla_reminder_cadence":{"value":"1h0m0s","source":"default"}}`
 	if string(first) != want {
 		t.Fatalf("JSONSummary rendered %s, want %s", first, want)
 	}

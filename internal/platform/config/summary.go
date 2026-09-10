@@ -50,6 +50,8 @@ func (c *Config) summaryRows() []summaryRow {
 		{key: "oidc.issuer", state: "set", source: src("oidc.issuer")},
 		{key: "auth.bypass_enabled", state: strconv.FormatBool(c.Auth.BypassEnabled), source: src("auth.bypass_enabled")},
 		{key: "worker.interval", state: c.Worker.Interval.String(), source: src("worker.interval")},
+		{key: "worker.sla_evaluate_interval", state: c.Worker.SLAEvaluateInterval.String(), source: src("worker.sla_evaluate_interval")},
+		{key: "worker.sla_reminder_cadence", state: c.Worker.SLAReminderCadence.String(), source: src("worker.sla_reminder_cadence")},
 	}
 }
 
@@ -66,6 +68,8 @@ type JSONSummary struct {
 	OIDCIssuer        PresenceSummary       `json:"oidc.issuer"`
 	AuthBypassEnabled ScalarSummary[bool]   `json:"auth.bypass_enabled"`
 	WorkerInterval    ScalarSummary[string] `json:"worker.interval"`
+	WorkerSLAEval     ScalarSummary[string] `json:"worker.sla_evaluate_interval"`
+	WorkerSLAReminder ScalarSummary[string] `json:"worker.sla_reminder_cadence"`
 }
 
 // ScalarSummary reports the value and provenance of a leaf that cannot carry
@@ -93,5 +97,7 @@ func (c *Config) JSONSummary() JSONSummary {
 		OIDCIssuer:        PresenceSummary{Set: true, Source: c.sourceOf("oidc.issuer")},
 		AuthBypassEnabled: ScalarSummary[bool]{Value: c.Auth.BypassEnabled, Source: c.sourceOf("auth.bypass_enabled")},
 		WorkerInterval:    ScalarSummary[string]{Value: c.Worker.Interval.String(), Source: c.sourceOf("worker.interval")},
+		WorkerSLAEval:     ScalarSummary[string]{Value: c.Worker.SLAEvaluateInterval.String(), Source: c.sourceOf("worker.sla_evaluate_interval")},
+		WorkerSLAReminder: ScalarSummary[string]{Value: c.Worker.SLAReminderCadence.String(), Source: c.sourceOf("worker.sla_reminder_cadence")},
 	}
 }

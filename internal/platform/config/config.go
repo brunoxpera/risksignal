@@ -100,6 +100,17 @@ type Worker struct {
 	// per source and job type (concept ch. 8.1, 14.1); until then this
 	// single period drives the whole loop.
 	Interval time.Duration `json:"interval"`
+
+	// SLAEvaluateInterval is the cadence of the sla.evaluate breach
+	// scheduler (ARCH-004 §4.4, WP-4.05): the worker runs one breach
+	// evaluation per cadence on the injected clock. The default is one
+	// minute (the "minute cadence" of the scheduler).
+	SLAEvaluateInterval time.Duration `json:"sla_evaluate_interval"`
+
+	// SLAReminderCadence is the reminder cadence of an already-escalated P1
+	// (ARCH-004 §4.4): after the first escalation a reminder is emitted
+	// once per cadence window. It is configuration, never table state.
+	SLAReminderCadence time.Duration `json:"sla_reminder_cadence"`
 }
 
 // Defaults returns the built-in schema-v1 defaults.
@@ -129,6 +140,11 @@ func Defaults() Config {
 			// A fresh local worker reports a heartbeat and a completed
 			// scheduler run every half minute without configuration.
 			Interval: 30 * time.Second,
+			// The SLA breach scheduler evaluates every minute (the
+			// "minute cadence" of ARCH-004 §4.4) and reminds an already-
+			// escalated P1 once per hour without configuration.
+			SLAEvaluateInterval: time.Minute,
+			SLAReminderCadence:  time.Hour,
 		},
 	}
 }
@@ -160,6 +176,22 @@ var envBindings = []struct {
 			return fmt.Errorf("worker.interval: %s: must be a Go duration such as 30s or 1m", envName("worker.interval"))
 		}
 		c.Worker.Interval = d
+		return nil
+	}},
+	{"worker.sla_evaluate_interval", func(c *Config, v string) error {
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("worker.sla_evaluate_interval: %s: must be a Go duration such as 1m", envName("worker.sla_evaluate_interval"))
+		}
+		c.Worker.SLAEvaluateInterval = d
+		return nil
+	}},
+	{"worker.sla_reminder_cadence", func(c *Config, v string) error {
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("worker.sla_reminder_cadence: %s: must be a Go duration such as 1h", envName("worker.sla_reminder_cadence"))
+		}
+		c.Worker.SLAReminderCadence = d
 		return nil
 	}},
 }
@@ -246,7 +278,9 @@ type fileAuth struct {
 }
 
 type fileWorker struct {
-	Interval *string `json:"interval"` // Go duration, e.g. "30s"
+	Interval            *string `json:"interval"`              // Go duration, e.g. "30s"
+	SLAEvaluateInterval *string `json:"sla_evaluate_interval"` // Go duration, e.g. "1m"
+	SLAReminderCadence  *string `json:"sla_reminder_cadence"`  // Go duration, e.g. "1h"
 }
 
 // applyConfigFile reads the JSON config file at path and overrides cfg with
@@ -311,6 +345,22 @@ func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
 		}
 		cfg.Worker.Interval = d
 		prov["worker.interval"] = SourceFile
+	}
+	if fc.Worker != nil && fc.Worker.SLAEvaluateInterval != nil {
+		d, err := time.ParseDuration(strings.TrimSpace(*fc.Worker.SLAEvaluateInterval))
+		if err != nil {
+			return fmt.Errorf("config file %s: worker.sla_evaluate_interval: invalid duration (expected a Go duration such as 1m)", path)
+		}
+		cfg.Worker.SLAEvaluateInterval = d
+		prov["worker.sla_evaluate_interval"] = SourceFile
+	}
+	if fc.Worker != nil && fc.Worker.SLAReminderCadence != nil {
+		d, err := time.ParseDuration(strings.TrimSpace(*fc.Worker.SLAReminderCadence))
+		if err != nil {
+			return fmt.Errorf("config file %s: worker.sla_reminder_cadence: invalid duration (expected a Go duration such as 1h)", path)
+		}
+		cfg.Worker.SLAReminderCadence = d
+		prov["worker.sla_reminder_cadence"] = SourceFile
 	}
 	return nil
 }
