@@ -3,8 +3,11 @@ package repo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
 	"github.com/brunoxpera/risksignal/internal/application"
@@ -14,18 +17,28 @@ import (
 // This file implements the read port of the priority factor rebuild (ARCH-004
 // §5, WP-4.04b / DEV-077). Rebuild assembles one signal's fresh
 // PriorityFactors from its persisted context: the linked match's method
-// (confidence re-derived per ADR-015), the vulnerability's latest KEV/CVSS/
-// EPSS evidence, and the owning asset's criticality/exposure. Both reads are
-// plain, transaction-free lookups — the recompute reads before it decides
-// whether anything changed, so an identical recompute touches no database.
+// (confidence re-derived per ADR-015), the vulnerability's latest KEV/CVSS
+// evidence, the vulnerability's current EPSS percentile from epss_current,
+// and the owning asset's criticality/exposure. All reads are plain,
+// transaction-free lookups — the recompute reads before it decides whether
+// anything changed, so an identical recompute touches no database.
 //
 // The factor evidence shapes are the canonical values the sources write (the
 // I1b synthetic shapes and the I2 adapter shapes, a superset): cvss
-// {cve_id, base_score, …}, kev {cve_id, known_exploited, …}, epss {cve_id,
-// percentile}. KEV carries one nuance — a kev_removed evidence historises the
-// removal of a CVE from the catalog (ARCH-002 §2.2) — so the latest kev and
-// the latest kev_removed rows are compared by observed_at: a removal newer
-// than the newest membership evidence wins (known_exploited = false).
+// {cve_id, base_score, …}, kev {cve_id, known_exploited, …}. KEV carries one
+// nuance — a kev_removed evidence historises the removal of a CVE from the
+// catalog (ARCH-002 §2.2) — so the latest kev and the latest kev_removed rows
+// are compared by observed_at: a removal newer than the newest membership
+// evidence wins (known_exploited = false).
+//
+// EPSS is deliberately not evidence-sourced (DEV-078): EPSS is bulk-loaded
+// into epss_current (TRUNCATE + COPY, ADR-013), so an `epss` evidence row
+// exists only through the I1b synthetic source. Reading the factor from
+// evidence left every real EPSS-fed signal at percentile 0 and made the P2
+// `epss >= 0.95` predicate unreachable from production data. The rebuild
+// therefore reads the current percentile from epss_current by the
+// vulnerability's cve_id (GetEpssByCveID) — the prioritisation read of the
+// bounded window, ARCH-002 §3.
 
 // PriorityFactorRepo is the postgres implementation of
 // application.PriorityFactorRepo.
@@ -58,15 +71,45 @@ func (r *PriorityFactorRepo) Rebuild(ctx context.Context, signalID string) (appl
 	if err != nil {
 		return application.PriorityFactorRebuild{}, err
 	}
+	epss, err := r.factorEPSS(ctx, op, src.CveID)
+	if err != nil {
+		return application.PriorityFactorRebuild{}, err
+	}
+	factors.EPSS = epss
 	if err := factors.Validate(); err != nil {
 		return application.PriorityFactorRebuild{}, application.ValidationError(op, err)
 	}
 	return application.PriorityFactorRebuild{CVEID: src.CveID, Factors: factors}, nil
 }
 
+// factorEPSS reads the current EPSS percentile of one CVE from epss_current
+// (DEV-078, ARCH-002 §3, ADR-013) — the bulk-loaded daily set (TRUNCATE +
+// COPY), keyed by cve_id, not an evidence row. A CVE absent from the current
+// set yields 0 (the no-factor default), never an error: a signal whose CVE
+// the day's file does not score simply carries no EPSS urgency. A percentile
+// the load did not write is treated the same way.
+func (r *PriorityFactorRepo) factorEPSS(ctx context.Context, op, cveID string) (float64, error) {
+	row, err := r.q.GetEpssByCveID(ctx, cveID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, mapDBError(op, err)
+	}
+	pct, err := row.Percentile.Float64Value()
+	if err != nil {
+		return 0, application.InfraError(op, fmt.Errorf("decode epss percentile of %s: %w", cveID, err))
+	}
+	if !pct.Valid {
+		return 0, nil // an absent percentile is no factor, not a zero value
+	}
+	return pct.Float64, nil
+}
+
 // factorsFromSource assembles the factor set from the signal's context and
-// its vulnerability's latest factor evidence. Confidence is re-derived from
-// the authoritative match method (ADR-015) rather than trusted from a stored
+// its vulnerability's latest factor evidence (KEV and CVSS; EPSS is read
+// separately from epss_current). Confidence is re-derived from the
+// authoritative match method (ADR-015) rather than trusted from a stored
 // copy.
 func factorsFromSource(op string, src gen.GetSignalPriorityFactorSourceRow, rows []gen.ListVulnerabilityFactorEvidenceRow) (domain.PriorityFactors, error) {
 	factors := domain.PriorityFactors{
@@ -91,14 +134,6 @@ func factorsFromSource(op string, src gen.GetSignalPriorityFactorSourceRow, rows
 				return domain.PriorityFactors{}, application.InfraError(op, fmt.Errorf("decode cvss evidence: %w", err))
 			}
 			factors.CVSS = v.BaseScore
-		case domain.EvidenceTypeEPSS:
-			var v struct {
-				Percentile float64 `json:"percentile"`
-			}
-			if err := json.Unmarshal(row.Value, &v); err != nil {
-				return domain.PriorityFactors{}, application.InfraError(op, fmt.Errorf("decode epss evidence: %w", err))
-			}
-			factors.EPSS = v.Percentile
 		case domain.EvidenceTypeKEV:
 			var v struct {
 				KnownExploited bool `json:"known_exploited"`

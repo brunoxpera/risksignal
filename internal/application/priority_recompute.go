@@ -165,8 +165,9 @@ func (s *Service) PublishPriorityRules(ctx context.Context, in PublishPriorityRu
 
 // RecomputePriority recomputes the computed priority of one signal (ARCH-004
 // §5, ch. 9.5): it rebuilds the factor set fresh (match method→confidence per
-// ADR-015, KEV/CVSS/EPSS from evidence, criticality/exposure from the owning
-// asset), evaluates the effective ruleset and persists the result only when
+// ADR-015, KEV/CVSS from evidence, EPSS percentile from epss_current,
+// criticality/exposure from the owning asset), evaluates the effective
+// ruleset and persists the result only when
 // the factor-set, the rule version or the evaluated result actually changed —
 // an identical recompute writes nothing (no row write, no audit, no version
 // bump). For an overridden signal only the preserved auto_priority is updated

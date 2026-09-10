@@ -401,7 +401,9 @@ type PriorityRuleRepo interface {
 // PriorityFactorRepo is the minimal read port of the priority factor rebuild
 // (ARCH-004 §5, ch. 9.5): the fresh PriorityFactors of one signal, sourced
 // from the linked match's method/confidence (ADR-015), the vulnerability's
-// latest KEV/CVSS/EPSS evidence and the owning asset's criticality/exposure.
+// latest KEV/CVSS evidence, its current EPSS percentile from epss_current
+// (bulk-loaded, ADR-013 — not the synthetic `epss` evidence type, DEV-078)
+// and the owning asset's criticality/exposure.
 // It is read-only and transaction-free — the recompute use case reads it
 // before it decides whether anything changed (changed-only persist), so an
 // unchanged recompute opens no transaction at all. The DEV-077 adapter
