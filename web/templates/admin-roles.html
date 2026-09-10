@@ -1,0 +1,29 @@
+{{define "content"}}
+<h1>Roles</h1>
+<p class="lead">The fixed role catalogue and its permission → scope grants (the authorisation matrix of record).</p>
+
+<section class="panel" aria-labelledby="roles-list">
+  <h2 id="roles-list">Role catalogue</h2>
+  <table class="roles">
+    <caption>Roles and their permissions</caption>
+    <thead>
+      <tr><th scope="col">Role</th><th scope="col">Permission</th><th scope="col">Scope</th></tr>
+    </thead>
+    <tbody>
+      {{- range $r := .Roles}}
+      {{- if $r.Permissions}}
+      {{- range $i, $p := $r.Permissions}}
+      <tr data-role="{{$r.Role}}">
+        {{if eq $i 0}}<td rowspan="{{len $r.Permissions}}"><span class="role" data-role="{{$r.Role}}">{{$r.Label}}</span></td>{{end}}
+        <td>{{$p.Permission}}</td>
+        <td><span class="scope" data-scope="{{$p.Scope}}">{{$p.Scope}}</span></td>
+      </tr>
+      {{- end}}
+      {{- else}}
+      <tr data-role="{{$r.Role}}"><td><span class="role" data-role="{{$r.Role}}">{{$r.Label}}</span></td><td class="muted">none</td><td></td></tr>
+      {{- end}}
+      {{- end}}
+    </tbody>
+  </table>
+</section>
+{{end}}

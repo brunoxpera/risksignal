@@ -1,0 +1,39 @@
+{{define "content"}}
+<h1>Source monitor</h1>
+<p class="lead">Last run, data age, errors and open quarantine per source.</p>
+
+{{if .MonitorAvailable}}
+<section class="panel" aria-labelledby="source-list">
+  <h2 id="source-list">Sources</h2>
+  <table class="sources">
+    <caption>Registered sources</caption>
+    <thead>
+      <tr>
+        <th scope="col">Source</th>
+        <th scope="col">Status</th>
+        <th scope="col">Last run</th>
+        <th scope="col">Data age</th>
+        <th scope="col">Errors</th>
+        <th scope="col">Quarantine</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{- range .Sources}}
+      <tr data-source-id="{{.ID}}">
+        <td>{{.Name}} <span class="muted">({{.Type}})</span></td>
+        <td><span class="status" data-status="{{.Status}}">{{.StatusLabel}}</span>{{if .Degraded}} <span class="warn" data-degraded="true">degraded</span>{{end}}</td>
+        <td>{{or .LastRunAt "never"}}</td>
+        <td>{{or .DataAge "—"}}</td>
+        <td>{{.ErrorCount}}</td>
+        <td>{{.OpenQuarantine}}</td>
+      </tr>
+      {{- else}}
+      <tr><td colspan="6" class="empty" data-empty="sources">No sources are registered.</td></tr>
+      {{- end}}
+    </tbody>
+  </table>
+</section>
+{{else}}
+<p class="empty" data-empty="source-monitor">The source monitor read is not wired into this process.</p>
+{{end}}
+{{end}}

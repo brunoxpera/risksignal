@@ -1,0 +1,63 @@
+{{define "content"}}
+<h1>Users &amp; roles</h1>
+<p class="lead">Deactivate, never delete. Role changes and deactivation are audited.</p>
+
+<section class="panel" aria-labelledby="users-list">
+  <h2 id="users-list">Users</h2>
+  <table class="users">
+    <caption>Internal users with their current roles</caption>
+    <thead>
+      <tr>
+        <th scope="col">Display name</th>
+        <th scope="col">Email</th>
+        <th scope="col">Roles</th>
+        <th scope="col">State</th>
+        <th scope="col">Grant</th>
+        <th scope="col">Revoke</th>
+        <th scope="col">Deactivate</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{- range .Users}}
+      <tr data-user-id="{{.ID}}">
+        <td>{{.DisplayName}}</td>
+        <td>{{or .Email "—"}}</td>
+        <td>
+          {{- if .Roles}}{{range .Roles}}<span class="role">{{.}}</span> {{end}}{{else}}<span class="muted">none</span>{{end}}
+        </td>
+        <td><span class="state" data-active="{{.Active}}">{{.StateLabel}}</span></td>
+        <td>
+          <form class="inline" method="post" action="/admin/users/{{.ID}}/roles/grant">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <label class="visually-hidden" for="grant-{{.ID}}">Role to grant to {{.DisplayName}}</label>
+            <select id="grant-{{.ID}}" name="role">{{range $.Roles}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select>
+            <button type="submit">Grant</button>
+          </form>
+        </td>
+        <td>
+          <form class="inline command--destructive" method="post" action="/admin/users/{{.ID}}/roles/revoke">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <input type="hidden" name="confirm_token" value="{{.ConfirmRevoke}}">
+            <p class="target-scope" data-target-scope="user {{.ID}}">Target: user <code>{{.ID}}</code></p>
+            <label class="visually-hidden" for="revoke-{{.ID}}">Role to revoke from {{.DisplayName}}</label>
+            <select id="revoke-{{.ID}}" name="role">{{range $.Roles}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select>
+            <button type="submit">Revoke</button>
+          </form>
+        </td>
+        <td>
+          <form class="inline command--destructive" method="post" action="/admin/users/{{.ID}}/deactivate">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <input type="hidden" name="confirm_token" value="{{.ConfirmDeactivate}}">
+            <p class="target-scope" data-target-scope="user {{.ID}}">Target: user <code>{{.ID}}</code></p>
+            <button type="submit"{{if not .Active}} disabled{{end}}>Deactivate</button>
+          </form>
+        </td>
+      </tr>
+      {{- else}}
+      <tr><td colspan="7" class="empty" data-empty="users">No users.</td></tr>
+      {{- end}}
+    </tbody>
+  </table>
+  {{if .NextCursor}}<p class="pager"><a href="{{.NextHref}}">Next page</a></p>{{end}}
+</section>
+{{end}}

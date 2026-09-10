@@ -1,0 +1,7 @@
+{{- define "_flash" -}}
+{{with .Flash}}
+<div class="flash flash--{{.Kind}}" role="status" data-flash="{{.Kind}}">
+  <p class="flash__message">{{.Message}}</p>
+</div>
+{{end}}
+{{- end -}}

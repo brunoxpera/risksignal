@@ -1,0 +1,40 @@
+{{define "content"}}
+<h1>Signal triage</h1>
+<p class="lead">Signals ordered by priority, then age. Filters round-trip through the URL and are re-stated below (share the URL to reproduce this view).</p>
+
+{{template "_filter_bar" .FilterBar}}
+
+<section class="panel" aria-labelledby="triage-sla">
+  <h2 id="triage-sla">Time-critical SLA countdowns</h2>
+  <div class="sla-panel" data-sla-endpoint="{{.SLAEndpoint}}">
+    {{template "_sla_list" .SLARows}}
+  </div>
+</section>
+
+<section class="panel" aria-labelledby="triage-list">
+  <h2 id="triage-list">Signals</h2>
+  <table class="signals">
+    <caption>Signals matching the current filters</caption>
+    <thead>
+      <tr>
+        <th scope="col">Priority</th>
+        <th scope="col">Signal</th>
+        <th scope="col">Asset</th>
+        <th scope="col">Confidence</th>
+        <th scope="col">Status</th>
+        <th scope="col">SLA</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{- range .Signals}}
+      {{template "_signal_row" .}}
+      {{- else}}
+      <tr><td colspan="6" class="empty" data-empty="signals">No signals match the current filters.</td></tr>
+      {{- end}}
+    </tbody>
+  </table>
+  {{if .NextCursor}}
+  <p class="pager"><a href="{{.NextHref}}">Next page</a></p>
+  {{end}}
+</section>
+{{end}}

@@ -1,0 +1,8 @@
+{{define "content"}}
+<section class="panel" aria-labelledby="error-heading">
+  <h1 id="error-heading">Request failed</h1>
+  <p class="error-code" data-status="{{.Status}}">Status {{.Status}}</p>
+  <p>{{.Message}}</p>
+  <p><a href="/">Back to the dashboard</a></p>
+</section>
+{{end}}

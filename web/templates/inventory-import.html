@@ -1,0 +1,54 @@
+{{define "content"}}
+<h1>Inventory import</h1>
+<p class="lead">Upload a CSV to validate and preview it; committing writes the inventory in one transaction.</p>
+
+<section class="panel" aria-labelledby="import-upload">
+  <h2 id="import-upload">Stage an import</h2>
+  <form class="upload" method="post" action="/inventory/imports" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="field">
+      <label for="import-file">Inventory CSV file</label>
+      <input type="file" id="import-file" name="file" accept=".csv,text/csv" required>
+    </div>
+    <button type="submit">Upload and preview</button>
+  </form>
+</section>
+
+{{if .Import}}
+<section class="panel" aria-labelledby="import-staged">
+  <h2 id="import-staged">Staged import</h2>
+  <dl class="detail" data-import-id="{{.Import.ID}}">
+    <dt>Import id</dt><dd><code>{{.Import.ID}}</code></dd>
+    <dt>Status</dt><dd><span class="status" data-status="{{.Import.Status}}">{{.Import.Status}}</span></dd>
+    <dt>Rows</dt><dd>{{.Import.Rows}}</dd>
+    <dt>Errors</dt><dd data-count="import-errors">{{.Import.ErrorCount}}</dd>
+    <dt>Warnings</dt><dd data-count="import-warnings">{{.Import.WarningCount}}</dd>
+    <dt>Assets created / updated</dt><dd>{{.Import.AssetsCreated}} / {{.Import.AssetsUpdated}}</dd>
+    <dt>Components created / updated</dt><dd>{{.Import.ComponentsCreated}} / {{.Import.ComponentsUpdated}}</dd>
+  </dl>
+
+  {{if .Import.Problems}}
+  <table class="problems">
+    <caption>Positioned errors</caption>
+    <thead><tr><th scope="col">Row</th><th scope="col">Column</th><th scope="col">Message</th></tr></thead>
+    <tbody>
+      {{- range .Import.Problems}}
+      <tr><td>{{.Row}}</td><td>{{.Column}}</td><td>{{.Message}}</td></tr>
+      {{- end}}
+    </tbody>
+  </table>
+  {{end}}
+
+  {{if .Import.Committable}}
+  <form class="command command--destructive" method="post" action="/inventory/imports/{{.Import.ID}}/commit">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="confirm_token" value="{{.ConfirmCommit}}">
+    <p class="target-scope" data-target-scope="import {{.Import.ID}}">Target: staged import <code>{{.Import.ID}}</code> ({{.Import.Rows}} rows) — committing writes the inventory.</p>
+    <button type="submit">Commit this import</button>
+  </form>
+  {{else}}
+  <p class="muted" data-import-committed="true">This import is {{.Import.Status}}; nothing more to commit.</p>
+  {{end}}
+</section>
+{{end}}
+{{end}}

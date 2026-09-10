@@ -1,0 +1,87 @@
+/* RiskSignal server-rendered UI stylesheet (ARCH-006 §3.2, ADR-004).
+   Colour is additive only: every priority/status/confidence statement also
+   carries text and a symbol (ARCH-006 §4 row 1). WP-5b.07 turns this into a
+   content-hashed build artifact; it is committed as the current build. */
+
+:root {
+  --fg: #14181f;
+  --muted: #55607a;
+  --bg: #ffffff;
+  --line: #c8d0e0;
+  --accent: #14469b;
+  --p1: #9a1b1b;
+  --p2: #a85a00;
+  --p3: #225c2b;
+  --p4: #38414f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--fg);
+  background: var(--bg);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+a { color: var(--accent); }
+
+/* Visible focus on every interactive element (ARCH-006 §4 row 5). */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Non-visible focus still earns a visible ring for keyboard users. */
+a:focus,
+button:focus,
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.skip-link { position: absolute; left: -9999px; }
+.skip-link:focus { left: 1rem; top: 1rem; background: var(--bg); padding: .5rem 1rem; }
+
+.site-header { display: flex; gap: 1.5rem; align-items: center; padding: .75rem 1rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.nav { list-style: none; display: flex; gap: 1rem; margin: 0; padding: 0; }
+.brand { font-weight: 700; margin: 0; }
+
+main { padding: 1rem; max-width: 64rem; margin: 0 auto; }
+
+.panel { border: 1px solid var(--line); border-radius: .5rem; padding: 1rem; margin: 1rem 0; }
+
+table { border-collapse: collapse; width: 100%; }
+caption { text-align: left; font-weight: 600; padding: .25rem 0; }
+th, td { border-bottom: 1px solid var(--line); padding: .4rem .6rem; text-align: left; vertical-align: top; }
+
+.priority { font-weight: 700; white-space: nowrap; }
+.priority[data-priority="P1"] { color: var(--p1); }
+.priority[data-priority="P2"] { color: var(--p2); }
+.priority[data-priority="P3"] { color: var(--p3); }
+.priority[data-priority="P4"] { color: var(--p4); }
+.priority__symbol { margin-right: .2rem; }
+
+.sla-badge { white-space: nowrap; }
+.sla-badge[data-breached="true"] { font-weight: 700; color: var(--p1); }
+
+.muted { color: var(--muted); }
+.empty { color: var(--muted); font-style: italic; }
+.flash { padding: .6rem 1rem; border-radius: .25rem; margin: .5rem 1rem; }
+.flash--error { background: #fde8e8; border: 1px solid #c93b3b; }
+.flash--success { background: #e7f6ec; border: 1px solid #2c7a43; }
+.flash--info { background: #eef3fd; border: 1px solid #14469b; }
+.notice--conflict { background: #fff4e5; border: 1px solid var(--p2); padding: .6rem 1rem; border-radius: .25rem; }
+
+.target-scope { font-size: .9rem; color: var(--muted); }
+.field { margin: .5rem 0; display: flex; flex-direction: column; gap: .25rem; max-width: 32rem; }
+.components { max-width: 48rem; }
+.form-inline, .inline { display: inline-flex; gap: .35rem; align-items: center; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

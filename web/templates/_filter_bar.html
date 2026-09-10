@@ -1,0 +1,27 @@
+{{- /* Reusable filter bar (ARCH-006 §4 row 4): a GET form whose fields
+       round-trip through the query string, plus a canonical URL and a re-stated
+       filter summary so a shared URL reproduces the exact view. */ -}}
+{{- define "_filter_bar" -}}
+<form class="filter-bar" method="get" action="{{.Action}}" role="search" aria-label="Filters">
+  {{- range .Fields}}
+  <div class="field">
+    <label for="filter-{{.Name}}">{{.Label}}</label>
+    {{- if .Select}}
+    <select id="filter-{{.Name}}" name="{{.Name}}">
+      <option value="">All</option>
+      {{- range .Options}}
+      <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+      {{- end}}
+    </select>
+    {{- else}}
+    <input type="text" id="filter-{{.Name}}" name="{{.Name}}" value="{{.Value}}">
+    {{- end}}
+  </div>
+  {{- end}}
+  <div class="filter-bar__actions">
+    <button type="submit">Apply filters</button>
+    <a class="filter-bar__reset" href="{{.Action}}">Reset</a>
+  </div>
+  <p class="filter-bar__state" data-canonical-url="{{.CanonicalURL}}">Filters applied: {{.Summary}}</p>
+</form>
+{{- end -}}

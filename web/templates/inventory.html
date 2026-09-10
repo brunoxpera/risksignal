@@ -1,0 +1,47 @@
+{{define "content"}}
+<h1>Inventory</h1>
+<p class="lead">Assets the principal may read. Filters round-trip through the URL.</p>
+
+{{template "_filter_bar" .FilterBar}}
+
+<section class="panel" aria-labelledby="inventory-list">
+  <h2 id="inventory-list">Assets</h2>
+  <table class="assets">
+    <caption>Assets matching the current filters</caption>
+    <thead>
+      <tr>
+        <th scope="col">Name</th>
+        <th scope="col">Type</th>
+        <th scope="col">Environment</th>
+        <th scope="col">Criticality</th>
+        <th scope="col">Exposure</th>
+        <th scope="col">Owner</th>
+        <th scope="col">Source</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{- range .Assets}}
+      <tr data-asset-id="{{.ID}}">
+        <td>{{.Name}}</td>
+        <td>{{.Type}}</td>
+        <td>{{.Environment}}</td>
+        <td><span class="criticality" data-criticality="{{.Criticality}}">{{.Criticality}}</span></td>
+        <td>{{.Exposure}}</td>
+        <td>{{or .Owner "—"}}</td>
+        <td>{{.Source}}</td>
+      </tr>
+      {{- else}}
+      <tr><td colspan="7" class="empty" data-empty="assets">No assets match the current filters.</td></tr>
+      {{- end}}
+    </tbody>
+  </table>
+  {{if .NextCursor}}<p class="pager"><a href="{{.NextHref}}">Next page</a></p>{{end}}
+</section>
+
+{{if .Import.Manage}}
+<section class="panel" aria-labelledby="inventory-import-link">
+  <h2 id="inventory-import-link">Inventory import</h2>
+  <p><a href="/inventory/imports">Stage and commit a CSV inventory import</a></p>
+</section>
+{{end}}
+{{end}}

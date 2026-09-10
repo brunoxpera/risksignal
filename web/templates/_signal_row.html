@@ -1,0 +1,14 @@
+{{- /* One triage-list row (ARCH-006 §3.1). The priority cell carries text,
+       a symbol and data-priority so priority is never conveyed by colour alone
+       (§4 row 1); the confidence cell uses the confidence vocabulary (§4 row
+       2). */ -}}
+{{- define "_signal_row" -}}
+<tr class="signal-row" data-signal-id="{{.ID}}" data-priority="{{.Priority}}" data-status="{{.Status}}">
+  <td><span class="priority" data-priority="{{.Priority}}"><span class="priority__symbol" aria-hidden="true">{{.Symbol}}</span> {{.Priority}}</span></td>
+  <td><a href="{{.Href}}">{{.CVEID}}</a>{{if .Summary}} <span class="muted">{{.Summary}}</span>{{end}}</td>
+  <td>{{or .AssetName "—"}}</td>
+  <td><span class="confidence" data-confidence="{{.Confidence}}">{{.ConfidenceLabel}}</span></td>
+  <td><span class="status" data-status="{{.Status}}">{{.StatusLabel}}</span></td>
+  <td>{{template "_sla_badge" .SLA}}</td>
+</tr>
+{{- end -}}

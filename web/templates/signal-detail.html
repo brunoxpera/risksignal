@@ -1,0 +1,165 @@
+{{define "content"}}
+<h1>Signal <code>{{.CVEID}}</code></h1>
+
+{{if .Conflict}}
+<div class="notice notice--conflict" role="alert" data-notice="stale-version">
+  <p><strong>Conflict:</strong> {{.ConflictMessage}} The form below shows the fresh version — review it and retry.</p>
+</div>
+{{end}}
+
+<section class="panel" aria-labelledby="detail-summary">
+  <h2 id="detail-summary">Summary</h2>
+  <dl class="detail">
+    <dt>Priority</dt>
+    <dd><span class="priority" data-priority="{{.Priority}}"><span class="priority__symbol" aria-hidden="true">{{.Symbol}}</span> {{.Priority}}</span></dd>
+    <dt>Status</dt>
+    <dd><span class="status" data-status="{{.Status}}">{{.StatusLabel}}</span></dd>
+    <dt>Confidence</dt>
+    <dd><span class="confidence" data-confidence="{{.Confidence}}">{{.ConfidenceLabel}}</span> <span class="muted">(match method: {{.Method}})</span></dd>
+    <dt>Owner</dt>
+    <dd>{{or .Owner "unassigned"}}</dd>
+    <dt>Version</dt>
+    <dd data-version="{{.Version}}">{{.Version}}</dd>
+    <dt>Created</dt>
+    <dd>{{.CreatedAt}}</dd>
+    <dt>SLA</dt>
+    <dd>{{template "_sla_badge" .SLA}}</dd>
+    <dt>Asset</dt>
+    <dd>{{if .Asset.Name}}{{.Asset.Name}} ({{.Asset.Type}}, criticality {{.Asset.Criticality}}){{else}}—{{end}}</dd>
+    <dt>Product</dt>
+    <dd>{{if .Product.Product}}{{.Product.Vendor}} / {{.Product.Product}} {{.Product.Version}}{{else}}—{{end}}</dd>
+  </dl>
+  {{if .Summary}}<p class="muted">{{.Summary}}</p>{{end}}
+</section>
+
+<section class="panel" aria-labelledby="detail-actions">
+  <h2 id="detail-actions">Actions</h2>
+  <p class="muted">Every value is explicit — no hidden defaults. Destructive actions show their target and require a confirmation token that is validated on the server.</p>
+
+  <form class="command" method="post" action="/signals/{{.ID}}/acknowledge">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="expected_version" value="{{.Version}}">
+    <button type="submit">Acknowledge (new → in review)</button>
+  </form>
+
+  <form class="command" method="post" action="/signals/{{.ID}}/transition">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="expected_version" value="{{.Version}}">
+    <input type="hidden" name="confirm_token" value="{{.ConfirmTransition}}">
+    <p class="target-scope" data-target-scope="signal {{.ID}}">Target: signal <code>{{.ID}}</code> (status {{.Status}})</p>
+    <div class="field">
+      <label for="cmd-transition-status">New status</label>
+      <select id="cmd-transition-status" name="status" required>
+        {{- range .Statuses}}
+        <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+        {{- end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="cmd-transition-reason">Reason (required for closed/reopen edges)</label>
+      <textarea id="cmd-transition-reason" name="reason"></textarea>
+    </div>
+    <button type="submit">Transition</button>
+  </form>
+
+  <form class="command" method="post" action="/signals/{{.ID}}/assign">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="expected_version" value="{{.Version}}">
+    <div class="field">
+      <label for="cmd-assign-owner">Assign owner (id; empty clears)</label>
+      <input type="text" id="cmd-assign-owner" name="owner_id" value="{{.Owner}}">
+    </div>
+    <button type="submit">Assign owner</button>
+  </form>
+
+  <form class="command" method="post" action="/signals/{{.ID}}/comment">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="field">
+      <label for="cmd-comment">Add comment</label>
+      <textarea id="cmd-comment" name="comment" required></textarea>
+    </div>
+    <button type="submit">Add comment</button>
+  </form>
+
+  <form class="command command--destructive" method="post" action="/signals/{{.ID}}/override">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="expected_version" value="{{.Version}}">
+    <input type="hidden" name="confirm_token" value="{{.ConfirmOverride}}">
+    <p class="target-scope" data-target-scope="signal {{.ID}}">Target: signal <code>{{.ID}}</code> (priority {{.Priority}})</p>
+    <div class="field">
+      <label for="cmd-override-priority">Override priority</label>
+      <select id="cmd-override-priority" name="priority" required>
+        {{- range .Priorities}}
+        <option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>
+        {{- end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="cmd-override-reason">Reason (required)</label>
+      <textarea id="cmd-override-reason" name="reason" required></textarea>
+    </div>
+    <button type="submit">Override priority</button>
+  </form>
+
+  <form class="command command--destructive" method="post" action="/signals/{{.ID}}/revert">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="expected_version" value="{{.Version}}">
+    <input type="hidden" name="confirm_token" value="{{.ConfirmRevert}}">
+    <p class="target-scope" data-target-scope="signal {{.ID}}">Target: signal <code>{{.ID}}</code> (priority {{.Priority}}, version {{.Version}})</p>
+    <button type="submit">Revert priority override</button>
+  </form>
+
+  <form class="command command--destructive" method="post" action="/signals/{{.ID}}/pause-sla">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <input type="hidden" name="confirm_token" value="{{.ConfirmPause}}">
+    <p class="target-scope" data-target-scope="signal {{.ID}}">Target: signal <code>{{.ID}}</code> (SLA clock)</p>
+    <div class="field">
+      <label for="cmd-pause-target">SLA target</label>
+      <select id="cmd-pause-target" name="target" required>
+        {{- range .SLATargets}}
+        <option value="{{.Value}}">{{.Label}}</option>
+        {{- end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="cmd-pause-reason">Reason (required)</label>
+      <textarea id="cmd-pause-reason" name="reason" required></textarea>
+    </div>
+    <button type="submit">Pause SLA clock</button>
+  </form>
+
+  <form class="command" method="post" action="/signals/{{.ID}}/resume-sla">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <div class="field">
+      <label for="cmd-resume-target">SLA target</label>
+      <select id="cmd-resume-target" name="target" required>
+        {{- range .SLATargets}}
+        <option value="{{.Value}}">{{.Label}}</option>
+        {{- end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="cmd-resume-reason">Reason (required)</label>
+      <textarea id="cmd-resume-reason" name="reason" required></textarea>
+    </div>
+    <button type="submit">Resume SLA clock</button>
+  </form>
+</section>
+
+<section class="panel" aria-labelledby="detail-asset">
+  <h2 id="detail-asset">Asset context</h2>
+  {{if .Components}}
+  <table class="components">
+    <caption>Components of the signal's asset</caption>
+    <thead><tr><th scope="col">Vendor</th><th scope="col">Product</th><th scope="col">Version</th></tr></thead>
+    <tbody>
+      {{- range .Components}}
+      <tr><td>{{or .Vendor "—"}}</td><td>{{or .Product "—"}}</td><td>{{or .Version "—"}}</td></tr>
+      {{- end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="empty" data-empty="components">No component context available.</p>
+  {{end}}
+</section>
+{{end}}

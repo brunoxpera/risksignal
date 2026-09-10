@@ -1,0 +1,47 @@
+{{define "content"}}
+<h1>Dashboard</h1>
+
+<section class="panel" aria-labelledby="dash-signals">
+  <h2 id="dash-signals">Signal overview</h2>
+  <p class="panel__lead">Aggregate counts over the signals the principal may read.</p>
+  <ul class="counts">
+    <li>Total: <strong data-count="total">{{.SignalTotal}}</strong></li>
+    {{- range .PriorityCounts}}
+    <li><span class="priority" data-priority="{{.Priority}}"><span class="priority__symbol" aria-hidden="true">{{.Symbol}}</span> {{.Priority}}</span>: <strong data-count="priority-{{.Priority}}">{{.Count}}</strong></li>
+    {{- end}}
+    {{- range .StatusCounts}}
+    <li><span class="status" data-status="{{.Status}}">{{.StatusLabel}}</span>: <strong data-count="status-{{.Status}}">{{.Count}}</strong></li>
+    {{- end}}
+  </ul>
+  <p><a href="/signals">Open the signal triage list</a></p>
+</section>
+
+<section class="panel" aria-labelledby="dash-sla">
+  <h2 id="dash-sla">Time-critical signals</h2>
+  <div class="sla-panel" data-sla-endpoint="{{.SLAEndpoint}}">
+    {{template "_sla_list" .SLARows}}
+  </div>
+</section>
+
+<section class="panel" aria-labelledby="dash-sources">
+  <h2 id="dash-sources">Sources</h2>
+  {{if .SourceMonitorAvailable}}
+  <ul class="source-summary">
+    {{- range .SourceSummary}}
+    <li data-source-id="{{.ID}}">{{.Name}}: {{.StatusLabel}} (last run {{or .LastRunAt "—"}})</li>
+    {{- end}}
+  </ul>
+  {{else}}
+  <p class="empty" data-empty="source-monitor">The source monitor is not configured for this process.</p>
+  {{end}}
+</section>
+
+<section class="panel" aria-labelledby="dash-inventory">
+  <h2 id="dash-inventory">Inventory data quality</h2>
+  <ul class="counts">
+    <li>Assets: <strong data-count="assets">{{.AssetTotal}}</strong></li>
+    <li>Assets with an owner: <strong data-count="assets-owned">{{.AssetOwned}}</strong></li>
+  </ul>
+  <p><a href="/inventory">Open the inventory</a></p>
+</section>
+{{end}}

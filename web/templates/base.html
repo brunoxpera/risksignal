@@ -1,0 +1,35 @@
+{{- define "base" -}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} · RiskSignal</title>
+  <link rel="stylesheet" href="{{asset "app.css"}}">
+  <script src="{{asset "app.js"}}" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to main content</a>
+  <header class="site-header">
+    <p class="brand">RiskSignal</p>
+    <nav aria-label="Main navigation">
+      <ul class="nav">
+        {{- range .Nav}}
+        <li><a href="{{.Href}}"{{if .Active}} aria-current="page"{{end}}>{{.Label}}</a></li>
+        {{- end}}
+      </ul>
+    </nav>
+    {{- if .Principal.Authenticated}}
+    <p class="principal" data-user-id="{{.Principal.UserID}}">Signed in as <strong>{{.Principal.DisplayName}}</strong></p>
+    {{- end}}
+  </header>
+  {{template "_flash" .}}
+  <main id="content" tabindex="-1">
+{{template "content" .}}
+  </main>
+  <footer class="site-footer">
+    <p>RiskSignal — server-rendered interface. Data shown reflects the authenticated principal's scope.</p>
+  </footer>
+</body>
+</html>
+{{- end -}}

@@ -1,0 +1,18 @@
+{{- /* SLA-countdown badge (ARCH-006 §4 row 6). Text + symbol survive CSS
+       removal; data-priority/data-remaining are the machine-readable state the
+       progressive layer reads. */ -}}
+{{- define "_sla_badge" -}}
+<span class="sla-badge" data-sla-id="{{.SignalID}}" data-priority="{{.Priority}}" data-remaining-seconds="{{.RemainingSeconds}}" data-breached="{{.Breached}}"><span class="priority__symbol" aria-hidden="true">{{.Symbol}}</span> {{.Priority}} SLA <time class="sla-badge__time">{{.Remaining}}</time></span>
+{{- end -}}
+
+{{- /* The fragment the triage list and dashboard swap in place of a full page
+       reload (GET /signals/_sla). */ -}}
+{{- define "_sla_list" -}}
+<div id="sla-countdowns" class="sla-countdowns">
+{{- range .}}
+{{template "_sla_badge" .}}
+{{- else}}
+<span class="sla-badge sla-badge--none">No time-critical (P1/P2) signals.</span>
+{{- end}}
+</div>
+{{- end -}}

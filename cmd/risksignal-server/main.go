@@ -41,12 +41,14 @@ import (
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/migrate"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
+	"github.com/brunoxpera/risksignal/internal/adapters/web"
 	"github.com/brunoxpera/risksignal/internal/application"
 	"github.com/brunoxpera/risksignal/internal/domain"
 	"github.com/brunoxpera/risksignal/internal/platform/buildinfo"
 	"github.com/brunoxpera/risksignal/internal/platform/clock"
 	"github.com/brunoxpera/risksignal/internal/platform/config"
 	"github.com/brunoxpera/risksignal/internal/platform/logging"
+	webassets "github.com/brunoxpera/risksignal/web"
 )
 
 // shutdownGracePeriod is how long the server waits for in-flight requests
@@ -144,9 +146,10 @@ func serve(cfg *config.Config, logger *slog.Logger) error {
 // concept ch. 10.2 on the ServeMux; WP-1b.08 registers the generated I1b
 // signal reads of ARCH-001 §4 (GET /api/v1/signals and
 // GET /api/v1/signals/{signal_id}) on the same mux behind the I5a per-route
-// permission declaration (signals.read). Every other path still 404s —
-// through the same chain, whose access log writes one structured record per
-// request (WP-1a.08).
+// permission declaration (signals.read). WP-5b.06 mounts the server-rendered
+// web adapter (ARCH-006 §3) on the same mux behind the same chain + auth
+// middleware; any other path still 404s through the same chain, whose access
+// log writes one structured record per request (WP-1a.08).
 //
 // The authentication middleware is built from the configuration: with the
 // local bypass enabled it authenticates as the seeded dev principal (local
@@ -197,10 +200,32 @@ func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (ht
 	i5b := httpapi.I5BAPI{Inventory: svc, Assets: svc, Users: svc}
 	httpapi.RegisterAPIRoutes(gate.Decorate(mux), httpapi.NewAPIHandler(svc, svc, svc, logger, i5b))
 
+	// The server-rendered web adapter (ARCH-006 §3, WP-5b.06) is mounted on the
+	// same mux behind the same middleware chain + I5a auth middleware: it calls
+	// the application service in-process (no loopback API call), so it runs the
+	// same use cases and the same in-command authoriser as the API. `gate`
+	// carries the per-route permission declarations of the web routes.
+	webUI, err := web.New(web.Options{
+		Service:      svc,
+		Roles:        repo.NewUserRepo(gen.New(pool)),
+		Logger:       logger,
+		Clock:        clock.RealClock{},
+		Identity:     httpapi.IdentityFromContext,
+		Templates:    webassets.Templates,
+		Assets:       webassets.Assets,
+		CookieSecure: cfg.Env == "production",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("web adapter: %w", err)
+	}
+	webUI.Register(mux, gate)
+
 	// The inventory-import upload is bounded by InventoryMaxBytes (the I5b
-	// staged CSV), not by the 1 MiB JSON default of the chain.
+	// staged CSV), not by the 1 MiB JSON default of the chain — for both the
+	// API upload and the server-rendered web upload.
 	return httpapi.NewHandlerWithAuth(mux, logger, auth,
-		httpapi.BodyLimitOverride("POST /api/v1/inventory/imports", application.InventoryMaxBytes)), nil
+		httpapi.BodyLimitOverride("POST /api/v1/inventory/imports", application.InventoryMaxBytes),
+		httpapi.BodyLimitOverride("POST /inventory/imports", application.InventoryMaxBytes)), nil
 }
 
 // buildAuthMiddleware assembles the I5a authentication middleware from the
