@@ -39,6 +39,7 @@ import (
 	"github.com/brunoxpera/risksignal/internal/adapters/sources/nvd"
 	"github.com/brunoxpera/risksignal/internal/adapters/worker"
 	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application/export"
 	"github.com/brunoxpera/risksignal/internal/platform/buildinfo"
 	"github.com/brunoxpera/risksignal/internal/platform/clock"
 	"github.com/brunoxpera/risksignal/internal/platform/config"
@@ -185,6 +186,18 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 		PriorityRules:      repo.NewPriorityRuleRepo(q),
 		FactorSource:       repo.NewPriorityFactorRepo(q),
 		SLAReminderCadence: cfg.Worker.SLAReminderCadence,
+		// The I6 operations ports (ARCH-007 §1.2/§2, WP-6.06 / DEV-118): the
+		// export CRUD + streaming read + spool the export.generate job runs on,
+		// and the retention repo the retention.execute handler and the monthly
+		// dry-run scheduler drive. ExportTTL/ExportMaxRows come from the export
+		// config (export.ttl/export.max_rows); the retention period and batch
+		// size take the ARCH-007 §2.4 defaults (5 years, 500).
+		Exports:       repo.NewExportRepo(q),
+		ExportStore:   export.NewSpool(cfg.Export.Dir),
+		SignalExport:  repo.NewSignalExportSource(q),
+		ExportTTL:     cfg.Export.TTL,
+		ExportMaxRows: cfg.Export.MaxRows,
+		Retention:     repo.NewRetentionRepo(q),
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)
 		},
@@ -302,6 +315,31 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 		return fmt.Errorf("configure sla scheduler: %w", err)
 	}
 
+	// The I6 export/retention jobs (ARCH-007 §1.2/§2.2, WP-6.06 / DEV-118): the
+	// export.generate and retention.execute relay handlers (registered on the
+	// same dispatch registry as the other job types) plus their two schedulers
+	// — the daily export sweep and the monthly retention dry-run proposal. The
+	// schedulers gate their cadence on the injected clock, so a production
+	// worker sweeps once per worker.export_sweep_interval and proposes a
+	// retention dry-run once per worker.retention_schedule, while a test drives
+	// them with a FakeClock without real waiting. Registering the handlers makes
+	// the rows the CreateExport/ApproveRetentionRun commands enqueue consumable
+	// — without them those rows would dead-letter ("no handler registered").
+	exportJobs, err := worker.NewExportJobs(svc, svc, clock.RealClock{}, cfg.Worker.ExportSweepInterval, logger)
+	if err != nil {
+		return fmt.Errorf("configure export jobs: %w", err)
+	}
+	if err := exportJobs.RegisterHandlers(relay); err != nil {
+		return fmt.Errorf("configure export jobs: %w", err)
+	}
+	retentionJobs, err := worker.NewRetentionJobs(svc, svc, clock.RealClock{}, cfg.Worker.RetentionSchedule, logger)
+	if err != nil {
+		return fmt.Errorf("configure retention jobs: %w", err)
+	}
+	if err := retentionJobs.RegisterHandlers(relay); err != nil {
+		return fmt.Errorf("configure retention jobs: %w", err)
+	}
+
 	health := worker.NewHealth()
 	// One scheduler cycle runs the source scan first (ARCH-002 §5: enqueue
 	// the source.fetch jobs of the due schedule slots — the dedupe keys of
@@ -329,6 +367,16 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 		// by the same drain. Its own cadence gate makes the call a no-op on the
 		// cycles that are not due.
 		if err := slaSchedule.Tick(ctx); err != nil {
+			return err
+		}
+		// The I6 cadences run before the drain: the daily export sweep reclaims
+		// the expired spool artifacts and the monthly retention scheduler
+		// proposes a dry-run. Both gate on the injected clock, so most cycles
+		// are no-ops.
+		if err := exportJobs.Sweep(ctx); err != nil {
+			return err
+		}
+		if err := retentionJobs.Tick(ctx); err != nil {
 			return err
 		}
 		return relay.Drain(ctx)

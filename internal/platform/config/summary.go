@@ -62,6 +62,11 @@ func (c *Config) summaryRows() []summaryRow {
 		{key: "worker.interval", state: c.Worker.Interval.String(), source: src("worker.interval")},
 		{key: "worker.sla_evaluate_interval", state: c.Worker.SLAEvaluateInterval.String(), source: src("worker.sla_evaluate_interval")},
 		{key: "worker.sla_reminder_cadence", state: c.Worker.SLAReminderCadence.String(), source: src("worker.sla_reminder_cadence")},
+		{key: "worker.retention_schedule", state: c.Worker.RetentionSchedule.String(), source: src("worker.retention_schedule")},
+		{key: "worker.export_sweep_interval", state: c.Worker.ExportSweepInterval.String(), source: src("worker.export_sweep_interval")},
+		{key: "export.dir", state: c.Export.Dir, source: src("export.dir")},
+		{key: "export.ttl", state: c.Export.TTL.String(), source: src("export.ttl")},
+		{key: "export.max_rows", state: strconv.Itoa(c.Export.MaxRows), source: src("export.max_rows")},
 		{key: "notify.p2_active", state: strconv.FormatBool(c.Notify.P2Active), source: src("notify.p2_active")},
 		{key: "notify.smtp.enabled", state: strconv.FormatBool(c.Notify.SMTP.Enabled), source: src("notify.smtp.enabled")},
 		{key: "notify.smtp.addr", state: "set", source: src("notify.smtp.addr")},
@@ -98,6 +103,12 @@ type JSONSummary struct {
 	WorkerInterval      ScalarSummary[string] `json:"worker.interval"`
 	WorkerSLAEval       ScalarSummary[string] `json:"worker.sla_evaluate_interval"`
 	WorkerSLAReminder   ScalarSummary[string] `json:"worker.sla_reminder_cadence"`
+	WorkerRetention     ScalarSummary[string] `json:"worker.retention_schedule"`
+	WorkerExportSweep   ScalarSummary[string] `json:"worker.export_sweep_interval"`
+
+	ExportDir     ScalarSummary[string] `json:"export.dir"`
+	ExportTTL     ScalarSummary[string] `json:"export.ttl"`
+	ExportMaxRows ScalarSummary[int]    `json:"export.max_rows"`
 
 	NotifyP2Active    ScalarSummary[bool] `json:"notify.p2_active"`
 	NotifySMTPEnabled ScalarSummary[bool] `json:"notify.smtp.enabled"`
@@ -153,6 +164,11 @@ func (c *Config) JSONSummary() JSONSummary {
 		WorkerInterval:      ScalarSummary[string]{Value: c.Worker.Interval.String(), Source: c.sourceOf("worker.interval")},
 		WorkerSLAEval:       ScalarSummary[string]{Value: c.Worker.SLAEvaluateInterval.String(), Source: c.sourceOf("worker.sla_evaluate_interval")},
 		WorkerSLAReminder:   ScalarSummary[string]{Value: c.Worker.SLAReminderCadence.String(), Source: c.sourceOf("worker.sla_reminder_cadence")},
+		WorkerRetention:     ScalarSummary[string]{Value: c.Worker.RetentionSchedule.String(), Source: c.sourceOf("worker.retention_schedule")},
+		WorkerExportSweep:   ScalarSummary[string]{Value: c.Worker.ExportSweepInterval.String(), Source: c.sourceOf("worker.export_sweep_interval")},
+		ExportDir:           ScalarSummary[string]{Value: c.Export.Dir, Source: c.sourceOf("export.dir")},
+		ExportTTL:           ScalarSummary[string]{Value: c.Export.TTL.String(), Source: c.sourceOf("export.ttl")},
+		ExportMaxRows:       ScalarSummary[int]{Value: c.Export.MaxRows, Source: c.sourceOf("export.max_rows")},
 		NotifyP2Active:      ScalarSummary[bool]{Value: c.Notify.P2Active, Source: c.sourceOf("notify.p2_active")},
 		NotifySMTPEnabled:   ScalarSummary[bool]{Value: c.Notify.SMTP.Enabled, Source: c.sourceOf("notify.smtp.enabled")},
 		NotifySMTPAddr:      PresenceSummary{Set: true, Source: c.sourceOf("notify.smtp.addr")},

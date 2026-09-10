@@ -41,6 +41,20 @@ const SchemaVersion = 1
 // Environment variable prefix for all overrides (D-006).
 const envVarPrefix = "RISKSIGNAL_"
 
+// I6 worker/export defaults (ARCH-007 §1.2/§2.4, WP-6.06 / DEV-118): the
+// monthly retention dry-run cadence, the daily export-sweep cadence and the
+// server-local export spool root.
+const (
+	// defaultRetentionSchedule is the monthly retention dry-run cadence
+	// (retention.schedule).
+	defaultRetentionSchedule = 30 * 24 * time.Hour
+	// defaultExportSweepInterval is the daily export-sweep cadence
+	// (worker.export_sweep_interval).
+	defaultExportSweepInterval = 24 * time.Hour
+	// defaultExportDir is the server-local export spool root (export.dir).
+	defaultExportDir = "var/exports"
+)
+
 // envVarConfigFile selects the optional JSON configuration file. It is not a
 // configuration value itself; it tells the loader where to look.
 const envVarConfigFile = envVarPrefix + "CONFIG_FILE"
@@ -68,6 +82,7 @@ type Config struct {
 	Auth          Auth     `json:"auth"`
 	Worker        Worker   `json:"worker"`
 	Notify        Notify   `json:"notify"`
+	Export        Export   `json:"export"`
 
 	// sources records the provenance of every leaf key; populated by Load.
 	sources map[string]Source
@@ -146,6 +161,35 @@ type Worker struct {
 	// (ARCH-004 §4.4): after the first escalation a reminder is emitted
 	// once per cadence window. It is configuration, never table state.
 	SLAReminderCadence time.Duration `json:"sla_reminder_cadence"`
+
+	// RetentionSchedule is the cadence of the monthly retention dry-run
+	// proposal (ARCH-007 §2.4, retention.schedule; WP-6.06 / DEV-118): the
+	// worker proposes one dry-run run per cadence on the injected clock. It is
+	// configuration, never table state. The default is monthly (30 days).
+	RetentionSchedule time.Duration `json:"retention_schedule"`
+
+	// ExportSweepInterval is the cadence of the daily export expiry sweep
+	// (ARCH-007 §1.2; WP-6.06 / DEV-118): the worker deletes the expired
+	// artifacts and marks their rows 'expired' once per cadence on the
+	// injected clock. The default is daily (24 hours).
+	ExportSweepInterval time.Duration `json:"export_sweep_interval"`
+}
+
+// Export carries the I6 export-spool configuration (ARCH-007 §1.2/§10,
+// WP-6.06 / DEV-118). The artifact is a file in a server-local spool — never a
+// bytea — so it self-expires and stays out of the audit/backup retention path.
+type Export struct {
+	// Dir is the spool root the export.generate job writes artifacts into and
+	// a download/sweep reads them from (export.dir; a volume in the demo
+	// deployment).
+	Dir string `json:"dir"`
+	// TTL is the artifact lifetime (export.ttl); an export expires at
+	// created_at + TTL and the sweep then deletes it. The default is 7 days.
+	TTL time.Duration `json:"ttl"`
+	// MaxRows bounds a single export (export.max_rows, the strict input limit
+	// of §12.3): a filter matching more rows is a validation error, never a
+	// silent truncation. The default is 100000.
+	MaxRows int `json:"max_rows"`
 }
 
 // Notify carries the I4 notification-channel configuration (ARCH-004 §6.1,
@@ -221,6 +265,10 @@ func Defaults() Config {
 			// escalated P1 once per hour without configuration.
 			SLAEvaluateInterval: time.Minute,
 			SLAReminderCadence:  time.Hour,
+			// The retention dry-run is proposed monthly and the export sweep
+			// runs daily without configuration (ARCH-007 §2.4/§1.2).
+			RetentionSchedule:   defaultRetentionSchedule,
+			ExportSweepInterval: defaultExportSweepInterval,
 		},
 		Notify: Notify{
 			// P2 notifications are configurable (FR-023); the active default
@@ -230,6 +278,14 @@ func Defaults() Config {
 			P2Active: true,
 			SMTP:     NotifySMTP{Enabled: false},
 			Webhook:  NotifyWebhook{Enabled: false},
+		},
+		Export: Export{
+			// A local worker spools export artifacts under var/exports by
+			// default, keeps them for 7 days and bounds an export at 100k rows
+			// (ARCH-007 §1.2: export.dir/export.ttl/export.max_rows).
+			Dir:     defaultExportDir,
+			TTL:     7 * 24 * time.Hour,
+			MaxRows: 100000,
 		},
 	}
 }
@@ -313,6 +369,39 @@ var envBindings = []struct {
 			return fmt.Errorf("worker.sla_reminder_cadence: %s: must be a Go duration such as 1h", envName("worker.sla_reminder_cadence"))
 		}
 		c.Worker.SLAReminderCadence = d
+		return nil
+	}},
+	{"worker.retention_schedule", func(c *Config, v string) error {
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("worker.retention_schedule: %s: must be a Go duration such as 720h", envName("worker.retention_schedule"))
+		}
+		c.Worker.RetentionSchedule = d
+		return nil
+	}},
+	{"worker.export_sweep_interval", func(c *Config, v string) error {
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("worker.export_sweep_interval: %s: must be a Go duration such as 24h", envName("worker.export_sweep_interval"))
+		}
+		c.Worker.ExportSweepInterval = d
+		return nil
+	}},
+	{"export.dir", func(c *Config, v string) error { c.Export.Dir = strings.TrimSpace(v); return nil }},
+	{"export.ttl", func(c *Config, v string) error {
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("export.ttl: %s: must be a Go duration such as 168h", envName("export.ttl"))
+		}
+		c.Export.TTL = d
+		return nil
+	}},
+	{"export.max_rows", func(c *Config, v string) error {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("export.max_rows: %s: must be an integer", envName("export.max_rows"))
+		}
+		c.Export.MaxRows = n
 		return nil
 	}},
 	{"notify.p2_active", func(c *Config, v string) error {
@@ -445,6 +534,7 @@ type configFile struct {
 	Auth          *fileAuth     `json:"auth"`
 	Worker        *fileWorker   `json:"worker"`
 	Notify        *fileNotify   `json:"notify"`
+	Export        *fileExport   `json:"export"`
 }
 
 type fileHTTP struct {
@@ -477,6 +567,14 @@ type fileWorker struct {
 	Interval            *string `json:"interval"`              // Go duration, e.g. "30s"
 	SLAEvaluateInterval *string `json:"sla_evaluate_interval"` // Go duration, e.g. "1m"
 	SLAReminderCadence  *string `json:"sla_reminder_cadence"`  // Go duration, e.g. "1h"
+	RetentionSchedule   *string `json:"retention_schedule"`    // Go duration, e.g. "720h" (monthly)
+	ExportSweepInterval *string `json:"export_sweep_interval"` // Go duration, e.g. "24h"
+}
+
+type fileExport struct {
+	Dir     *string `json:"dir"`
+	TTL     *string `json:"ttl"` // Go duration, e.g. "168h"
+	MaxRows *int    `json:"max_rows"`
 }
 
 type fileNotify struct {
@@ -622,6 +720,40 @@ func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
 		}
 		cfg.Worker.SLAReminderCadence = d
 		prov["worker.sla_reminder_cadence"] = SourceFile
+	}
+	if fc.Worker != nil && fc.Worker.RetentionSchedule != nil {
+		d, err := time.ParseDuration(strings.TrimSpace(*fc.Worker.RetentionSchedule))
+		if err != nil {
+			return fmt.Errorf("config file %s: worker.retention_schedule: invalid duration (expected a Go duration such as 720h)", path)
+		}
+		cfg.Worker.RetentionSchedule = d
+		prov["worker.retention_schedule"] = SourceFile
+	}
+	if fc.Worker != nil && fc.Worker.ExportSweepInterval != nil {
+		d, err := time.ParseDuration(strings.TrimSpace(*fc.Worker.ExportSweepInterval))
+		if err != nil {
+			return fmt.Errorf("config file %s: worker.export_sweep_interval: invalid duration (expected a Go duration such as 24h)", path)
+		}
+		cfg.Worker.ExportSweepInterval = d
+		prov["worker.export_sweep_interval"] = SourceFile
+	}
+	if fc.Export != nil {
+		if fc.Export.Dir != nil {
+			cfg.Export.Dir = strings.TrimSpace(*fc.Export.Dir)
+			prov["export.dir"] = SourceFile
+		}
+		if fc.Export.TTL != nil {
+			d, err := time.ParseDuration(strings.TrimSpace(*fc.Export.TTL))
+			if err != nil {
+				return fmt.Errorf("config file %s: export.ttl: invalid duration (expected a Go duration such as 168h)", path)
+			}
+			cfg.Export.TTL = d
+			prov["export.ttl"] = SourceFile
+		}
+		if fc.Export.MaxRows != nil {
+			cfg.Export.MaxRows = *fc.Export.MaxRows
+			prov["export.max_rows"] = SourceFile
+		}
 	}
 	if fc.Notify != nil {
 		if fc.Notify.P2Active != nil {

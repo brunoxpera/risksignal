@@ -117,6 +117,28 @@ func Validate(c *Config) []error {
 		errs = append(errs, errors.New("worker.sla_reminder_cadence: must be a positive duration (set it via a config file or RISKSIGNAL_WORKER_SLA_REMINDER_CADENCE)"))
 	}
 
+	// worker.retention_schedule and worker.export_sweep_interval must be
+	// positive: a non-positive cadence would make the retention/sweep
+	// schedulers spin or never fire (ARCH-007 §2.4/§1.2, WP-6.06).
+	if c.Worker.RetentionSchedule <= 0 {
+		errs = append(errs, errors.New("worker.retention_schedule: must be a positive duration (set it via a config file or RISKSIGNAL_WORKER_RETENTION_SCHEDULE)"))
+	}
+	if c.Worker.ExportSweepInterval <= 0 {
+		errs = append(errs, errors.New("worker.export_sweep_interval: must be a positive duration (set it via a config file or RISKSIGNAL_WORKER_EXPORT_SWEEP_INTERVAL)"))
+	}
+
+	// The export spool (ARCH-007 §1.2): a positive TTL, a positive max-rows
+	// bound and a non-empty spool root.
+	if strings.TrimSpace(c.Export.Dir) == "" {
+		errs = append(errs, errors.New("export.dir: must not be empty (the server-local export spool root)"))
+	}
+	if c.Export.TTL <= 0 {
+		errs = append(errs, errors.New("export.ttl: must be a positive duration (set it via a config file or RISKSIGNAL_EXPORT_TTL)"))
+	}
+	if c.Export.MaxRows <= 0 {
+		errs = append(errs, errors.New("export.max_rows: must be a positive integer (set it via a config file or RISKSIGNAL_EXPORT_MAX_ROWS)"))
+	}
+
 	// The notify channels (ARCH-004 §6.1): an enabled SMTP channel needs a
 	// host:port relay, a sender and a recipient; an enabled webhook needs a
 	// parseable URL and a signing secret. A disabled channel is inert, so
