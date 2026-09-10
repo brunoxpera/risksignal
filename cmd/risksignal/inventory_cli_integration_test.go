@@ -364,8 +364,114 @@ func TestInventoryImportRequiresCommitFlag(t *testing.T) {
 	}
 }
 
+// TestInventoryCLIImportStampsActingUser pins the DEV-108 actor fix
+// (NFR-013 channel parity, ARCH-006 §6): the `inventory import --commit`
+// audit row stamps the acting user id, not the hard-coded I2 system
+// principal "operator". The actor is resolved from --as (or, absent it,
+// the configured local bypass principal) through the same identity read
+// port the signal commands use.
+func TestInventoryCLIImportStampsActingUser(t *testing.T) {
+	dbURL := newTestDB(t)
+	env := cliDBEnv(dbURL)
+	if code, _, stderr := runCLI(t, env, "maintenance", "migrate", "--output", "json"); code != exitOK {
+		t.Fatalf("migrate exit code = %d (stderr: %s)", code, stderr)
+	}
+	pool := openPoolForTest(t, dbURL)
+
+	// The default principal: no --as, so the configured local bypass
+	// principal (local-developer) acts.
+	file := writeInventoryITFile(t, inventoryITVendorRow("actor-a1", "Portal-Host", "acme", "portal", "2.4.4"))
+	code, stdout, stderr := runCLI(t, env, "inventory", "import", file, "--commit", "--output", "json")
+	if code != exitOK {
+		t.Fatalf("import --commit exit code = %d (stderr: %s)", code, stderr)
+	}
+	var res inventoryImportResult
+	decodeJSONStrict(t, string(decodeEnvelope(t, stdout).Result), &res)
+	if !res.Committed || !res.Changed {
+		t.Fatalf("commit markers = %+v, want committed+changed", res)
+	}
+
+	audit := auditInventoryActors(t, pool)
+	if len(audit) != 1 {
+		t.Fatalf("inventory.import audit rows = %d, want 1", len(audit))
+	}
+	if audit[0].Action != application.AuditActionInventoryImport {
+		t.Fatalf("audit action = %q, want %q", audit[0].Action, application.AuditActionInventoryImport)
+	}
+	if audit[0].Type != application.ActorTypeUser || audit[0].ID != inventoryITLocalDeveloperUser {
+		t.Fatalf("default-import audit actor = %s/%s, want user/%s (the resolved local bypass principal)",
+			audit[0].Type, audit[0].ID, inventoryITLocalDeveloperUser)
+	}
+	if audit[0].Type == application.ActorTypeSystem || audit[0].ID == "operator" {
+		t.Fatal("the CLI import still stamps the hard-coded system/operator actor")
+	}
+
+	// --as names the acting identity: the administrator commits a changed
+	// file and its audit row carries the administrator's user id (the
+	// space-separated flag also exercises the inventory value-flag reorder).
+	renamed := writeInventoryITFile(t, inventoryITVendorRow("actor-a1", "Portal-Host-Renamed", "acme", "portal", "2.4.4"))
+	code, stdout, stderr = runCLI(t, env, "inventory", "import", renamed, "--commit", "--as", "local::administrator", "--output", "json")
+	if code != exitOK {
+		t.Fatalf("import --as --commit exit code = %d (stderr: %s)", code, stderr)
+	}
+	res = inventoryImportResult{}
+	decodeJSONStrict(t, string(decodeEnvelope(t, stdout).Result), &res)
+	if !res.Committed || !res.Changed {
+		t.Fatalf("the --as commit markers = %+v, want committed+changed", res)
+	}
+	audit = auditInventoryActors(t, pool)
+	if len(audit) != 2 {
+		t.Fatalf("inventory.import audit rows after the --as commit = %d, want 2", len(audit))
+	}
+	if audit[1].Type != application.ActorTypeUser || audit[1].ID != inventoryITAdminUser {
+		t.Fatalf("--as import audit actor = %s/%s, want user/%s", audit[1].Type, audit[1].ID, inventoryITAdminUser)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // helpers
+
+// Seeded identities (migration 00009) the actor-threading assertion acts as:
+// the default bypass principal local-developer and the administrator named
+// with --as.
+const (
+	inventoryITLocalDeveloperUser = "e5a00000-0000-4000-8000-000000000001"
+	inventoryITAdminUser          = "e5a00000-0000-4000-8000-000000000004"
+)
+
+// inventoryAuditActor is the acting-identity evidence of one audit row.
+type inventoryAuditActor struct {
+	Type   string
+	ID     string
+	Action string
+}
+
+// auditInventoryActors returns the actor evidence of the inventory.import
+// audit rows in commit order.
+func auditInventoryActors(t *testing.T, pool *pgxpool.Pool) []inventoryAuditActor {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	rows, err := pool.Query(ctx,
+		`SELECT actor_type, actor_id, action FROM audit_events WHERE action = $1 ORDER BY occurred_at, id`,
+		application.AuditActionInventoryImport)
+	if err != nil {
+		t.Fatalf("read inventory.import audit rows: %v", err)
+	}
+	defer rows.Close()
+	var out []inventoryAuditActor
+	for rows.Next() {
+		var a inventoryAuditActor
+		if err := rows.Scan(&a.Type, &a.ID, &a.Action); err != nil {
+			t.Fatalf("scan inventory.import audit row: %v", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read inventory.import audit rows: %v", err)
+	}
+	return out
+}
 
 // openPoolForTest opens a pool on the scratch database of a CLI test.
 func openPoolForTest(t *testing.T, dbURL string) *pgxpool.Pool {

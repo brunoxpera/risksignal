@@ -74,9 +74,12 @@ const (
 	// AuditActionInventoryImport records an inventory import commit.
 	AuditActionInventoryImport = "inventory.import"
 
-	// defaultInventoryActorID is the I2 audit actor of the inventory
-	// commands: a system principal (ch. 13.2 — user principals arrive
-	// with I5a), the same "operator" the quarantine review commands use.
+	// defaultInventoryActorID is the fallback audit actor of the
+	// inventory commands for an internal (non-user) caller that passes
+	// no actor: a system principal, the same "operator" the quarantine
+	// review commands use. The CLI resolves its acting principal (--as or
+	// the local bypass principal) and no longer relies on this default
+	// (NFR-013 channel parity, ARCH-006 §6).
 	defaultInventoryActorID = "operator"
 )
 
@@ -405,9 +408,11 @@ func inventorySnapshotHash(s InventorySnapshot) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// inventoryActor defaults the audit actor of the inventory commands:
-// empty Actor (the CLI takes no identity input before I5a) becomes the
-// system principal "operator", like the quarantine review commands.
+// inventoryActor defaults the audit actor of the inventory commands: an
+// empty Actor (an internal, non-user caller) becomes the system principal
+// "operator", like the quarantine review commands. A resolved user actor
+// (the CLI's --as principal, the staged API's authenticated user) passes
+// through unchanged.
 func inventoryActor(a Actor) Actor {
 	if a.Type == "" {
 		a.Type = ActorTypeSystem

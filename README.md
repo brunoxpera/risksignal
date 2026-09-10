@@ -453,7 +453,7 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
 
       RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
         bin/risksignal inventory preview inventory.csv --output json
-- `inventory import <file> [--commit|--yes]` — commit one inventory CSV
+- `inventory import <file> [--commit|--yes] [--as <subject>]` — commit one inventory CSV
   (ARCH-003 §1.3 step 3). Dry run is mandatory (concept ch. 11.3):
   without `--commit` (or its alias `--yes`) the command renders exactly
   the preview report and writes nothing. With a commit flag the clean
@@ -472,11 +472,15 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
   untouched, and a re-commit of identical content is a no-op — no row
   rewritten, no rebuild enqueued. Problem rows never write: the report
   carries the positioned problems of the rows a commit blocked next to
-  the committed tallies. The audit actor is the I2 system principal
-  `operator` (user principals land with I5a). Example:
+  the committed tallies. The audit actor is the acting principal,
+  resolved like the `signal` commands (ARCH-006 §6, NFR-013 channel
+  parity): the `--as` subject, or the configured
+  `auth.bypass_principal` in the local namespace, turned into the user
+  actor the `inventory.import` audit row stamps. Example:
 
       RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
-        bin/risksignal inventory import inventory.csv --commit --output json
+        bin/risksignal inventory import inventory.csv --commit \
+        --as local::administrator --output json
 - `quarantine list [--status <status>] [--source <type|id>] [--limit <n>]`
   — the quarantine working list (ARCH-002 §4, concept ch. 8.6): every
   record the I2 normalisers isolated because it failed to parse or

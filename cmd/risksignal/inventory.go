@@ -34,8 +34,12 @@
 // path — e.dbService wires the postgres repositories behind the
 // application ports, including repo.InventoryRepo behind both the
 // preview read port and the commit write path. The audit actor of a
-// commit is the I2 system principal "operator" (application defaults it;
-// user principals arrive with I5a, ch. 13.2).
+// commit is the acting principal, resolved like the signal commands
+// (ARCH-006 §6, NFR-013 channel parity): the --as subject, or the
+// configured auth.bypass_principal in the local namespace, turned into
+// the user actor the audit row stamps through the identity read port
+// (e.resolveSignalActor). The application still defaults an empty actor
+// to the I2 system principal "operator" for internal (non-user) callers.
 package main
 
 import (
@@ -85,21 +89,41 @@ func runInventory(e *cmdEnv, args []string) int {
 // so that every flag token precedes the positional file argument (Go's
 // flag package stops parsing at the first non-flag argument, while the
 // documented grammar places the file first: `inventory import <file>
-// --commit`). The inventory flags are booleans (--commit, --yes) that may
-// carry an inline value (--commit=true) and never consume the following
-// token — unlike the value flags of the quarantine commands — so the
-// reorder is a pure partition of the tokens.
+// --commit`). The boolean flags (--commit, --yes) may carry an inline
+// value (--commit=true) and never consume the following token; the sole
+// value flag (--as) does consume its value token when written
+// space-separated (`--as local::administrator`), so the reorder keeps the
+// pair together. An inline form (`--as=local::administrator`) needs no
+// special handling.
 func inventoryFlagsFirst(args []string) []string {
 	flags := make([]string, 0, len(args))
 	rest := make([]string, 0, len(args))
-	for _, a := range args {
-		if strings.HasPrefix(a, "-") && a != "-" {
-			flags = append(flags, a)
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") || a == "-" {
+			rest = append(rest, a)
 			continue
 		}
-		rest = append(rest, a)
+		flags = append(flags, a)
+		if !strings.Contains(a, "=") && inventoryValueFlag(a) && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
 	}
 	return append(flags, rest...)
+}
+
+// inventoryValueFlag reports whether one inventory flag token consumes the
+// following token as its value (so the reorder must keep the pair
+// together). The inventory grammar has exactly one such flag, --as; the
+// confirmation flags --commit/--yes are booleans.
+func inventoryValueFlag(token string) bool {
+	switch token {
+	case "--as", "-as":
+		return true
+	default:
+		return false
+	}
 }
 
 // inventoryProblemView is the fixed machine-readable shape of one
@@ -299,17 +323,23 @@ func (e *cmdEnv) cmdInventoryPreview(args []string) outcome {
 // exactly one matching.rebuild job (dedupe key rule_version +
 // inventory_snapshot). The result report is the authoritative
 // in-transaction classification; the positioned problems it carries name
-// the rows a commit blocked — problem rows never write.
+// the rows a commit blocked — problem rows never write. The acting
+// identity of the commit is resolved from --as (or the configured
+// auth.bypass_principal), like the signal commands; the
+// inventory.import audit row stamps that principal (ARCH-006 §6,
+// NFR-013 channel parity).
 func (e *cmdEnv) cmdInventoryImport(args []string) outcome {
-	fs := newFlagSet(e, "usage: risksignal inventory import <file> [--commit|--yes]\n"+
+	fs := newFlagSet(e, "usage: risksignal inventory import <file> [--commit|--yes] [--as <subject>]\n"+
 		"  dry run by default: preview one inventory CSV against the current inventory,\n"+
 		"  nothing written. --commit (or its alias --yes) commits the clean rows in one\n"+
 		"  transaction: additive upserts (UQ (source, external_id); UQ (asset_id,\n"+
 		"  natural_key)), the inventory.import audit event and one matching.rebuild job\n"+
 		"  when the commit changed inventory (ARCH-003 §5). Re-committing identical\n"+
-		"  content is a no-op.")
+		"  content is a no-op. --as names the acting identity of the commit (the audit\n"+
+		"  actor), defaulting to local::<auth.bypass_principal>.")
 	commit := fs.Bool("commit", false, "commit the clean rows of the file")
 	yes := fs.Bool("yes", false, "alias of --commit (ch. 11.3: non-interactive confirmation)")
+	as := fs.String("as", "", "acting identity's issuer-qualified subject")
 	if err := fs.Parse(inventoryFlagsFirst(args)); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return outcome{}
@@ -339,6 +369,15 @@ func (e *cmdEnv) cmdInventoryImport(args []string) outcome {
 	}
 	defer pool.Close()
 
+	// The acting principal of the commit (ARCH-006 §6, NFR-013): the same
+	// --as/configured-bypass resolution the signal commands use, so the
+	// inventory.import audit row stamps the resolved user id — not a
+	// hard-coded system/operator. An unknown subject denies (exit 4).
+	actor, out := e.resolveSignalActor(ctx, svc, cfg, *as)
+	if !out.ok() {
+		return out
+	}
+
 	if !*commit && !*yes {
 		// The mandatory dry run: read-only preview, nothing written.
 		res, err := application.PreviewInventoryCSV(ctx, strings.NewReader(string(data)), repo.NewInventoryRepo(gen.New(pool)))
@@ -360,7 +399,7 @@ func (e *cmdEnv) cmdInventoryImport(args []string) outcome {
 		return e.ok(result)
 	}
 
-	committed, err := svc.CommitInventory(ctx, application.CommitInventoryInput{File: data})
+	committed, err := svc.CommitInventory(ctx, application.CommitInventoryInput{File: data, Actor: actor})
 	if err != nil {
 		return demoErrorOutcome(err)
 	}

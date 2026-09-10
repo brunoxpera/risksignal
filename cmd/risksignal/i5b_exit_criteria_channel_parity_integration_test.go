@@ -69,7 +69,6 @@ const (
 	i5bAnalystSubject = "local::security-analyst"
 	i5bAdminSubject   = "local::administrator"
 	i5bAdminUserID    = "e5a00000-0000-4000-8000-000000000004"
-	i5bOperatorUserID = "operator" // the pre-I5a CLI inventory command's system principal
 )
 
 // i5bClock is the injected clock of the parity channels: a fixed base instant
@@ -556,9 +555,10 @@ func TestI5bExitCriteriaChannelParitySignalCommands(t *testing.T) {
 // TestI5bExitCriteriaChannelParityInventoryImport is the ARCH-006 §8a proof for
 // the staged inventory import: API POST→GET→commit vs CLI `import --commit`.
 // The stored inventory (assets/components) and the single matching.rebuild job
-// must be identical; the audit action and minimised after snapshot match (the
-// CLI inventory command's documented operator principal is asserted
-// separately, since it predates the I5b user-identity path).
+// must be identical; the audit action, the acting user (`users.id`) and the
+// minimised after snapshot match across the channels (NFR-013): the CLI
+// resolves the same administrator principal from --as that the API derives
+// from its authenticated bypass identity.
 func TestI5bExitCriteriaChannelParityInventoryImport(t *testing.T) {
 	apiF := newI5bFixture(t)
 	cliF := newI5bFixture(t)
@@ -598,7 +598,7 @@ func TestI5bExitCriteriaChannelParityInventoryImport(t *testing.T) {
 
 	// --- CLI channel: import --commit --------------------------------------
 	file := writeInventoryITFile(t, rows...)
-	code, stdout, stderr := runCLI(t, cliDBEnv(cliF.dbURL), "inventory", "import", file, "--commit", "--output", "json")
+	code, stdout, stderr := runCLI(t, cliDBEnv(cliF.dbURL), "inventory", "import", file, "--commit", "--as", i5bAdminSubject, "--output", "json")
 	if code != exitOK {
 		t.Fatalf("CLI import --commit exit = %d, want 0 (stdout: %s, stderr: %s)", code, stdout, stderr)
 	}
@@ -638,14 +638,17 @@ func TestI5bExitCriteriaChannelParityInventoryImport(t *testing.T) {
 	if len(gotAudit) != 1 || gotAudit[0].Action != wantAudit[0].Action || gotAudit[0].After != wantAudit[0].After {
 		t.Fatalf("inventory audit diverged:\n api %v\n cli %v", wantAudit, gotAudit)
 	}
-	// The acting principal differs by design: the I5b API commit stamps the
-	// resolved user (Administrator), the pre-I5a CLI command its operator
-	// system principal.
+	// The acting principal is the same on both channels (NFR-013): the API
+	// commit stamps its resolved bypass user, the CLI commit the user its
+	// --as subject resolves to — here the same Administrator identity.
 	if wantAudit[0].ActorType != application.ActorTypeUser || wantAudit[0].ActorID != i5bAdminUserID {
 		t.Fatalf("API inventory audit actor = %s/%s, want user/%s", wantAudit[0].ActorType, wantAudit[0].ActorID, i5bAdminUserID)
 	}
-	if gotAudit[0].ActorType != application.ActorTypeSystem || gotAudit[0].ActorID != i5bOperatorUserID {
-		t.Fatalf("CLI inventory audit actor = %s/%s, want system/%s", gotAudit[0].ActorType, gotAudit[0].ActorID, i5bOperatorUserID)
+	if gotAudit[0].ActorType != application.ActorTypeUser || gotAudit[0].ActorID != i5bAdminUserID {
+		t.Fatalf("CLI inventory audit actor = %s/%s, want user/%s (the --as principal)", gotAudit[0].ActorType, gotAudit[0].ActorID, i5bAdminUserID)
+	}
+	if gotAudit[0].ActorType != wantAudit[0].ActorType || gotAudit[0].ActorID != wantAudit[0].ActorID {
+		t.Fatalf("inventory audit actor diverged:\n api %s/%s\n cli %s/%s", wantAudit[0].ActorType, wantAudit[0].ActorID, gotAudit[0].ActorType, gotAudit[0].ActorID)
 	}
 }
 

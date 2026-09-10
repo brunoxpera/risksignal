@@ -310,11 +310,13 @@ commands:
                                     read-only)
   inventory import <file>           dry run by default (preview, nothing
                   [--commit|--yes]  written); --commit or --yes commits the
-                                    clean rows in one transaction: the
+                  [--as <subject>]  clean rows in one transaction: the
                                     additive upserts, the inventory.import
                                     audit event and one matching.rebuild
                                     job when inventory changed (re-commit
-                                    of identical content is a no-op)
+                                    of identical content is a no-op);
+                                    --as names the commit's acting identity
+                                    (audit actor), default local::<bypass>
   quarantine list [--status <s>]    show the quarantine working list (the
                   [--source <t|id>]  isolated records of the ch. 8.6 state
                   [--limit <n>]      machine): position, reason, payload
