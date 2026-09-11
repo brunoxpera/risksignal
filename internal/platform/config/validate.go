@@ -153,6 +153,38 @@ func Validate(c *Config) []error {
 		errs = append(errs, errors.New("export.max_rows: must be a positive integer (set it via a config file or RISKSIGNAL_EXPORT_MAX_ROWS)"))
 	}
 
+	// The observability surface (ARCH-007 §5/§10, WP-6.08 / DEV-120): the
+	// metrics exposition is never public — loopback in local, an internal-only
+	// (not all-interfaces) address in demo/production — and the optional OTLP
+	// target must be a parseable URL. Errors reference the key only.
+	if c.Observability.MetricsEnabled {
+		maddr := strings.TrimSpace(c.Observability.MetricsAddr)
+		if maddr == "" {
+			errs = append(errs, errors.New("observability.metrics_addr: mandatory when observability.metrics_enabled is true (a host:port bind)"))
+		} else if host, _, err := net.SplitHostPort(maddr); err != nil {
+			errs = append(errs, errors.New("observability.metrics_addr: must be a host:port pair (for example 127.0.0.1:9091)"))
+		} else {
+			switch env {
+			case "local":
+				// The local exposition binds loopback only (ARCH-007 §5).
+				if !isLoopbackAddr(maddr) {
+					errs = append(errs, errors.New("observability.metrics_addr: must be a loopback address in local mode (127.0.0.0/8 or ::1), ARCH-007 §5"))
+				}
+			case "demo", "production":
+				// Outside local the exposition must never bind all interfaces
+				// (an empty host is the wildcard bind) — it is an internal-only
+				// listener behind the deployment's network boundary
+				// (ARCH-007 §5/§8).
+				if strings.TrimSpace(host) == "" {
+					errs = append(errs, errors.New("observability.metrics_addr: must not bind all interfaces outside local mode — the metrics endpoint is never public, ARCH-007 §5"))
+				}
+			}
+		}
+	}
+	if otlp := strings.TrimSpace(c.Observability.OTLPEndpoint); otlp != "" && !isValidURL(otlp) {
+		errs = append(errs, errors.New("observability.otlp_endpoint: must be a valid URL (must include a scheme and a host) when set"))
+	}
+
 	// The notify channels (ARCH-004 §6.1): an enabled SMTP channel needs a
 	// host:port relay, a sender and a recipient; an enabled webhook needs a
 	// parseable URL and a signing secret. A disabled channel is inert, so

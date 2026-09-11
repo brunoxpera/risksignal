@@ -60,6 +60,11 @@ const (
 	defaultExportSweepInterval = 24 * time.Hour
 	// defaultExportDir is the server-local export spool root (export.dir).
 	defaultExportDir = "var/exports"
+	// defaultMetricsAddr is the loopback default bind of the internal
+	// Prometheus exposition listener (observability.metrics_addr). It is never
+	// public: local binds loopback, demo/production an internal-only address
+	// (ARCH-007 §5/§10, WP-6.08 / DEV-120).
+	defaultMetricsAddr = "127.0.0.1:9091"
 )
 
 // envVarConfigFile selects the optional JSON configuration file. It is not a
@@ -91,6 +96,8 @@ type Config struct {
 	Notify        Notify    `json:"notify"`
 	Export        Export    `json:"export"`
 	Retention     Retention `json:"retention"`
+
+	Observability Observability `json:"observability"`
 
 	// sources records the provenance of every leaf key; populated by Load.
 	sources map[string]Source
@@ -219,6 +226,32 @@ type Retention struct {
 	Schedule time.Duration `json:"schedule"`
 }
 
+// Observability carries the I6 observability configuration (ARCH-007 §5/§10,
+// WP-6.08 / DEV-120): the internal-only Prometheus exposition and the optional
+// OTLP trace export. The exposition is never public — local binds loopback,
+// demo/production an internal-only address — and OTLP is off by default.
+//
+// All three keys are additive to schema v1 (ARCH-007 §10); the schema version
+// is unchanged. metrics_addr and otlp_endpoint can carry a host or a target
+// URL, so Summary/JSONSummary report presence and provenance only, never
+// content (the same rule as http.addr and the oidc URL keys).
+type Observability struct {
+	// MetricsEnabled gates the internal Prometheus /metrics listener
+	// (observability.metrics_enabled). Off by default: an operator opts in,
+	// and the endpoint is only ever served on the internal metrics_addr.
+	MetricsEnabled bool `json:"metrics_enabled"`
+	// MetricsAddr is the internal bind address of the /metrics listener
+	// (observability.metrics_addr). It is never public: loopback in local,
+	// an internal-only (not all-interfaces) address in demo/production
+	// (ARCH-007 §5/§8). Default 127.0.0.1:9091.
+	MetricsAddr string `json:"metrics_addr"`
+	// OTLPEndpoint is the OTLP/HTTP trace export target
+	// (observability.otlp_endpoint). Empty (the default) disables export — no
+	// OTel SDK is linked and no network call is made; setting it links the
+	// thin OTLP adapter (ARCH-007 §5).
+	OTLPEndpoint string `json:"otlp_endpoint"`
+}
+
 // Notify carries the I4 notification-channel configuration (ARCH-004 §6.1,
 // WP-4.06). It selects which channels an active notification uses and holds
 // the local SMTP and webhook targets. There is no production mail/webhook
@@ -324,6 +357,14 @@ func Defaults() Config {
 			PseudonymiseYears: 0,
 			BatchSize:         defaultRetentionBatchSize,
 			Schedule:          defaultRetentionSchedule,
+		},
+		Observability: Observability{
+			// The metrics exposition is opt-in and binds loopback by default;
+			// OTLP export is off (the empty endpoint links no adapter)
+			// (ARCH-007 §5/§10, WP-6.08 / DEV-120).
+			MetricsEnabled: false,
+			MetricsAddr:    defaultMetricsAddr,
+			OTLPEndpoint:   "",
 		},
 	}
 }
@@ -466,6 +507,22 @@ var envBindings = []struct {
 		c.Export.MaxRows = n
 		return nil
 	}},
+	{"observability.metrics_enabled", func(c *Config, v string) error {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("observability.metrics_enabled: %s: must be a boolean (true or false)", envName("observability.metrics_enabled"))
+		}
+		c.Observability.MetricsEnabled = b
+		return nil
+	}},
+	{"observability.metrics_addr", func(c *Config, v string) error {
+		c.Observability.MetricsAddr = strings.TrimSpace(v)
+		return nil
+	}},
+	{"observability.otlp_endpoint", func(c *Config, v string) error {
+		c.Observability.OTLPEndpoint = strings.TrimSpace(v)
+		return nil
+	}},
 	{"notify.p2_active", func(c *Config, v string) error {
 		b, err := strconv.ParseBool(strings.TrimSpace(v))
 		if err != nil {
@@ -588,16 +645,17 @@ func applyEnv(cfg *Config, prov map[string]Source) error {
 // configFile mirrors Config with pointers so that loaders can tell a present
 // JSON key apart from an absent one, and can apply strict unknown-key checks.
 type configFile struct {
-	SchemaVersion *int           `json:"schema_version"`
-	Env           *string        `json:"env"`
-	HTTP          *fileHTTP      `json:"http"`
-	Database      *fileDatabase  `json:"database"`
-	OIDC          *fileOIDC      `json:"oidc"`
-	Auth          *fileAuth      `json:"auth"`
-	Worker        *fileWorker    `json:"worker"`
-	Notify        *fileNotify    `json:"notify"`
-	Export        *fileExport    `json:"export"`
-	Retention     *fileRetention `json:"retention"`
+	SchemaVersion *int               `json:"schema_version"`
+	Env           *string            `json:"env"`
+	HTTP          *fileHTTP          `json:"http"`
+	Database      *fileDatabase      `json:"database"`
+	OIDC          *fileOIDC          `json:"oidc"`
+	Auth          *fileAuth          `json:"auth"`
+	Worker        *fileWorker        `json:"worker"`
+	Notify        *fileNotify        `json:"notify"`
+	Export        *fileExport        `json:"export"`
+	Retention     *fileRetention     `json:"retention"`
+	Observability *fileObservability `json:"observability"`
 }
 
 type fileHTTP struct {
@@ -644,6 +702,12 @@ type fileRetention struct {
 	PseudonymiseYears *int    `json:"pseudonymise_years"`
 	BatchSize         *int    `json:"batch_size"`
 	Schedule          *string `json:"schedule"` // Go duration, e.g. "720h" (monthly)
+}
+
+type fileObservability struct {
+	MetricsEnabled *bool   `json:"metrics_enabled"`
+	MetricsAddr    *string `json:"metrics_addr"`
+	OTLPEndpoint   *string `json:"otlp_endpoint"`
 }
 
 type fileNotify struct {
@@ -836,6 +900,20 @@ func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
 			}
 			cfg.Retention.Schedule = d
 			prov["retention.schedule"] = SourceFile
+		}
+	}
+	if fc.Observability != nil {
+		if fc.Observability.MetricsEnabled != nil {
+			cfg.Observability.MetricsEnabled = *fc.Observability.MetricsEnabled
+			prov["observability.metrics_enabled"] = SourceFile
+		}
+		if fc.Observability.MetricsAddr != nil {
+			cfg.Observability.MetricsAddr = strings.TrimSpace(*fc.Observability.MetricsAddr)
+			prov["observability.metrics_addr"] = SourceFile
+		}
+		if fc.Observability.OTLPEndpoint != nil {
+			cfg.Observability.OTLPEndpoint = strings.TrimSpace(*fc.Observability.OTLPEndpoint)
+			prov["observability.otlp_endpoint"] = SourceFile
 		}
 	}
 	if fc.Notify != nil {

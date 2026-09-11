@@ -108,7 +108,10 @@ func TestJSONSummaryIsDeterministic(t *testing.T) {
 		`"notify.smtp.to":{"set":true,"source":"default"},` +
 		`"notify.webhook.enabled":{"value":false,"source":"default"},` +
 		`"notify.webhook.url":{"set":true,"source":"default"},` +
-		`"notify.webhook.secret":{"set":true,"source":"default"}}`
+		`"notify.webhook.secret":{"set":true,"source":"default"},` +
+		`"observability.metrics_enabled":{"value":false,"source":"default"},` +
+		`"observability.metrics_addr":{"set":true,"source":"default"},` +
+		`"observability.otlp_endpoint":{"set":true,"source":"default"}}`
 	if string(first) != want {
 		t.Fatalf("JSONSummary rendered %s, want %s", first, want)
 	}

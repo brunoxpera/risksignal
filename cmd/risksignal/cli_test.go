@@ -594,6 +594,18 @@ const goldenDiagnoseConfigJSON = `{
     "notify.webhook.secret": {
       "set": true,
       "source": "default"
+    },
+    "observability.metrics_enabled": {
+      "value": false,
+      "source": "default"
+    },
+    "observability.metrics_addr": {
+      "set": true,
+      "source": "default"
+    },
+    "observability.otlp_endpoint": {
+      "set": true,
+      "source": "default"
     }
   },
   "error": null

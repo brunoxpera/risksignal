@@ -78,6 +78,9 @@ func (c *Config) summaryRows() []summaryRow {
 		{key: "notify.webhook.enabled", state: strconv.FormatBool(c.Notify.Webhook.Enabled), source: src("notify.webhook.enabled")},
 		{key: "notify.webhook.url", state: "set", source: src("notify.webhook.url")},
 		{key: "notify.webhook.secret", state: "set", source: src("notify.webhook.secret")},
+		{key: "observability.metrics_enabled", state: strconv.FormatBool(c.Observability.MetricsEnabled), source: src("observability.metrics_enabled")},
+		{key: "observability.metrics_addr", state: "set", source: src("observability.metrics_addr")},
+		{key: "observability.otlp_endpoint", state: "set", source: src("observability.otlp_endpoint")},
 	}
 }
 
@@ -125,6 +128,10 @@ type JSONSummary struct {
 	NotifyWebhookOn   ScalarSummary[bool] `json:"notify.webhook.enabled"`
 	NotifyWebhookURL  PresenceSummary     `json:"notify.webhook.url"`
 	NotifyWebhookSec  PresenceSummary     `json:"notify.webhook.secret"`
+
+	ObservabilityMetricsEnabled ScalarSummary[bool] `json:"observability.metrics_enabled"`
+	ObservabilityMetricsAddr    PresenceSummary     `json:"observability.metrics_addr"`
+	ObservabilityOTLPEndpoint   PresenceSummary     `json:"observability.otlp_endpoint"`
 }
 
 // ScalarSummary reports the value and provenance of a leaf that cannot carry
@@ -188,5 +195,9 @@ func (c *Config) JSONSummary() JSONSummary {
 		NotifyWebhookOn:            ScalarSummary[bool]{Value: c.Notify.Webhook.Enabled, Source: c.sourceOf("notify.webhook.enabled")},
 		NotifyWebhookURL:           PresenceSummary{Set: true, Source: c.sourceOf("notify.webhook.url")},
 		NotifyWebhookSec:           PresenceSummary{Set: true, Source: c.sourceOf("notify.webhook.secret")},
+
+		ObservabilityMetricsEnabled: ScalarSummary[bool]{Value: c.Observability.MetricsEnabled, Source: c.sourceOf("observability.metrics_enabled")},
+		ObservabilityMetricsAddr:    PresenceSummary{Set: true, Source: c.sourceOf("observability.metrics_addr")},
+		ObservabilityOTLPEndpoint:   PresenceSummary{Set: true, Source: c.sourceOf("observability.otlp_endpoint")},
 	}
 }

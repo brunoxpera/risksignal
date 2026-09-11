@@ -28,6 +28,9 @@ var envKeys = []string{
 	envName("auth.bypass_enabled"),
 	envName("auth.bypass_principal"),
 	envName("worker.interval"),
+	envName("observability.metrics_enabled"),
+	envName("observability.metrics_addr"),
+	envName("observability.otlp_endpoint"),
 }
 
 // resetEnv removes every loader input so each test starts from pure
