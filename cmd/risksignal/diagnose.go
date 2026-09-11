@@ -8,13 +8,18 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"net"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
 	"github.com/brunoxpera/risksignal/internal/platform/config"
 )
 
@@ -22,7 +27,7 @@ import (
 func runDiagnose(e *cmdEnv, args []string) int {
 	if len(args) < 1 {
 		return e.emit("diagnose", e.fail(exitValidation, classValidation,
-			"missing subcommand (supported: config, connectivity, health, backup, restore-test)"))
+			"missing subcommand (supported: config, connectivity, health, audit-chain, backup, restore-test)"))
 	}
 	command := "diagnose " + args[0]
 	switch args[0] {
@@ -32,13 +37,15 @@ func runDiagnose(e *cmdEnv, args []string) int {
 		return e.emit(command, e.cmdDiagnoseConnectivity(args[1:]))
 	case "health":
 		return e.emit(command, e.cmdDiagnoseHealth(args[1:]))
+	case "audit-chain":
+		return e.emit(command, e.cmdDiagnoseAuditChain(args[1:]))
 	case "backup":
 		return e.emit(command, e.cmdBackup(args[1:]))
 	case "restore-test":
 		return e.emit(command, e.cmdRestoreTest(args[1:]))
 	default:
 		return e.emit(command, e.fail(exitValidation, classValidation,
-			"unknown subcommand (supported: config, connectivity, health, backup, restore-test)"))
+			"unknown subcommand (supported: config, connectivity, health, audit-chain, backup, restore-test)"))
 	}
 }
 
@@ -215,4 +222,62 @@ func dbTCPTarget(databaseURL string) (string, error) {
 		port = "5432"
 	}
 	return net.JoinHostPort(host, port), nil
+}
+
+// auditChainTimeout bounds one end-to-end audit chain verification.
+const auditChainTimeout = 30 * time.Second
+
+// auditChainView is the machine-readable payload of diagnose audit-chain.
+type auditChainView struct {
+	Rows      int  `json:"rows"`
+	Chained   int  `json:"chained"`
+	Unchained int  `json:"unchained"`
+	Verified  bool `json:"verified"`
+}
+
+// cmdDiagnoseAuditChain runs `risksignal diagnose audit-chain`: it verifies
+// the optional audit hash chain end-to-end (ARCH-007 §7 control 3b, §4
+// AT-015) — recomputing every chained row's SHA-256(prev_hash ‖ canonical row
+// bytes) and checking each link. An intact chain (including an all-unchained
+// trail, the chain never enabled) exits 0; a divergence is a state conflict
+// (exit 5) whose message names the offending row; a database failure is exit
+// 6. It is read-only.
+func (e *cmdEnv) cmdDiagnoseAuditChain(args []string) outcome {
+	fs := newFlagSet(e, "usage: risksignal diagnose audit-chain")
+	if err := fs.Parse(args); err != nil {
+		return flagParseOutcome(e, err)
+	}
+	if fs.NArg() > 0 {
+		return e.fail(exitValidation, classValidation, "unexpected argument %q", fs.Arg(0))
+	}
+
+	cfg, out := loadConfig(e)
+	if !out.ok() {
+		return out
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), auditChainTimeout)
+	defer cancel()
+
+	pool, err := postgres.OpenPool(ctx, cfg.Database.URL)
+	if err != nil {
+		return e.fail(exitInfrastructure, classInfrastructure, "%v", err)
+	}
+	defer pool.Close()
+
+	status, err := repo.NewAuditRepo(gen.New(pool)).VerifyChain(ctx)
+	if err != nil {
+		var mismatch *repo.ChainMismatchError
+		if errors.As(err, &mismatch) {
+			return e.fail(exitConflict, classConflict, "%v", err)
+		}
+		return e.fail(exitInfrastructure, classInfrastructure, "%v", err)
+	}
+
+	view := auditChainView{Rows: status.Rows, Chained: status.Chained, Unchained: status.Unchained, Verified: true}
+	if e.format == formatText {
+		fmt.Fprintf(e.stdout, "audit chain: %d row(s), %d chained, %d unchained — intact\n",
+			status.Rows, status.Chained, status.Unchained)
+	}
+	return e.ok(view)
 }

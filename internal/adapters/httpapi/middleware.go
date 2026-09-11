@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Middleware wraps an http.Handler with cross-cutting behaviour. It is the
@@ -53,6 +54,9 @@ type handlerConfig struct {
 	// extra holds middlewares inserted just after the correlation middleware
 	// (see WithMiddleware) — the observability layers of the composition root.
 	extra []Middleware
+	// hstsMaxAge is the Strict-Transport-Security max-age of the chain
+	// (0 = off); the online modes force it (HSTS, ARCH-007 §7 control 4).
+	hstsMaxAge time.Duration
 }
 
 // WithMiddleware appends an extra middleware to the WP-1a.06 chain, inserted
@@ -102,7 +106,7 @@ func (cfg handlerConfig) baseChain(logger *slog.Logger) []Middleware {
 	mws := make([]Middleware, 0, 6+len(cfg.extra))
 	mws = append(mws, CorrelationID)
 	mws = append(mws, cfg.extra...)
-	mws = append(mws, AccessLog(logger), RecoverPanic(logger), SecurityHeaders, ContentSecurityPolicy, CORSDisabled)
+	mws = append(mws, AccessLog(logger), RecoverPanic(logger), SecurityHeaders, ContentSecurityPolicy, StrictTransportSecurity(cfg.hstsMaxAge), CORSDisabled)
 	return mws
 }
 

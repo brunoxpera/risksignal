@@ -194,7 +194,7 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	}
 	svc := application.NewService(application.ServiceDeps{
 		Signals:         repo.NewSignalRepo(q),
-		Audit:           repo.NewAuditRepo(q),
+		Audit:           repo.NewAuditRepoWithHashChain(q, cfg.Retention.HashChainEnabled),
 		Outbox:          repo.NewOutboxRepo(q),
 		Vulnerabilities: repo.NewVulnerabilityRepo(q),
 		Matches:         repo.NewMatchRepo(q),

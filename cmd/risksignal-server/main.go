@@ -281,9 +281,26 @@ func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger, opt
 	chainOpts := []httpapi.HandlerOption{
 		httpapi.BodyLimitOverride("POST /api/v1/inventory/imports", application.InventoryMaxBytes),
 		httpapi.BodyLimitOverride("POST /inventory/imports", application.InventoryMaxBytes),
+		// HSTS is forced in the online modes (demo/production, ARCH-007 §7
+		// control 4); local development is plain HTTP over loopback and
+		// leaves it off.
+		httpapi.HSTS(hstsMaxAge(cfg)),
 	}
 	chainOpts = append(chainOpts, opts...)
 	return httpapi.NewHandlerWithAuth(mux, logger, auth, chainOpts...), nil
+}
+
+// hstsMaxAge returns the Strict-Transport-Security max-age the server chain
+// enforces: one year in the online modes (demo/production force HSTS,
+// ARCH-007 §7 control 4) and 0 — header off — in local mode, where the server
+// speaks plain HTTP over loopback.
+func hstsMaxAge(cfg *config.Config) time.Duration {
+	switch cfg.Env {
+	case "demo", "production":
+		return 365 * 24 * time.Hour
+	default:
+		return 0
+	}
 }
 
 // observabilityRegistry builds the process metrics registry with every §16.2
@@ -376,7 +393,7 @@ func newSignalService(cfg *config.Config, pool *pgxpool.Pool) *application.Servi
 	q := gen.New(pool)
 	return application.NewService(application.ServiceDeps{
 		Signals:         repo.NewSignalRepo(q),
-		Audit:           repo.NewAuditRepo(q),
+		Audit:           repo.NewAuditRepoWithHashChain(q, cfg.Retention.HashChainEnabled),
 		Outbox:          repo.NewOutboxRepo(q),
 		Vulnerabilities: repo.NewVulnerabilityRepo(q),
 		Matches:         repo.NewMatchRepo(q),

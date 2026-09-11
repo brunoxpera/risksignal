@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brunoxpera/risksignal/internal/platform/logging"
 )
@@ -68,6 +69,38 @@ func TestSecurityHeadersPresent(t *testing.T) {
 		if got := rec.Header().Get(name); got != want {
 			t.Errorf("header %s = %q, want %q", name, got, want)
 		}
+	}
+}
+
+// TestHSTSHeaderControlledByOption proves the Strict-Transport-Security
+// header is absent when the chain is built without the HSTS option (plain-HTTP
+// local) and present, with includeSubDomains, when the online-mode option is
+// set (ARCH-007 §7 control 4).
+func TestHSTSHeaderControlledByOption(t *testing.T) {
+	logger, _ := testLogger(t)
+
+	// Default chain (local): no HSTS header.
+	h := NewHandler(okHandler(), logger)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if got := rec.Header().Get("Strict-Transport-Security"); got != "" {
+		t.Errorf("default chain sets Strict-Transport-Security = %q, want absent", got)
+	}
+
+	// Online chain: a one-year max-age with includeSubDomains.
+	h2 := NewHandler(okHandler(), logger, HSTS(365*24*time.Hour))
+	rec2 := httptest.NewRecorder()
+	h2.ServeHTTP(rec2, httptest.NewRequest(http.MethodGet, "/", nil))
+	if got := rec2.Header().Get("Strict-Transport-Security"); got != "max-age=31536000; includeSubDomains" {
+		t.Errorf("online chain Strict-Transport-Security = %q, want max-age=31536000; includeSubDomains", got)
+	}
+
+	// A non-positive max-age keeps it off even when the option is passed.
+	h3 := NewHandler(okHandler(), logger, HSTS(0))
+	rec3 := httptest.NewRecorder()
+	h3.ServeHTTP(rec3, httptest.NewRequest(http.MethodGet, "/", nil))
+	if got := rec3.Header().Get("Strict-Transport-Security"); got != "" {
+		t.Errorf("HSTS(0) chain sets Strict-Transport-Security = %q, want absent", got)
 	}
 }
 

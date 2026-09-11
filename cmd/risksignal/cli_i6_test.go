@@ -44,6 +44,19 @@ func TestExportUnknownSubcommand(t *testing.T) {
 	assertValidationFailure(t, code, stdout, stderr, "unknown subcommand")
 }
 
+func TestDiagnoseAuditChainRejectsUnexpectedArgument(t *testing.T) {
+	code, stdout, stderr := runCLI(t, cliValidEnv(), "diagnose", "audit-chain", "bogus")
+	assertValidationFailure(t, code, stdout, stderr, "unexpected argument")
+}
+
+func TestSourcesAllowPrivateRefusedOutsideLocal(t *testing.T) {
+	env := cliValidEnv()
+	env["RISKSIGNAL_ENV"] = "demo"
+	env["RISKSIGNAL_SOURCES_ALLOW_PRIVATE"] = "true"
+	code, stdout, stderr := runCLI(t, env, "diagnose", "config")
+	assertValidationFailure(t, code, stdout, stderr, "sources.allow_private")
+}
+
 func TestRetentionRequiresExactlyOneMode(t *testing.T) {
 	code, stdout, stderr := runCLI(t, cliValidEnv(), "maintenance", "retention")
 	assertValidationFailure(t, code, stdout, stderr, "exactly one of")

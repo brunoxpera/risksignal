@@ -920,3 +920,36 @@ func TestLoadInvalidRetentionValues(t *testing.T) {
 		}
 	})
 }
+
+// TestSourcesAllowPrivateOnlyInLocal proves the SSRF relaxation is local-only:
+// local mode accepts it; demo and production refuse it (ARCH-007 §7).
+func TestSourcesAllowPrivateOnlyInLocal(t *testing.T) {
+	env := validEnv()
+	env["sources.allow_private"] = "true"
+	cfg := mustLoad(t, "", env)
+	if !cfg.Sources.AllowPrivate {
+		t.Error("Sources.AllowPrivate = false, want true in local mode")
+	}
+
+	for _, mode := range []string{"demo", "production"} {
+		t.Run(mode, func(t *testing.T) {
+			env := validEnv()
+			env["env"] = mode
+			env["sources.allow_private"] = "true"
+			mustFail(t, "", env, "sources.allow_private")
+		})
+	}
+}
+
+// TestHashChainEnabledDefaultAndOverride pins the retention hash-chain flag:
+// off by default (the append path is unchanged), configurable on.
+func TestHashChainEnabledDefaultAndOverride(t *testing.T) {
+	if cfg := mustLoad(t, "", validEnv()); cfg.Retention.HashChainEnabled {
+		t.Error("Retention.HashChainEnabled = true, want false by default")
+	}
+	env := validEnv()
+	env["retention.hash_chain_enabled"] = "true"
+	if cfg := mustLoad(t, "", env); !cfg.Retention.HashChainEnabled {
+		t.Error("Retention.HashChainEnabled = false, want true from env")
+	}
+}
