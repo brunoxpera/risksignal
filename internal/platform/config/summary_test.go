@@ -78,6 +78,7 @@ func TestJSONSummaryIsDeterministic(t *testing.T) {
 		`"env":{"value":"local","source":"default"},` +
 		`"http.addr":{"set":true,"source":"default"},` +
 		`"database.url":{"set":true,"source":"env"},` +
+		`"database.retention_url":{"set":false,"source":"default"},` +
 		`"oidc.issuer":{"set":true,"source":"env"},` +
 		`"oidc.client_id":{"value":"","source":"default"},` +
 		`"oidc.client_secret_ref":{"set":true,"source":"default"},` +

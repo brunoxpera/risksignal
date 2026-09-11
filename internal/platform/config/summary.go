@@ -47,6 +47,7 @@ func (c *Config) summaryRows() []summaryRow {
 		{key: "env", state: c.Env, source: src("env")},
 		{key: "http.addr", state: "set", source: src("http.addr")},
 		{key: "database.url", state: "set", source: src("database.url")},
+		{key: "database.retention_url", state: presenceState(c.Database.RetentionURL), source: src("database.retention_url")},
 		{key: "oidc.issuer", state: "set", source: src("oidc.issuer")},
 		{key: "oidc.client_id", state: c.OIDC.ClientID, source: src("oidc.client_id")},
 		{key: "oidc.client_secret_ref", state: "set", source: src("oidc.client_secret_ref")},
@@ -95,27 +96,28 @@ func (c *Config) summaryRows() []summaryRow {
 // not drift; keys that can carry credentials report presence and source
 // only, never content.
 type JSONSummary struct {
-	SchemaVersion       ScalarSummary[int]    `json:"schema_version"`
-	Env                 ScalarSummary[string] `json:"env"`
-	HTTPAddr            PresenceSummary       `json:"http.addr"`
-	DatabaseURL         PresenceSummary       `json:"database.url"`
-	OIDCIssuer          PresenceSummary       `json:"oidc.issuer"`
-	OIDCClientID        ScalarSummary[string] `json:"oidc.client_id"`
-	OIDCClientSecret    PresenceSummary       `json:"oidc.client_secret_ref"`
-	OIDCRedirectURL     PresenceSummary       `json:"oidc.redirect_url"`
-	OIDCScopes          ScalarSummary[string] `json:"oidc.scopes"`
-	OIDCRolesClaim      ScalarSummary[string] `json:"oidc.roles_claim"`
-	OIDCRoleMappings    ScalarSummary[string] `json:"oidc.role_mappings"`
-	OIDCAudience        ScalarSummary[string] `json:"oidc.audience"`
-	OIDCSessionCookie   ScalarSummary[string] `json:"oidc.session_cookie_name"`
-	OIDCSessionTTL      ScalarSummary[string] `json:"oidc.session_ttl"`
-	AuthBypassEnabled   ScalarSummary[bool]   `json:"auth.bypass_enabled"`
-	AuthBypassPrincipal ScalarSummary[string] `json:"auth.bypass_principal"`
-	SourcesAllowPrivate ScalarSummary[bool]   `json:"sources.allow_private"`
-	WorkerInterval      ScalarSummary[string] `json:"worker.interval"`
-	WorkerSLAEval       ScalarSummary[string] `json:"worker.sla_evaluate_interval"`
-	WorkerSLAReminder   ScalarSummary[string] `json:"worker.sla_reminder_cadence"`
-	WorkerExportSweep   ScalarSummary[string] `json:"worker.export_sweep_interval"`
+	SchemaVersion        ScalarSummary[int]    `json:"schema_version"`
+	Env                  ScalarSummary[string] `json:"env"`
+	HTTPAddr             PresenceSummary       `json:"http.addr"`
+	DatabaseURL          PresenceSummary       `json:"database.url"`
+	DatabaseRetentionURL PresenceSummary       `json:"database.retention_url"`
+	OIDCIssuer           PresenceSummary       `json:"oidc.issuer"`
+	OIDCClientID         ScalarSummary[string] `json:"oidc.client_id"`
+	OIDCClientSecret     PresenceSummary       `json:"oidc.client_secret_ref"`
+	OIDCRedirectURL      PresenceSummary       `json:"oidc.redirect_url"`
+	OIDCScopes           ScalarSummary[string] `json:"oidc.scopes"`
+	OIDCRolesClaim       ScalarSummary[string] `json:"oidc.roles_claim"`
+	OIDCRoleMappings     ScalarSummary[string] `json:"oidc.role_mappings"`
+	OIDCAudience         ScalarSummary[string] `json:"oidc.audience"`
+	OIDCSessionCookie    ScalarSummary[string] `json:"oidc.session_cookie_name"`
+	OIDCSessionTTL       ScalarSummary[string] `json:"oidc.session_ttl"`
+	AuthBypassEnabled    ScalarSummary[bool]   `json:"auth.bypass_enabled"`
+	AuthBypassPrincipal  ScalarSummary[string] `json:"auth.bypass_principal"`
+	SourcesAllowPrivate  ScalarSummary[bool]   `json:"sources.allow_private"`
+	WorkerInterval       ScalarSummary[string] `json:"worker.interval"`
+	WorkerSLAEval        ScalarSummary[string] `json:"worker.sla_evaluate_interval"`
+	WorkerSLAReminder    ScalarSummary[string] `json:"worker.sla_reminder_cadence"`
+	WorkerExportSweep    ScalarSummary[string] `json:"worker.export_sweep_interval"`
 
 	ExportDir     ScalarSummary[string] `json:"export.dir"`
 	ExportTTL     ScalarSummary[string] `json:"export.ttl"`
@@ -166,34 +168,48 @@ func roleMappingsState(m map[string]string) string {
 	return strconv.Itoa(len(m)) + " mapping(s)"
 }
 
+// presenceState renders the presence of an optional, secret-capable leaf as a
+// secret-free verdict: "set" when it carries a value, "unset" when it is
+// empty. The content is never rendered. Unlike the mandatory credential keys
+// (http.addr, database.url, oidc.issuer), database.retention_url is optional,
+// so its presence is operationally meaningful — unset disables the retention
+// and pseudonymisation commit paths (fail closed) — and is reported truthfully.
+func presenceState(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "unset"
+	}
+	return "set"
+}
+
 // JSONSummary renders the provenance report for the CLI. A Configuration
 // built without Load reports every source as SourceDefault.
 func (c *Config) JSONSummary() JSONSummary {
 	return JSONSummary{
-		SchemaVersion:       ScalarSummary[int]{Value: c.SchemaVersion, Source: c.sourceOf("schema_version")},
-		Env:                 ScalarSummary[string]{Value: c.Env, Source: c.sourceOf("env")},
-		HTTPAddr:            PresenceSummary{Set: true, Source: c.sourceOf("http.addr")},
-		DatabaseURL:         PresenceSummary{Set: true, Source: c.sourceOf("database.url")},
-		OIDCIssuer:          PresenceSummary{Set: true, Source: c.sourceOf("oidc.issuer")},
-		OIDCClientID:        ScalarSummary[string]{Value: c.OIDC.ClientID, Source: c.sourceOf("oidc.client_id")},
-		OIDCClientSecret:    PresenceSummary{Set: true, Source: c.sourceOf("oidc.client_secret_ref")},
-		OIDCRedirectURL:     PresenceSummary{Set: true, Source: c.sourceOf("oidc.redirect_url")},
-		OIDCScopes:          ScalarSummary[string]{Value: strings.Join(c.OIDC.Scopes, " "), Source: c.sourceOf("oidc.scopes")},
-		OIDCRolesClaim:      ScalarSummary[string]{Value: c.OIDC.RolesClaim, Source: c.sourceOf("oidc.roles_claim")},
-		OIDCRoleMappings:    ScalarSummary[string]{Value: roleMappingsState(c.OIDC.RoleMappings), Source: c.sourceOf("oidc.role_mappings")},
-		OIDCAudience:        ScalarSummary[string]{Value: c.OIDC.Audience, Source: c.sourceOf("oidc.audience")},
-		OIDCSessionCookie:   ScalarSummary[string]{Value: c.OIDC.SessionCookieName, Source: c.sourceOf("oidc.session_cookie_name")},
-		OIDCSessionTTL:      ScalarSummary[string]{Value: c.OIDC.SessionTTL.String(), Source: c.sourceOf("oidc.session_ttl")},
-		AuthBypassEnabled:   ScalarSummary[bool]{Value: c.Auth.BypassEnabled, Source: c.sourceOf("auth.bypass_enabled")},
-		AuthBypassPrincipal: ScalarSummary[string]{Value: c.Auth.BypassPrincipal, Source: c.sourceOf("auth.bypass_principal")},
-		SourcesAllowPrivate: ScalarSummary[bool]{Value: c.Sources.AllowPrivate, Source: c.sourceOf("sources.allow_private")},
-		WorkerInterval:      ScalarSummary[string]{Value: c.Worker.Interval.String(), Source: c.sourceOf("worker.interval")},
-		WorkerSLAEval:       ScalarSummary[string]{Value: c.Worker.SLAEvaluateInterval.String(), Source: c.sourceOf("worker.sla_evaluate_interval")},
-		WorkerSLAReminder:   ScalarSummary[string]{Value: c.Worker.SLAReminderCadence.String(), Source: c.sourceOf("worker.sla_reminder_cadence")},
-		WorkerExportSweep:   ScalarSummary[string]{Value: c.Worker.ExportSweepInterval.String(), Source: c.sourceOf("worker.export_sweep_interval")},
-		ExportDir:           ScalarSummary[string]{Value: c.Export.Dir, Source: c.sourceOf("export.dir")},
-		ExportTTL:           ScalarSummary[string]{Value: c.Export.TTL.String(), Source: c.sourceOf("export.ttl")},
-		ExportMaxRows:       ScalarSummary[int]{Value: c.Export.MaxRows, Source: c.sourceOf("export.max_rows")},
+		SchemaVersion:        ScalarSummary[int]{Value: c.SchemaVersion, Source: c.sourceOf("schema_version")},
+		Env:                  ScalarSummary[string]{Value: c.Env, Source: c.sourceOf("env")},
+		HTTPAddr:             PresenceSummary{Set: true, Source: c.sourceOf("http.addr")},
+		DatabaseURL:          PresenceSummary{Set: true, Source: c.sourceOf("database.url")},
+		DatabaseRetentionURL: PresenceSummary{Set: strings.TrimSpace(c.Database.RetentionURL) != "", Source: c.sourceOf("database.retention_url")},
+		OIDCIssuer:           PresenceSummary{Set: true, Source: c.sourceOf("oidc.issuer")},
+		OIDCClientID:         ScalarSummary[string]{Value: c.OIDC.ClientID, Source: c.sourceOf("oidc.client_id")},
+		OIDCClientSecret:     PresenceSummary{Set: true, Source: c.sourceOf("oidc.client_secret_ref")},
+		OIDCRedirectURL:      PresenceSummary{Set: true, Source: c.sourceOf("oidc.redirect_url")},
+		OIDCScopes:           ScalarSummary[string]{Value: strings.Join(c.OIDC.Scopes, " "), Source: c.sourceOf("oidc.scopes")},
+		OIDCRolesClaim:       ScalarSummary[string]{Value: c.OIDC.RolesClaim, Source: c.sourceOf("oidc.roles_claim")},
+		OIDCRoleMappings:     ScalarSummary[string]{Value: roleMappingsState(c.OIDC.RoleMappings), Source: c.sourceOf("oidc.role_mappings")},
+		OIDCAudience:         ScalarSummary[string]{Value: c.OIDC.Audience, Source: c.sourceOf("oidc.audience")},
+		OIDCSessionCookie:    ScalarSummary[string]{Value: c.OIDC.SessionCookieName, Source: c.sourceOf("oidc.session_cookie_name")},
+		OIDCSessionTTL:       ScalarSummary[string]{Value: c.OIDC.SessionTTL.String(), Source: c.sourceOf("oidc.session_ttl")},
+		AuthBypassEnabled:    ScalarSummary[bool]{Value: c.Auth.BypassEnabled, Source: c.sourceOf("auth.bypass_enabled")},
+		AuthBypassPrincipal:  ScalarSummary[string]{Value: c.Auth.BypassPrincipal, Source: c.sourceOf("auth.bypass_principal")},
+		SourcesAllowPrivate:  ScalarSummary[bool]{Value: c.Sources.AllowPrivate, Source: c.sourceOf("sources.allow_private")},
+		WorkerInterval:       ScalarSummary[string]{Value: c.Worker.Interval.String(), Source: c.sourceOf("worker.interval")},
+		WorkerSLAEval:        ScalarSummary[string]{Value: c.Worker.SLAEvaluateInterval.String(), Source: c.sourceOf("worker.sla_evaluate_interval")},
+		WorkerSLAReminder:    ScalarSummary[string]{Value: c.Worker.SLAReminderCadence.String(), Source: c.sourceOf("worker.sla_reminder_cadence")},
+		WorkerExportSweep:    ScalarSummary[string]{Value: c.Worker.ExportSweepInterval.String(), Source: c.sourceOf("worker.export_sweep_interval")},
+		ExportDir:            ScalarSummary[string]{Value: c.Export.Dir, Source: c.sourceOf("export.dir")},
+		ExportTTL:            ScalarSummary[string]{Value: c.Export.TTL.String(), Source: c.sourceOf("export.ttl")},
+		ExportMaxRows:        ScalarSummary[int]{Value: c.Export.MaxRows, Source: c.sourceOf("export.max_rows")},
 
 		RetentionClosedSignalYears: ScalarSummary[int]{Value: c.Retention.ClosedSignalYears, Source: c.sourceOf("retention.closed_signal_years")},
 		RetentionPseudonymiseYears: ScalarSummary[int]{Value: c.Retention.PseudonymiseYears, Source: c.sourceOf("retention.pseudonymise_years")},

@@ -122,8 +122,18 @@ type HTTP struct {
 }
 
 // Database carries the PostgreSQL connection configuration.
+//
+// RetentionURL is the separate, optional DSN the governed retention and
+// pseudonymisation acts use: they authenticate as the dedicated retention
+// login (risksignal_retention_login, migration 00015) on their own connection,
+// never as the application runtime role and never via SET ROLE (ARCH-007 §7
+// control 3a amendment). Like URL it carries credentials (runtime-injected,
+// never stored) and is therefore presence-only in Summary/JSONSummary. It is
+// optional: when unset the retention/pseudonymisation commit paths refuse to
+// start (fail closed) rather than silently fall back to the application role.
 type Database struct {
-	URL string `json:"url"` // credentials are runtime-injected, never stored
+	URL          string `json:"url"`           // credentials are runtime-injected, never stored
+	RetentionURL string `json:"retention_url"` // optional; credentials runtime-injected, presence-only
 }
 
 // OIDC carries the OpenID Connect provider configuration (ARCH-005 §2).
@@ -362,7 +372,8 @@ func Defaults() Config {
 			Addr: "127.0.0.1:8080", // concept ch. 4.2: loopback by default
 		},
 		Database: Database{
-			URL: "", // mandatory, no baked-in value
+			URL:          "", // mandatory, no baked-in value
+			RetentionURL: "", // optional: unset disables the retention/pseudonymisation commit paths (fail closed)
 		},
 		OIDC: OIDC{
 			Issuer:     "", // mandatory, no baked-in value
@@ -459,6 +470,10 @@ var envBindings = []struct {
 	{"env", func(c *Config, v string) error { c.Env = strings.TrimSpace(v); return nil }},
 	{"http.addr", func(c *Config, v string) error { c.HTTP.Addr = strings.TrimSpace(v); return nil }},
 	{"database.url", func(c *Config, v string) error { c.Database.URL = strings.TrimSpace(v); return nil }},
+	{"database.retention_url", func(c *Config, v string) error {
+		c.Database.RetentionURL = strings.TrimSpace(v)
+		return nil
+	}},
 	{"oidc.issuer", func(c *Config, v string) error { c.OIDC.Issuer = strings.TrimSpace(v); return nil }},
 	{"oidc.client_id", func(c *Config, v string) error { c.OIDC.ClientID = strings.TrimSpace(v); return nil }},
 	{"oidc.client_secret_ref", func(c *Config, v string) error { c.OIDC.ClientSecretRef = strings.TrimSpace(v); return nil }},
@@ -697,6 +712,7 @@ func Load() (*Config, error) {
 		"env":                          SourceDefault,
 		"http.addr":                    SourceDefault,
 		"database.url":                 SourceDefault,
+		"database.retention_url":       SourceDefault,
 		"oidc.issuer":                  SourceDefault,
 		"oidc.client_id":               SourceDefault,
 		"oidc.client_secret_ref":       SourceDefault,
@@ -789,7 +805,8 @@ type fileHTTP struct {
 }
 
 type fileDatabase struct {
-	URL *string `json:"url"`
+	URL          *string `json:"url"`
+	RetentionURL *string `json:"retention_url"`
 }
 
 type fileOIDC struct {
@@ -901,6 +918,10 @@ func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
 	if fc.Database != nil && fc.Database.URL != nil {
 		cfg.Database.URL = strings.TrimSpace(*fc.Database.URL)
 		prov["database.url"] = SourceFile
+	}
+	if fc.Database != nil && fc.Database.RetentionURL != nil {
+		cfg.Database.RetentionURL = strings.TrimSpace(*fc.Database.RetentionURL)
+		prov["database.retention_url"] = SourceFile
 	}
 	if fc.OIDC != nil && fc.OIDC.Issuer != nil {
 		cfg.OIDC.Issuer = strings.TrimSpace(*fc.OIDC.Issuer)

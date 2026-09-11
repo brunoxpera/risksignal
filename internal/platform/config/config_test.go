@@ -15,6 +15,7 @@ var envKeys = []string{
 	envName("env"),
 	envName("http.addr"),
 	envName("database.url"),
+	envName("database.retention_url"),
 	envName("oidc.issuer"),
 	envName("oidc.client_id"),
 	envName("oidc.client_secret_ref"),
@@ -951,5 +952,70 @@ func TestHashChainEnabledDefaultAndOverride(t *testing.T) {
 	env["retention.hash_chain_enabled"] = "true"
 	if cfg := mustLoad(t, "", env); !cfg.Retention.HashChainEnabled {
 		t.Error("Retention.HashChainEnabled = false, want true from env")
+	}
+}
+
+// TestLoadRetentionURLFromEnv resolves database.retention_url from the
+// environment, reports it presence-only in Summary/JSONSummary and never
+// renders the credential.
+func TestLoadRetentionURLFromEnv(t *testing.T) {
+	secret := "postgres://ret:s3cr3t-ret@127.0.0.1:5432/risksignal"
+	env := validEnv()
+	env["database.retention_url"] = secret
+	cfg := mustLoad(t, "", env)
+	if cfg.Database.RetentionURL != secret {
+		t.Fatalf("Database.RetentionURL = %q, want the env value", cfg.Database.RetentionURL)
+	}
+	sum := cfg.Summary()
+	if strings.Contains(sum, "s3cr3t-ret") || strings.Contains(sum, secret) {
+		t.Errorf("Summary() leaks the retention credential:\n%s", sum)
+	}
+	line := summaryLine(sum, "database.retention_url")
+	if !strings.Contains(line, "set (source=env)") {
+		t.Errorf("Summary() database.retention_url line %q does not report presence with source env", line)
+	}
+	if !cfg.JSONSummary().DatabaseRetentionURL.Set {
+		t.Error("JSONSummary.DatabaseRetentionURL.Set = false, want true")
+	}
+}
+
+// TestRetentionURLOptionalAndReportedUnset pins the fail-closed marker: the
+// key defaults to empty and both renderings report it unset.
+func TestRetentionURLOptionalAndReportedUnset(t *testing.T) {
+	cfg := mustLoad(t, "", validEnv())
+	if cfg.Database.RetentionURL != "" {
+		t.Fatalf("Database.RetentionURL = %q, want empty by default", cfg.Database.RetentionURL)
+	}
+	if line := summaryLine(cfg.Summary(), "database.retention_url"); !strings.Contains(line, "unset (source=default)") {
+		t.Errorf("Summary() database.retention_url line %q does not report unset", line)
+	}
+	if cfg.JSONSummary().DatabaseRetentionURL.Set {
+		t.Error("JSONSummary.DatabaseRetentionURL.Set = true, want false")
+	}
+}
+
+// TestLoadRetentionURLFromFile resolves the key from the config file and
+// TestLoadInvalidRetentionURL rejects an unparsable retention DSN naming the
+// key only.
+func TestLoadRetentionURLFromFile(t *testing.T) {
+	file := writeConfigFile(t, `{
+		"database": {
+			"url": "postgres://file@127.0.0.1/db",
+			"retention_url": "postgres://ret@127.0.0.1/risksignal"
+		},
+		"oidc": {"issuer": "https://issuer.file.example/"}
+	}`)
+	cfg := mustLoad(t, file, nil)
+	if cfg.Database.RetentionURL != "postgres://ret@127.0.0.1/risksignal" {
+		t.Fatalf("Database.RetentionURL = %q, want the file value", cfg.Database.RetentionURL)
+	}
+}
+
+func TestLoadInvalidRetentionURL(t *testing.T) {
+	env := validEnv()
+	env["database.retention_url"] = "not a url"
+	err := mustFailErr(t, "", env, "database.retention_url")
+	if strings.Contains(err.Error(), "not a url") {
+		t.Errorf("Load() error echoes the offending value: %v", err)
 	}
 }

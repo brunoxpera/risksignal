@@ -26,6 +26,7 @@ var cliEnvKeys = []string{
 	"RISKSIGNAL_ENV",
 	"RISKSIGNAL_HTTP_ADDR",
 	"RISKSIGNAL_DATABASE_URL",
+	"RISKSIGNAL_DATABASE_RETENTION_URL",
 	"RISKSIGNAL_OIDC_ISSUER",
 	"RISKSIGNAL_AUTH_BYPASS_ENABLED",
 	"RISKSIGNAL_BACKUP_ENCRYPTION_KEY_REF",
@@ -473,6 +474,10 @@ const goldenDiagnoseConfigJSON = `{
     "database.url": {
       "set": true,
       "source": "env"
+    },
+    "database.retention_url": {
+      "set": false,
+      "source": "default"
     },
     "oidc.issuer": {
       "set": true,

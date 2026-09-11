@@ -55,6 +55,13 @@ func Validate(c *Config) []error {
 	if dbURL != "" && !isValidURL(dbURL) {
 		errs = append(errs, errors.New("database.url: invalid URL (must include a scheme and a host)"))
 	}
+	// database.retention_url is optional — unset means the retention and
+	// pseudonymisation commit paths refuse to start (fail closed) — but a value
+	// that is present must be a parseable DSN. The key only is named, never the
+	// value, so the runtime-injected retention credential cannot leak.
+	if retentionURL := strings.TrimSpace(c.Database.RetentionURL); retentionURL != "" && !isValidURL(retentionURL) {
+		errs = append(errs, errors.New("database.retention_url: invalid URL (must include a scheme and a host)"))
+	}
 	if issuer != "" && !isValidURL(issuer) {
 		errs = append(errs, errors.New("oidc.issuer: invalid URL (must include a scheme and a host)"))
 	}
