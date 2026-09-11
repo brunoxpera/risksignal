@@ -88,7 +88,7 @@ SBOM_DIR := $(ARTIFACT_DIR)/sbom
 SCAN_DIR := $(ARTIFACT_DIR)/scan
 
 .PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
-	verify-connectivity ci-lint ci-test test-exit-criteria test-i5a-exit-criteria test-i5b-exit-criteria test-contract ci-build demo demo-smoke check-gofmt vet lint-golangci \
+	verify-connectivity ci-lint ci-test test-exit-criteria test-i5a-exit-criteria test-i5b-exit-criteria test-i6-exit-criteria test-contract ci-build demo demo-smoke check-gofmt vet lint-golangci \
 	lint-licenses lint-secrets lint-openapi-validate lint-openapi-diff up-db image sbom scan sign backup restore-test \
 	provision-retention-login perf
 
@@ -147,7 +147,15 @@ ci-lint: check-gofmt vet lint-golangci lint-arch lint-licenses lint-secrets \
 ##          the staged inventory import and the user role grant/revoke, the
 ##          §11.2 UX-guardrail gate (internal/adapters/web) and the outbox-
 ##          append / import-commit atomicity fault injections — run standalone
-##          with `make test-i5b-exit-criteria`.
+##          with `make test-i5b-exit-criteria`. The suite also includes the I6
+##          operations/acceptance exit-criteria proofs (WP-6.12 / DEV-134,
+##          ARCH-007 §12/§13): AT-014 export + CSV neutralisation, AT-015/NFR-011
+##          backup/restore, AT-021/NFR-015 retention (determinism, legal hold,
+##          safe order), NFR-010 observability (the §16.2 families, the
+##          request→job→audit→notification correlation join, the OTLP spans),
+##          the §7 security proofs (SSRF, append-only audit role, hash-chain
+##          verify) and the §4.3 private-demo lockdown + smoke — run standalone
+##          with `make test-i6-exit-criteria`.
 ci-test: up-db
 	$(GO) test -race ./...
 
@@ -182,6 +190,26 @@ test-i5a-exit-criteria: up-db
 ##          tests skip cleanly.
 test-exit-criteria: up-db
 	$(GO) test -race ./cmd/risksignal ./cmd/risksignal-worker -run 'TestI4ExitCriteria'
+
+## test-i6-exit-criteria: run only the I6 exit-criteria suite (WP-6.12 /
+##          DEV-134, ARCH-007 §12/§13) — the mandatory acceptance cases AT-013
+##          (perf), AT-014 (export + CSV neutralisation), AT-015/NFR-011
+##          (backup/restore), AT-021/NFR-015 (retention determinism + legal
+##          hold + safe order), NFR-010 (observability: the §16.2 families, the
+##          request→job→audit→notification correlation join, the OTLP spans),
+##          the §7 security proofs and the §4.3 private-demo proofs, plus the
+##          four fault injections (export job-append rollback, retention batch
+##          failure resumable, tampered audit chain, SSRF targets) — race-enabled
+##          against the compose database. Each `I6ExitCriteria` gate delegates
+##          to the landed per-work-package proof, so the suite is a
+##          consolidation over the same assertions, not a re-implementation. The
+##          AT-013 evidence is produced by `make perf` (the versioned report
+##          under dist/perf/); override the profile with
+##          `PERF_SCALE=smoke make test-i6-exit-criteria`. The integration proofs
+##          skip cleanly without a reachable database.
+test-i6-exit-criteria: up-db
+	$(GO) test -race -count=1 -run 'I6ExitCriteria' ./internal/application ./internal/application/export ./internal/platform/metrics ./internal/platform/tracing ./internal/platform/config ./internal/adapters/httpapi ./internal/adapters/worker ./internal/adapters/sources/fetchguard ./internal/adapters/postgres/repo ./cmd/risksignal ./cmd/risksignal-server
+	$(MAKE) perf
 
 ## test-contract: run only the WP-1b.09 contract suite (ADR-011 gate 3,
 ##          DEV-023) — the OpenAPI 3.1 document validation and the generated

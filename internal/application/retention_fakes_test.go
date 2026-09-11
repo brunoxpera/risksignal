@@ -213,6 +213,15 @@ func (d *fakeDB) applyRetentionDeletion(del retentionDeletion) {
 			}
 		}
 		d.signalRows = kept
+		// Mirror the real candidate scan: a deleted signal no longer appears
+		// as a retention candidate, so a re-run (resumable) naturally skips it.
+		keptCandidates := make([]application.RetentionCandidate, 0, len(d.retentionCandidates))
+		for _, c := range d.retentionCandidates {
+			if c.SignalID != del.signalID {
+				keptCandidates = append(keptCandidates, c)
+			}
+		}
+		d.retentionCandidates = keptCandidates
 	}
 }
 
@@ -351,7 +360,11 @@ type fakeRetentionRepo struct {
 	db *fakeDB
 	// failDelete, when set, makes the named deletion table fail — the batch
 	// fault seam. failPseudonymiseSignal arms a PseudonymiseSignal failure.
+	// failDeleteSignal, when set, makes the deletion of the named signal fail
+	// (before any table is touched) — the per-signal batch-fault seam that lets
+	// one batch fail while the run continues with the next.
 	failDelete             map[string]error
+	failDeleteSignal       map[string]error
 	failPseudonymiseSignal error
 }
 
@@ -601,6 +614,11 @@ func (f *fakeRetentionRepo) delete(ctx context.Context, tx application.Tx, table
 	ftx.record("retention.delete_" + table)
 	if f.failDelete != nil {
 		if err, ok := f.failDelete[table]; ok && err != nil {
+			return 0, err
+		}
+	}
+	if f.failDeleteSignal != nil {
+		if err, ok := f.failDeleteSignal[signalID]; ok && err != nil {
 			return 0, err
 		}
 	}
