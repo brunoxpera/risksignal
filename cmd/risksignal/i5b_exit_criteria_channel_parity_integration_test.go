@@ -858,7 +858,7 @@ func newI5bAPIStack(t *testing.T, svc *application.Service, principal string) *h
 	mux := http.NewServeMux()
 	gate := httpapi.NewPermissionGate(nil, logger)
 	httpapi.RegisterAPIRoutes(gate.Decorate(mux), httpapi.NewAPIHandler(svc, svc, svc, logger,
-		httpapi.I5BAPI{Inventory: svc, Assets: svc, Users: svc}))
+		httpapi.APISurfaces{Inventory: svc, Assets: svc, Users: svc}))
 	auth := httpapi.AuthenticationMiddleware(nil, nil, httpapi.AuthOptions{BypassEnabled: true, BypassPrincipal: principal})
 	srv := httptest.NewServer(auth(mux))
 	t.Cleanup(srv.Close)

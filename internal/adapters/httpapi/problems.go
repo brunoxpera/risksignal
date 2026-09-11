@@ -38,11 +38,18 @@ const (
 	titleAssetNotFound           = "Asset not found"
 	titleInventoryImportNotFound = "Inventory import not found"
 	titleUserNotFound            = "User not found"
-	titlePayloadTooLarge         = "Payload too large"
-	titleConflict                = "Conflict"
-	titleUnauthorized            = "Unauthorized"
-	titleForbidden               = "Forbidden"
-	titleInternalError           = "Internal server error"
+	// titleExportNotFound, titleExportExpired, titleRetentionRunNotFound and
+	// titleLegalHoldNotFound are the I6 operation 404/410 titles (ARCH-007
+	// §1.1/§2.1).
+	titleExportNotFound       = "Export not found"
+	titleExportExpired        = "Export expired"
+	titleRetentionRunNotFound = "Retention run not found"
+	titleLegalHoldNotFound    = "Legal hold not found"
+	titlePayloadTooLarge      = "Payload too large"
+	titleConflict             = "Conflict"
+	titleUnauthorized         = "Unauthorized"
+	titleForbidden            = "Forbidden"
+	titleInternalError        = "Internal server error"
 )
 
 // newProblem assembles one RFC 9457 problem detail (ARCH-001 §4

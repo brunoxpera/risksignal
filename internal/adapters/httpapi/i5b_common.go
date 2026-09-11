@@ -18,15 +18,20 @@ import (
 	"github.com/brunoxpera/risksignal/internal/domain"
 )
 
-// I5BAPI groups the application surfaces of the I5b operations. Each field is
-// a narrow interface over *application.Service; a nil field leaves its
+// APISurfaces groups the optional application surfaces of the hand-bound
+// operations: the I5b staged-import, asset-read and user/role-admin handlers
+// plus the I6 export, retention-run and legal-hold handlers. Each field is a
+// narrow interface over *application.Service; a nil field leaves its
 // operations answering the generic 500 (a composition root that does not
 // serve them), exactly like a nil reveal leaves the reveal route answering
 // 500.
-type I5BAPI struct {
-	Inventory InventoryImports
-	Assets    AssetsRead
-	Users     UserAdmin
+type APISurfaces struct {
+	Inventory  InventoryImports
+	Assets     AssetsRead
+	Users      UserAdmin
+	Exports    ExportAPI
+	Retention  RetentionAPI
+	LegalHolds LegalHoldAPI
 }
 
 // ActorResolver maps an authenticated request identity onto the audit actor

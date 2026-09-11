@@ -18,8 +18,9 @@ import (
 // apiHandlers composes the per-domain strict-server implementations into the
 // single gen.StrictServerInterface the generated registration mounts. The
 // embedded method sets are disjoint (the signal reads, the audit reveal, the
-// signal command and the I5b inventory/assets/admin operations), so embedding
-// yields the full interface without forwarding boilerplate.
+// signal command, the I5b inventory/assets/admin operations and the I6
+// export/retention/legal-hold operations), so embedding yields the full
+// interface without forwarding boilerplate.
 type apiHandlers struct {
 	*signalsHandler
 	auditRevealHandler
@@ -27,9 +28,11 @@ type apiHandlers struct {
 	*inventoryImportHandler
 	*assetsHandler
 	*userAdminHandler
-	// The I6 export operations are declared by the contract but not yet bound
-	// to their use cases (WP-6.07); the thin stubs answer the generic 500.
-	i6ContractHandlers
+	// The I6 operations (ARCH-007 §1.1/§2.1/§2.2): the export resources, the
+	// retention-run surface and the legal holds, bound to their use cases.
+	exportHandler
+	retentionHandler
+	legalHoldHandler
 }
 
 // Compile-time proof that the composed handler implements every generated
@@ -47,28 +50,31 @@ var _ gen.StrictServerInterface = (*apiHandlers)(nil)
 // application.NewService does; a nil reveal leaves the reveal route answering
 // a 500 (a composition root that does not serve it).
 //
-// The optional i5b argument carries the staged-import, asset-read and
-// user/role-admin surfaces (at most one value); when absent (or a field of it
-// nil) that group answers the generic 500, like a nil reveal.
-func NewAPIHandler(query SignalsQuery, reveal AuditReveal, commands SignalCommands, logger *slog.Logger, i5b ...I5BAPI) gen.ServerInterface {
+// The optional surfaces argument carries the staged-import, asset-read,
+// user/role-admin and I6 export/retention/legal-hold surfaces (at most one
+// value); when absent (or a field of it nil) that group answers the generic
+// 500, like a nil reveal.
+func NewAPIHandler(query SignalsQuery, reveal AuditReveal, commands SignalCommands, logger *slog.Logger, surfaces ...APISurfaces) gen.ServerInterface {
 	if query == nil {
 		panic("httpapi: NewAPIHandler: query must not be nil")
 	}
 	if logger == nil {
 		panic("httpapi: NewAPIHandler: logger must not be nil")
 	}
-	var surfaces I5BAPI
-	if len(i5b) > 0 {
-		surfaces = i5b[0]
+	var s APISurfaces
+	if len(surfaces) > 0 {
+		s = surfaces[0]
 	}
 	h := &apiHandlers{
 		signalsHandler:         &signalsHandler{query: query, logger: logger},
 		auditRevealHandler:     auditRevealHandler{reveal: reveal, logger: logger},
 		signalCommandHandler:   signalCommandHandler{commands: commands, query: query, logger: logger},
-		inventoryImportHandler: &inventoryImportHandler{imports: surfaces.Inventory, logger: logger},
-		assetsHandler:          &assetsHandler{assets: surfaces.Assets, logger: logger},
-		userAdminHandler:       &userAdminHandler{admin: surfaces.Users, logger: logger},
-		i6ContractHandlers:     i6ContractHandlers{logger: logger},
+		inventoryImportHandler: &inventoryImportHandler{imports: s.Inventory, logger: logger},
+		assetsHandler:          &assetsHandler{assets: s.Assets, logger: logger},
+		userAdminHandler:       &userAdminHandler{admin: s.Users, logger: logger},
+		exportHandler:          exportHandler{exports: s.Exports, logger: logger},
+		retentionHandler:       retentionHandler{retention: s.Retention, logger: logger},
+		legalHoldHandler:       legalHoldHandler{holds: s.LegalHolds, logger: logger},
 	}
 	return gen.NewStrictHandlerWithOptions(h, []gen.StrictMiddlewareFunc{recordRequestPath},
 		gen.StrictHTTPServerOptions{

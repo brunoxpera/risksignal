@@ -43,6 +43,7 @@ import (
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
 	"github.com/brunoxpera/risksignal/internal/adapters/web"
 	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application/export"
 	"github.com/brunoxpera/risksignal/internal/domain"
 	"github.com/brunoxpera/risksignal/internal/platform/buildinfo"
 	"github.com/brunoxpera/risksignal/internal/platform/clock"
@@ -162,7 +163,7 @@ func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (ht
 		return nil, err
 	}
 
-	svc := newSignalService(pool)
+	svc := newSignalService(cfg, pool)
 
 	mux := http.NewServeMux()
 	// The per-route declaration gate runs the real checker (ARCH-005 §5): it
@@ -202,9 +203,31 @@ func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (ht
 	gate.Declare("GET /api/v1/roles", domain.PermissionUsersRolesManage)
 	gate.Declare("PATCH /api/v1/users/{id}/roles", domain.PermissionUsersRolesManage)
 	gate.Declare("POST /api/v1/users/{id}/deactivate", domain.PermissionUsersRolesManage)
+	// The I6 operations (ARCH-007 §1.1/§2.1/§2.2) declare their per-route
+	// permission here; the use case remains the gate of record. Exports carry
+	// exports.create; the retention dry-run/reads/holds carry retention.manage
+	// and the four-eyes deletion approval carries settings.approve (Product
+	// Owner) — the ARCH-007 §9 reuse.
+	gate.Declare("POST /api/v1/exports", domain.PermissionExportsCreate)
+	gate.Declare("GET /api/v1/exports/{id}", domain.PermissionExportsCreate)
+	gate.Declare("GET /api/v1/exports/{id}/download", domain.PermissionExportsCreate)
+	gate.Declare("POST /api/v1/retention/runs", domain.PermissionRetentionManage)
+	gate.Declare("GET /api/v1/retention/runs", domain.PermissionRetentionManage)
+	gate.Declare("GET /api/v1/retention/runs/{id}", domain.PermissionRetentionManage)
+	gate.Declare("POST /api/v1/retention/runs/{id}/approve", domain.PermissionSettingsApprove)
+	gate.Declare("POST /api/v1/legal-holds", domain.PermissionRetentionManage)
+	gate.Declare("GET /api/v1/legal-holds", domain.PermissionRetentionManage)
+	gate.Declare("POST /api/v1/legal-holds/{id}/release", domain.PermissionRetentionManage)
 
-	i5b := httpapi.I5BAPI{Inventory: svc, Assets: svc, Users: svc}
-	httpapi.RegisterAPIRoutes(gate.Decorate(mux), httpapi.NewAPIHandler(svc, svc, svc, logger, i5b))
+	surfaces := httpapi.APISurfaces{
+		Inventory:  svc,
+		Assets:     svc,
+		Users:      svc,
+		Exports:    svc,
+		Retention:  svc,
+		LegalHolds: svc,
+	}
+	httpapi.RegisterAPIRoutes(gate.Decorate(mux), httpapi.NewAPIHandler(svc, svc, svc, logger, surfaces))
 
 	// The server-rendered web adapter (ARCH-006 §3, WP-5b.06) is mounted on the
 	// same mux behind the same middleware chain + I5a auth middleware: it calls
@@ -302,7 +325,7 @@ func (a oidcVerifier) Verify(ctx context.Context, rawToken string) (domain.Ident
 // lazily, so a stopped database keeps the server up and readiness reports
 // it (the /api/v1 reads answer 500 problem details until the pool
 // recovers).
-func newSignalService(pool *pgxpool.Pool) *application.Service {
+func newSignalService(cfg *config.Config, pool *pgxpool.Pool) *application.Service {
 	q := gen.New(pool)
 	return application.NewService(application.ServiceDeps{
 		Signals:         repo.NewSignalRepo(q),
@@ -331,8 +354,16 @@ func newSignalService(pool *pgxpool.Pool) *application.Service {
 		// The I6 retention port (ARCH-007 §2/§3, WP-6.05 / DEV-116-117):
 		// the candidate scan, the run lifecycle, the legal holds and the
 		// in-place pseudonymisation/deletion primitives. DEV-117 wires the
-		// postgres adapter so the retention use cases run end to end.
-		Retention: repo.NewRetentionRepo(q),
+		// postgres adapter so the retention use cases run end to end. The
+		// export ports (Exports/ExportStore) back the POST /exports surface and
+		// the time-limited download (WP-6.07); the retention period/batch/
+		// pseudonymisation period come from the retention config (§10).
+		Retention:                  repo.NewRetentionRepo(q),
+		Exports:                    repo.NewExportRepo(q),
+		ExportStore:                export.NewSpool(cfg.Export.Dir),
+		RetentionClosedSignalYears: cfg.Retention.ClosedSignalYears,
+		RetentionBatchSize:         cfg.Retention.BatchSize,
+		RetentionPseudonymiseYears: cfg.Retention.PseudonymiseYears,
 		// The I5a reference command endpoint (ARCH-005 §8) drives the I4
 		// triage commands, so the server composition root wires the triage/
 		// SLA/priority ports the use cases author and persist through.

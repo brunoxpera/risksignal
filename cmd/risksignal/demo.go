@@ -45,6 +45,7 @@ import (
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
 	"github.com/brunoxpera/risksignal/internal/adapters/sources/synthetic"
 	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/application/export"
 	"github.com/brunoxpera/risksignal/internal/domain"
 	"github.com/brunoxpera/risksignal/internal/platform/clock"
 	"github.com/brunoxpera/risksignal/internal/platform/config"
@@ -300,14 +301,14 @@ func (e *cmdEnv) dbService(ctx context.Context, cfg *config.Config) (*pgxpool.Po
 	if err != nil {
 		return nil, nil, e.fail(exitInfrastructure, classInfrastructure, "%v", err)
 	}
-	return pool, newAppService(pool, clock.RealClock{}), outcome{}
+	return pool, newAppService(cfg, pool, clock.RealClock{}), outcome{}
 }
 
 // newAppService wires the postgres repositories behind the application
 // ports on one pool — the composition every database-backed CLI command
 // (demo, source) shares, with the given clock through the Clock port and
 // postgres.WithTx as the transaction boundary.
-func newAppService(pool *pgxpool.Pool, clk clock.Clock) *application.Service {
+func newAppService(cfg *config.Config, pool *pgxpool.Pool, clk clock.Clock) *application.Service {
 	q := gen.New(pool)
 	return application.NewService(application.ServiceDeps{
 		Signals:         repo.NewSignalRepo(q),
@@ -337,7 +338,21 @@ func newAppService(pool *pgxpool.Pool, clk clock.Clock) *application.Service {
 		Comments:      repo.NewCommentRepo(q),
 		PriorityRules: repo.NewPriorityRuleRepo(q),
 		FactorSource:  repo.NewPriorityFactorRepo(q),
-		Clock:         clk,
+		// The I6 operations ports (ARCH-007 §1.1/§2): the export CRUD + spool +
+		// streaming read back `risksignal export …` and the retention repo
+		// backs `risksignal maintenance retention|identity-pseudonymize` and
+		// `risksignal legal-hold …` (WP-6.07). The retention period/batch/
+		// pseudonymisation period come from the retention config (§10).
+		Exports:                    repo.NewExportRepo(q),
+		ExportStore:                export.NewSpool(cfg.Export.Dir),
+		SignalExport:               repo.NewSignalExportSource(q),
+		ExportTTL:                  cfg.Export.TTL,
+		ExportMaxRows:              cfg.Export.MaxRows,
+		Retention:                  repo.NewRetentionRepo(q),
+		RetentionClosedSignalYears: cfg.Retention.ClosedSignalYears,
+		RetentionBatchSize:         cfg.Retention.BatchSize,
+		RetentionPseudonymiseYears: cfg.Retention.PseudonymiseYears,
+		Clock:                      clk,
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)
 		},

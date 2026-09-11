@@ -36,6 +36,7 @@ import (
 	"github.com/brunoxpera/risksignal/internal/application"
 	"github.com/brunoxpera/risksignal/internal/domain"
 	"github.com/brunoxpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/platform/config"
 )
 
 // parityAnalystUser is the fixed id of the migration-seeded local::security-analyst
@@ -77,7 +78,8 @@ func parityFixture(t *testing.T) (*pgxpool.Pool, string, domain.RiskSignal) {
 
 	at := time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC)
 	matchID := seedCreateSignalFixture(t, pool, at)
-	created, err := newAppService(pool, clock.NewFakeClock(at)).CreateSignal(ctx, faultTestInput(matchID))
+	baseCfg := config.Defaults()
+	created, err := newAppService(&baseCfg, pool, clock.NewFakeClock(at)).CreateSignal(ctx, faultTestInput(matchID))
 	if err != nil {
 		t.Fatalf("CreateSignal: %v", err)
 	}
@@ -90,7 +92,8 @@ func parityFixture(t *testing.T) (*pgxpool.Pool, string, domain.RiskSignal) {
 func parityAPIHandler(t *testing.T, pool *pgxpool.Pool, bypassPrincipal string) *httptest.Server {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc := newAppService(pool, clock.RealClock{})
+	baseCfg := config.Defaults()
+	svc := newAppService(&baseCfg, pool, clock.RealClock{})
 	mux := http.NewServeMux()
 	gate := httpapi.NewPermissionGate(nil, logger)
 	gate.Declare("POST /api/v1/signals/{signal_id}/commands", domain.PermissionSignalsTriage)

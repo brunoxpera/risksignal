@@ -276,6 +276,54 @@ func (e Priority) Valid() bool {
 	}
 }
 
+// Defines values for RetentionRunStatus.
+const (
+	RetentionRunStatusApproved  RetentionRunStatus = "approved"
+	RetentionRunStatusCompleted RetentionRunStatus = "completed"
+	RetentionRunStatusDryRun    RetentionRunStatus = "dry_run"
+	RetentionRunStatusExecuting RetentionRunStatus = "executing"
+	RetentionRunStatusFailed    RetentionRunStatus = "failed"
+	RetentionRunStatusRejected  RetentionRunStatus = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the RetentionRunStatus enum.
+func (e RetentionRunStatus) Valid() bool {
+	switch e {
+	case RetentionRunStatusApproved:
+		return true
+	case RetentionRunStatusCompleted:
+		return true
+	case RetentionRunStatusDryRun:
+		return true
+	case RetentionRunStatusExecuting:
+		return true
+	case RetentionRunStatusFailed:
+		return true
+	case RetentionRunStatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RetentionStage.
+const (
+	Delete       RetentionStage = "delete"
+	Pseudonymise RetentionStage = "pseudonymise"
+)
+
+// Valid indicates whether the value is a known member of the RetentionStage enum.
+func (e RetentionStage) Valid() bool {
+	switch e {
+	case Delete:
+		return true
+	case Pseudonymise:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
 	Administrator     Role = "administrator"
@@ -696,6 +744,55 @@ type InventoryImportWarning struct {
 	Value  string `json:"value"`
 }
 
+// LegalHold One documented legal hold (ARCH-007 §2.1): it blocks both deletion and
+// pseudonymisation of the aggregate until released. Setting/releasing a
+// hold is audited.
+type LegalHold struct {
+	// ActorId Principal id that set the hold.
+	ActorId string `json:"actor_id"`
+
+	// AggregateId Identifier of the held aggregate (uuid).
+	AggregateId string `json:"aggregate_id"`
+
+	// AggregateType Type of the held aggregate; defaults to "risk_signal".
+	AggregateType string    `json:"aggregate_type"`
+	CreatedAt     time.Time `json:"created_at"`
+
+	// Id Legal hold identifier (uuid).
+	Id string `json:"id"`
+
+	// Reason Documented hold reason (mandatory, non-blank).
+	Reason string `json:"reason"`
+
+	// ReleasedAt Release instant; null while the hold is active.
+	ReleasedAt *time.Time `json:"released_at"`
+}
+
+// LegalHoldCreateRequest The body of a legal-hold creation (ARCH-007 §2.1): the aggregate to
+// hold and the mandatory documented reason.
+type LegalHoldCreateRequest struct {
+	// AggregateId Identifier of the aggregate to hold (uuid).
+	AggregateId string `json:"aggregate_id"`
+
+	// AggregateType Aggregate type; defaults to "risk_signal" when omitted.
+	AggregateType *string `json:"aggregate_type,omitempty"`
+
+	// Reason Documented hold reason (mandatory, non-blank).
+	Reason string `json:"reason"`
+}
+
+// LegalHoldList One page of the legal-hold read (ARCH-007 §2.1).
+type LegalHoldList struct {
+	Data       []LegalHold `json:"data"`
+	NextCursor *string     `json:"next_cursor"`
+}
+
+// LegalHoldReleaseRequest The body of a legal-hold release (ARCH-007 §2.1): the mandatory
+// released reason.
+type LegalHoldReleaseRequest struct {
+	Reason string `json:"reason"`
+}
+
 // MatchMethod How the vulnerability was matched to the component (ADR-015); the full method-led set.
 type MatchMethod string
 
@@ -733,6 +830,87 @@ type ProblemDetails struct {
 	// Type URI reference identifying the problem type; "about:blank" when no specific type applies.
 	Type string `json:"type"`
 }
+
+// RetentionApproveRequest The body of a retention approval (ARCH-007 §2.2): the mandatory
+// non-blank reason. Approval is the four-eyes half (permission
+// `settings.approve`, Product Owner); no deletion runs without an
+// approved run.
+type RetentionApproveRequest struct {
+	Reason string `json:"reason"`
+}
+
+// RetentionDryRunReport The counts-only outcome of a retention dry-run (ARCH-007 §2.1): how
+// many candidates were found, how many are held, and how many would be
+// pseudonymised/deleted. It carries no business content.
+type RetentionDryRunReport struct {
+	Candidates     int `json:"candidates"`
+	Held           int `json:"held"`
+	ToDelete       int `json:"to_delete"`
+	ToPseudonymise int `json:"to_pseudonymise"`
+}
+
+// RetentionDryRunRequest The body of a retention dry-run (ARCH-007 §2.2): the policy, stage and
+// cutoff to propose. All properties are optional — the configured policy
+// defaults apply.
+type RetentionDryRunRequest struct {
+	Cutoff   *time.Time `json:"cutoff,omitempty"`
+	PolicyId *string    `json:"policy_id,omitempty"`
+
+	// Stage Retention stage of a run (ARCH-007 §2.1); "pseudonymise" runs before "delete".
+	Stage *RetentionStage `json:"stage,omitempty"`
+}
+
+// RetentionRun One retention run (ARCH-007 §2.1) — the operational record that
+// survives deletion. It carries counts and time ranges only, never
+// business content.
+type RetentionRun struct {
+	ApprovalReason *string    `json:"approval_reason"`
+	ApprovedAt     *time.Time `json:"approved_at"`
+
+	// ApprovedBy Approving principal id; null until approved.
+	ApprovedBy *string `json:"approved_by"`
+
+	// Cutoff RFC 3339 UTC cutoff (closed_at <= cutoff is due).
+	Cutoff       time.Time `json:"cutoff"`
+	DeletedCount int       `json:"deleted_count"`
+
+	// DryRun The dry-run counts; null until a dry-run is recorded.
+	DryRun      *RetentionDryRunReport `json:"dry_run"`
+	FailedCount int                    `json:"failed_count"`
+	FinishedAt  *time.Time             `json:"finished_at"`
+
+	// Id Retention run identifier (uuid).
+	Id           string  `json:"id"`
+	LastError    *string `json:"last_error"`
+	PartitionKey string  `json:"partition_key"`
+
+	// PolicyId Retention policy id, e.g. "closed-signals-5y".
+	PolicyId           string `json:"policy_id"`
+	PseudonymisedCount int    `json:"pseudonymised_count"`
+
+	// Stage Retention stage of a run (ARCH-007 §2.1); "pseudonymise" runs before "delete".
+	Stage     RetentionStage `json:"stage"`
+	StartedAt *time.Time     `json:"started_at"`
+
+	// Status Lifecycle of a retention run (ARCH-007 §2.2): dry_run → approved →
+	// executing → completed, plus failed/rejected. Only an approved run may
+	// be executed; a rejected run is terminal.
+	Status RetentionRunStatus `json:"status"`
+}
+
+// RetentionRunList One page of the retention-run report (ARCH-007 §2.2).
+type RetentionRunList struct {
+	Data       []RetentionRun `json:"data"`
+	NextCursor *string        `json:"next_cursor"`
+}
+
+// RetentionRunStatus Lifecycle of a retention run (ARCH-007 §2.2): dry_run → approved →
+// executing → completed, plus failed/rejected. Only an approved run may
+// be executed; a rejected run is terminal.
+type RetentionRunStatus string
+
+// RetentionStage Retention stage of a run (ARCH-007 §2.1); "pseudonymise" runs before "delete".
+type RetentionStage string
 
 // RevealActorRequest The body of the governed reveal command (ADR-014): the mandatory
 // non-blank justification of the identity resolution.
@@ -1051,6 +1229,18 @@ type RevealAuditEventActorJSONRequestBody = RevealActorRequest
 // CreateExportJSONRequestBody defines body for CreateExport for application/json ContentType.
 type CreateExportJSONRequestBody = ExportCreateRequest
 
+// CreateLegalHoldJSONRequestBody defines body for CreateLegalHold for application/json ContentType.
+type CreateLegalHoldJSONRequestBody = LegalHoldCreateRequest
+
+// ReleaseLegalHoldJSONRequestBody defines body for ReleaseLegalHold for application/json ContentType.
+type ReleaseLegalHoldJSONRequestBody = LegalHoldReleaseRequest
+
+// CreateRetentionRunJSONRequestBody defines body for CreateRetentionRun for application/json ContentType.
+type CreateRetentionRunJSONRequestBody = RetentionDryRunRequest
+
+// ApproveRetentionRunJSONRequestBody defines body for ApproveRetentionRun for application/json ContentType.
+type ApproveRetentionRunJSONRequestBody = RetentionApproveRequest
+
 // SignalCommandJSONRequestBody defines body for SignalCommand for application/json ContentType.
 type SignalCommandJSONRequestBody = SignalCommandRequest
 
@@ -1264,6 +1454,133 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/inventory/imports/{id}/commit (the `CommitInventoryImport` operationId).
 	CommitInventoryImport(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListLegalHolds List the legal holds
+	//
+	// The legal-hold read (ARCH-007 §2.1): every hold matching the filter,
+	// ordered by creation instant. Requires `retention.manage`.
+	//
+	// Corresponds with GET /api/v1/legal-holds (the `ListLegalHolds` operationId).
+	ListLegalHolds(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateLegalHoldWithBody Set a documented legal hold
+	//
+	// Set one documented legal hold (ARCH-007 §2.1, §13.4 step 2): an active
+	// hold blocks both the deletion and the pseudonymisation of its
+	// aggregate and preserves the original record as-is. The mandatory
+	// reason is the audit record. Requires `retention.manage`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/legal-holds (the `CreateLegalHold` operationId).
+	CreateLegalHoldWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateLegalHold Set a documented legal hold
+	//
+	// Set one documented legal hold (ARCH-007 §2.1, §13.4 step 2): an active
+	// hold blocks both the deletion and the pseudonymisation of its
+	// aggregate and preserves the original record as-is. The mandatory
+	// reason is the audit record. Requires `retention.manage`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/legal-holds (the `CreateLegalHold` operationId).
+	CreateLegalHold(ctx context.Context, body CreateLegalHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReleaseLegalHoldWithBody Release a legal hold
+	//
+	// Release one hold by its id (ARCH-007 §2.1): the release is set-once,
+	// takes a mandatory reason and is audited. A released hold no longer
+	// blocks its aggregate. Requires `retention.manage`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/legal-holds/{id}/release (the `ReleaseLegalHold` operationId).
+	ReleaseLegalHoldWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ReleaseLegalHold Release a legal hold
+	//
+	// Release one hold by its id (ARCH-007 §2.1): the release is set-once,
+	// takes a mandatory reason and is audited. A released hold no longer
+	// blocks its aggregate. Requires `retention.manage`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/legal-holds/{id}/release (the `ReleaseLegalHold` operationId).
+	ReleaseLegalHold(ctx context.Context, id string, body ReleaseLegalHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListRetentionRuns List the retention-run report
+	//
+	// The retention-run report (ARCH-007 §2.2 step 4): every stored run
+	// with its counts-only dry-run report, its four-eyes approval and its
+	// final counts. The rows survive the deletion they report on. Requires
+	// `retention.manage`.
+	//
+	// Corresponds with GET /api/v1/retention/runs (the `ListRetentionRuns` operationId).
+	ListRetentionRuns(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateRetentionRunWithBody Propose a retention dry-run
+	//
+	// Run a retention dry-run (ARCH-007 §2.2 step 1): scan the closed
+	// signals due at the cutoff, count the actionable and held candidates
+	// and store a counts-only `retention_runs` row (`status='dry_run'`). A
+	// dry-run changes nothing (reads only, no audit row) — it is the
+	// mandatory proposal the four-eyes approval acts on. Requires
+	// `retention.manage`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/retention/runs (the `CreateRetentionRun` operationId).
+	CreateRetentionRunWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateRetentionRun Propose a retention dry-run
+	//
+	// Run a retention dry-run (ARCH-007 §2.2 step 1): scan the closed
+	// signals due at the cutoff, count the actionable and held candidates
+	// and store a counts-only `retention_runs` row (`status='dry_run'`). A
+	// dry-run changes nothing (reads only, no audit row) — it is the
+	// mandatory proposal the four-eyes approval acts on. Requires
+	// `retention.manage`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/retention/runs (the `CreateRetentionRun` operationId).
+	CreateRetentionRun(ctx context.Context, body CreateRetentionRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetRetentionRun Get one retention run
+	//
+	// The status read of one retention run (ARCH-007 §2.2): its counts-only
+	// dry-run report, its four-eyes approval and its final counts. Requires
+	// `retention.manage`.
+	//
+	// Corresponds with GET /api/v1/retention/runs/{id} (the `GetRetentionRun` operationId).
+	GetRetentionRun(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ApproveRetentionRunWithBody Approve (or reject) a retention dry-run
+	//
+	// The four-eyes approval of a stored dry-run (ARCH-007 §2.2 step 2): the
+	// Product Owner reviews the report and decides with a mandatory reason,
+	// flipping the run `dry_run → approved` (or `→ rejected`). Only an
+	// approved run may be executed, and the approval enqueues exactly one
+	// `retention.execute` job. Requires `settings.approve`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/retention/runs/{id}/approve (the `ApproveRetentionRun` operationId).
+	ApproveRetentionRunWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ApproveRetentionRun Approve (or reject) a retention dry-run
+	//
+	// The four-eyes approval of a stored dry-run (ARCH-007 §2.2 step 2): the
+	// Product Owner reviews the report and decides with a mandatory reason,
+	// flipping the run `dry_run → approved` (or `→ rejected`). Only an
+	// approved run may be executed, and the approval enqueues exactly one
+	// `retention.execute` job. Requires `settings.approve`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/retention/runs/{id}/approve (the `ApproveRetentionRun` operationId).
+	ApproveRetentionRun(ctx context.Context, id string, body ApproveRetentionRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListRoles List the role vocabulary
 	//
@@ -1603,6 +1920,243 @@ func (c *Client) GetInventoryImport(ctx context.Context, id string, reqEditors .
 // Corresponds with POST /api/v1/inventory/imports/{id}/commit (the `CommitInventoryImport` operationId).
 func (c *Client) CommitInventoryImport(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCommitInventoryImportRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListLegalHolds List the legal holds
+//
+// The legal-hold read (ARCH-007 §2.1): every hold matching the filter,
+// ordered by creation instant. Requires `retention.manage`.
+//
+// Corresponds with GET /api/v1/legal-holds (the `ListLegalHolds` operationId).
+func (c *Client) ListLegalHolds(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListLegalHoldsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateLegalHoldWithBody Set a documented legal hold
+//
+// Set one documented legal hold (ARCH-007 §2.1, §13.4 step 2): an active
+// hold blocks both the deletion and the pseudonymisation of its
+// aggregate and preserves the original record as-is. The mandatory
+// reason is the audit record. Requires `retention.manage`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/legal-holds (the `CreateLegalHold` operationId).
+func (c *Client) CreateLegalHoldWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateLegalHoldRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateLegalHold Set a documented legal hold
+//
+// Set one documented legal hold (ARCH-007 §2.1, §13.4 step 2): an active
+// hold blocks both the deletion and the pseudonymisation of its
+// aggregate and preserves the original record as-is. The mandatory
+// reason is the audit record. Requires `retention.manage`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/legal-holds (the `CreateLegalHold` operationId).
+func (c *Client) CreateLegalHold(ctx context.Context, body CreateLegalHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateLegalHoldRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReleaseLegalHoldWithBody Release a legal hold
+//
+// Release one hold by its id (ARCH-007 §2.1): the release is set-once,
+// takes a mandatory reason and is audited. A released hold no longer
+// blocks its aggregate. Requires `retention.manage`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/legal-holds/{id}/release (the `ReleaseLegalHold` operationId).
+func (c *Client) ReleaseLegalHoldWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseLegalHoldRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReleaseLegalHold Release a legal hold
+//
+// Release one hold by its id (ARCH-007 §2.1): the release is set-once,
+// takes a mandatory reason and is audited. A released hold no longer
+// blocks its aggregate. Requires `retention.manage`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/legal-holds/{id}/release (the `ReleaseLegalHold` operationId).
+func (c *Client) ReleaseLegalHold(ctx context.Context, id string, body ReleaseLegalHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReleaseLegalHoldRequest(c.Server, id, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListRetentionRuns List the retention-run report
+//
+// The retention-run report (ARCH-007 §2.2 step 4): every stored run
+// with its counts-only dry-run report, its four-eyes approval and its
+// final counts. The rows survive the deletion they report on. Requires
+// `retention.manage`.
+//
+// Corresponds with GET /api/v1/retention/runs (the `ListRetentionRuns` operationId).
+func (c *Client) ListRetentionRuns(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListRetentionRunsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateRetentionRunWithBody Propose a retention dry-run
+//
+// Run a retention dry-run (ARCH-007 §2.2 step 1): scan the closed
+// signals due at the cutoff, count the actionable and held candidates
+// and store a counts-only `retention_runs` row (`status='dry_run'`). A
+// dry-run changes nothing (reads only, no audit row) — it is the
+// mandatory proposal the four-eyes approval acts on. Requires
+// `retention.manage`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/retention/runs (the `CreateRetentionRun` operationId).
+func (c *Client) CreateRetentionRunWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateRetentionRunRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateRetentionRun Propose a retention dry-run
+//
+// Run a retention dry-run (ARCH-007 §2.2 step 1): scan the closed
+// signals due at the cutoff, count the actionable and held candidates
+// and store a counts-only `retention_runs` row (`status='dry_run'`). A
+// dry-run changes nothing (reads only, no audit row) — it is the
+// mandatory proposal the four-eyes approval acts on. Requires
+// `retention.manage`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/retention/runs (the `CreateRetentionRun` operationId).
+func (c *Client) CreateRetentionRun(ctx context.Context, body CreateRetentionRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateRetentionRunRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetRetentionRun Get one retention run
+//
+// The status read of one retention run (ARCH-007 §2.2): its counts-only
+// dry-run report, its four-eyes approval and its final counts. Requires
+// `retention.manage`.
+//
+// Corresponds with GET /api/v1/retention/runs/{id} (the `GetRetentionRun` operationId).
+func (c *Client) GetRetentionRun(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetRetentionRunRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ApproveRetentionRunWithBody Approve (or reject) a retention dry-run
+//
+// The four-eyes approval of a stored dry-run (ARCH-007 §2.2 step 2): the
+// Product Owner reviews the report and decides with a mandatory reason,
+// flipping the run `dry_run → approved` (or `→ rejected`). Only an
+// approved run may be executed, and the approval enqueues exactly one
+// `retention.execute` job. Requires `settings.approve`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/retention/runs/{id}/approve (the `ApproveRetentionRun` operationId).
+func (c *Client) ApproveRetentionRunWithBody(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApproveRetentionRunRequestWithBody(c.Server, id, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ApproveRetentionRun Approve (or reject) a retention dry-run
+//
+// The four-eyes approval of a stored dry-run (ARCH-007 §2.2 step 2): the
+// Product Owner reviews the report and decides with a mandatory reason,
+// flipping the run `dry_run → approved` (or `→ rejected`). Only an
+// approved run may be executed, and the approval enqueues exactly one
+// `retention.execute` job. Requires `settings.approve`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/retention/runs/{id}/approve (the `ApproveRetentionRun` operationId).
+func (c *Client) ApproveRetentionRun(ctx context.Context, id string, body ApproveRetentionRunJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApproveRetentionRunRequest(c.Server, id, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2230,6 +2784,268 @@ func NewCommitInventoryImportRequest(server string, id string) (*http.Request, e
 	return req, nil
 }
 
+// NewListLegalHoldsRequest constructs an http.Request for the ListLegalHolds method
+func NewListLegalHoldsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/legal-holds")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateLegalHoldRequest calls the generic CreateLegalHold builder with application/json body
+func NewCreateLegalHoldRequest(server string, body CreateLegalHoldJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateLegalHoldRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateLegalHoldRequestWithBody constructs an http.Request for the CreateLegalHold method, with any body, and a specified content type
+func NewCreateLegalHoldRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/legal-holds")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewReleaseLegalHoldRequest calls the generic ReleaseLegalHold builder with application/json body
+func NewReleaseLegalHoldRequest(server string, id string, body ReleaseLegalHoldJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewReleaseLegalHoldRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewReleaseLegalHoldRequestWithBody constructs an http.Request for the ReleaseLegalHold method, with any body, and a specified content type
+func NewReleaseLegalHoldRequestWithBody(server string, id string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/legal-holds/%s/release", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListRetentionRunsRequest constructs an http.Request for the ListRetentionRuns method
+func NewListRetentionRunsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/retention/runs")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateRetentionRunRequest calls the generic CreateRetentionRun builder with application/json body
+func NewCreateRetentionRunRequest(server string, body CreateRetentionRunJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateRetentionRunRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateRetentionRunRequestWithBody constructs an http.Request for the CreateRetentionRun method, with any body, and a specified content type
+func NewCreateRetentionRunRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/retention/runs")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetRetentionRunRequest constructs an http.Request for the GetRetentionRun method
+func NewGetRetentionRunRequest(server string, id string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/retention/runs/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewApproveRetentionRunRequest calls the generic ApproveRetentionRun builder with application/json body
+func NewApproveRetentionRunRequest(server string, id string, body ApproveRetentionRunJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewApproveRetentionRunRequestWithBody(server, id, "application/json", bodyReader)
+}
+
+// NewApproveRetentionRunRequestWithBody constructs an http.Request for the ApproveRetentionRun method, with any body, and a specified content type
+func NewApproveRetentionRunRequestWithBody(server string, id string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/retention/runs/%s/approve", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListRolesRequest constructs an http.Request for the ListRoles method
 func NewListRolesRequest(server string) (*http.Request, error) {
 	var err error
@@ -2765,6 +3581,139 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /api/v1/inventory/imports/{id}/commit (the `CommitInventoryImport` operationId).
 	CommitInventoryImportWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*CommitInventoryImportResponse, error)
 
+	// ListLegalHoldsWithResponse List the legal holds
+	//
+	// The legal-hold read (ARCH-007 §2.1): every hold matching the filter,
+	// ordered by creation instant. Requires `retention.manage`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/legal-holds (the `ListLegalHolds` operationId).
+	ListLegalHoldsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListLegalHoldsResponse, error)
+
+	// CreateLegalHoldWithBodyWithResponse Set a documented legal hold
+	//
+	// Set one documented legal hold (ARCH-007 §2.1, §13.4 step 2): an active
+	// hold blocks both the deletion and the pseudonymisation of its
+	// aggregate and preserves the original record as-is. The mandatory
+	// reason is the audit record. Requires `retention.manage`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/legal-holds (the `CreateLegalHold` operationId).
+	CreateLegalHoldWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateLegalHoldResponse, error)
+
+	// CreateLegalHoldWithResponse Set a documented legal hold
+	//
+	// Set one documented legal hold (ARCH-007 §2.1, §13.4 step 2): an active
+	// hold blocks both the deletion and the pseudonymisation of its
+	// aggregate and preserves the original record as-is. The mandatory
+	// reason is the audit record. Requires `retention.manage`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/legal-holds (the `CreateLegalHold` operationId).
+	CreateLegalHoldWithResponse(ctx context.Context, body CreateLegalHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateLegalHoldResponse, error)
+
+	// ReleaseLegalHoldWithBodyWithResponse Release a legal hold
+	//
+	// Release one hold by its id (ARCH-007 §2.1): the release is set-once,
+	// takes a mandatory reason and is audited. A released hold no longer
+	// blocks its aggregate. Requires `retention.manage`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/legal-holds/{id}/release (the `ReleaseLegalHold` operationId).
+	ReleaseLegalHoldWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseLegalHoldResponse, error)
+
+	// ReleaseLegalHoldWithResponse Release a legal hold
+	//
+	// Release one hold by its id (ARCH-007 §2.1): the release is set-once,
+	// takes a mandatory reason and is audited. A released hold no longer
+	// blocks its aggregate. Requires `retention.manage`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/legal-holds/{id}/release (the `ReleaseLegalHold` operationId).
+	ReleaseLegalHoldWithResponse(ctx context.Context, id string, body ReleaseLegalHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseLegalHoldResponse, error)
+
+	// ListRetentionRunsWithResponse List the retention-run report
+	//
+	// The retention-run report (ARCH-007 §2.2 step 4): every stored run
+	// with its counts-only dry-run report, its four-eyes approval and its
+	// final counts. The rows survive the deletion they report on. Requires
+	// `retention.manage`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/retention/runs (the `ListRetentionRuns` operationId).
+	ListRetentionRunsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListRetentionRunsResponse, error)
+
+	// CreateRetentionRunWithBodyWithResponse Propose a retention dry-run
+	//
+	// Run a retention dry-run (ARCH-007 §2.2 step 1): scan the closed
+	// signals due at the cutoff, count the actionable and held candidates
+	// and store a counts-only `retention_runs` row (`status='dry_run'`). A
+	// dry-run changes nothing (reads only, no audit row) — it is the
+	// mandatory proposal the four-eyes approval acts on. Requires
+	// `retention.manage`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/retention/runs (the `CreateRetentionRun` operationId).
+	CreateRetentionRunWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRetentionRunResponse, error)
+
+	// CreateRetentionRunWithResponse Propose a retention dry-run
+	//
+	// Run a retention dry-run (ARCH-007 §2.2 step 1): scan the closed
+	// signals due at the cutoff, count the actionable and held candidates
+	// and store a counts-only `retention_runs` row (`status='dry_run'`). A
+	// dry-run changes nothing (reads only, no audit row) — it is the
+	// mandatory proposal the four-eyes approval acts on. Requires
+	// `retention.manage`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/retention/runs (the `CreateRetentionRun` operationId).
+	CreateRetentionRunWithResponse(ctx context.Context, body CreateRetentionRunJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRetentionRunResponse, error)
+
+	// GetRetentionRunWithResponse Get one retention run
+	//
+	// The status read of one retention run (ARCH-007 §2.2): its counts-only
+	// dry-run report, its four-eyes approval and its final counts. Requires
+	// `retention.manage`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/retention/runs/{id} (the `GetRetentionRun` operationId).
+	GetRetentionRunWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetRetentionRunResponse, error)
+
+	// ApproveRetentionRunWithBodyWithResponse Approve (or reject) a retention dry-run
+	//
+	// The four-eyes approval of a stored dry-run (ARCH-007 §2.2 step 2): the
+	// Product Owner reviews the report and decides with a mandatory reason,
+	// flipping the run `dry_run → approved` (or `→ rejected`). Only an
+	// approved run may be executed, and the approval enqueues exactly one
+	// `retention.execute` job. Requires `settings.approve`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/retention/runs/{id}/approve (the `ApproveRetentionRun` operationId).
+	ApproveRetentionRunWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApproveRetentionRunResponse, error)
+
+	// ApproveRetentionRunWithResponse Approve (or reject) a retention dry-run
+	//
+	// The four-eyes approval of a stored dry-run (ARCH-007 §2.2 step 2): the
+	// Product Owner reviews the report and decides with a mandatory reason,
+	// flipping the run `dry_run → approved` (or `→ rejected`). Only an
+	// approved run may be executed, and the approval enqueues exactly one
+	// `retention.execute` job. Requires `settings.approve`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/retention/runs/{id}/approve (the `ApproveRetentionRun` operationId).
+	ApproveRetentionRunWithResponse(ctx context.Context, id string, body ApproveRetentionRunJSONRequestBody, reqEditors ...RequestEditorFn) (*ApproveRetentionRunResponse, error)
+
 	// ListRolesWithResponse List the role vocabulary
 	//
 	// The role catalogue (ARCH-006 §3.3, ARCH-005 §1): the fixed five-role
@@ -3224,6 +4173,8 @@ type DownloadExportResponse struct {
 	JSON403 *ProblemDetails
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *ProblemDetails
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ProblemDetails
 	// JSON410 the response for an HTTP 410 `application/json` response
 	JSON410 *ProblemDetails
 	// JSON500 the response for an HTTP 500 `application/json` response
@@ -3245,6 +4196,11 @@ func (r DownloadExportResponse) GetJSON403() *ProblemDetails {
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
 func (r DownloadExportResponse) GetJSON404() *ProblemDetails {
 	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DownloadExportResponse) GetJSON409() *ProblemDetails {
+	return r.JSON409
 }
 
 // GetJSON410 returns the response for an HTTP 410 `application/json` response
@@ -3494,6 +4450,461 @@ func (r CommitInventoryImportResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CommitInventoryImportResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListLegalHoldsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *LegalHoldList
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListLegalHoldsResponse) GetJSON200() *LegalHoldList {
+	return r.JSON200
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListLegalHoldsResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ListLegalHoldsResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListLegalHoldsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListLegalHoldsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListLegalHoldsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListLegalHoldsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateLegalHoldResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *LegalHold
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateLegalHoldResponse) GetJSON200() *LegalHold {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateLegalHoldResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateLegalHoldResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r CreateLegalHoldResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateLegalHoldResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateLegalHoldResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateLegalHoldResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateLegalHoldResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ReleaseLegalHoldResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *LegalHold
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ReleaseLegalHoldResponse) GetJSON200() *LegalHold {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ReleaseLegalHoldResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ReleaseLegalHoldResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ReleaseLegalHoldResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r ReleaseLegalHoldResponse) GetJSON409() *ProblemDetails {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ReleaseLegalHoldResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ReleaseLegalHoldResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ReleaseLegalHoldResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReleaseLegalHoldResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReleaseLegalHoldResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListRetentionRunsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RetentionRunList
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListRetentionRunsResponse) GetJSON200() *RetentionRunList {
+	return r.JSON200
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListRetentionRunsResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ListRetentionRunsResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListRetentionRunsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListRetentionRunsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListRetentionRunsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListRetentionRunsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateRetentionRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RetentionRun
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateRetentionRunResponse) GetJSON200() *RetentionRun {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateRetentionRunResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateRetentionRunResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r CreateRetentionRunResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateRetentionRunResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateRetentionRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateRetentionRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateRetentionRunResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetRetentionRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RetentionRun
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetRetentionRunResponse) GetJSON200() *RetentionRun {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetRetentionRunResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetRetentionRunResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetRetentionRunResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetRetentionRunResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetRetentionRunResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetRetentionRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetRetentionRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetRetentionRunResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ApproveRetentionRunResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *RetentionRun
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *ProblemDetails
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *ProblemDetails
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *ProblemDetails
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ProblemDetails
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *ProblemDetails
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ApproveRetentionRunResponse) GetJSON200() *RetentionRun {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ApproveRetentionRunResponse) GetJSON400() *ProblemDetails {
+	return r.JSON400
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ApproveRetentionRunResponse) GetJSON403() *ProblemDetails {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ApproveRetentionRunResponse) GetJSON404() *ProblemDetails {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r ApproveRetentionRunResponse) GetJSON409() *ProblemDetails {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ApproveRetentionRunResponse) GetJSON500() *ProblemDetails {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ApproveRetentionRunResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ApproveRetentionRunResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ApproveRetentionRunResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ApproveRetentionRunResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4174,6 +5585,205 @@ func (c *ClientWithResponses) CommitInventoryImportWithResponse(ctx context.Cont
 	return ParseCommitInventoryImportResponse(rsp)
 }
 
+// ListLegalHoldsWithResponse List the legal holds
+//
+// The legal-hold read (ARCH-007 §2.1): every hold matching the filter,
+// ordered by creation instant. Requires `retention.manage`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/legal-holds (the `ListLegalHolds` operationId).
+func (c *ClientWithResponses) ListLegalHoldsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListLegalHoldsResponse, error) {
+	rsp, err := c.ListLegalHolds(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListLegalHoldsResponse(rsp)
+}
+
+// CreateLegalHoldWithBodyWithResponse Set a documented legal hold
+//
+// Set one documented legal hold (ARCH-007 §2.1, §13.4 step 2): an active
+// hold blocks both the deletion and the pseudonymisation of its
+// aggregate and preserves the original record as-is. The mandatory
+// reason is the audit record. Requires `retention.manage`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/legal-holds (the `CreateLegalHold` operationId).
+func (c *ClientWithResponses) CreateLegalHoldWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateLegalHoldResponse, error) {
+	rsp, err := c.CreateLegalHoldWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateLegalHoldResponse(rsp)
+}
+
+// CreateLegalHoldWithResponse Set a documented legal hold
+//
+// Set one documented legal hold (ARCH-007 §2.1, §13.4 step 2): an active
+// hold blocks both the deletion and the pseudonymisation of its
+// aggregate and preserves the original record as-is. The mandatory
+// reason is the audit record. Requires `retention.manage`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/legal-holds (the `CreateLegalHold` operationId).
+func (c *ClientWithResponses) CreateLegalHoldWithResponse(ctx context.Context, body CreateLegalHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateLegalHoldResponse, error) {
+	rsp, err := c.CreateLegalHold(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateLegalHoldResponse(rsp)
+}
+
+// ReleaseLegalHoldWithBodyWithResponse Release a legal hold
+//
+// Release one hold by its id (ARCH-007 §2.1): the release is set-once,
+// takes a mandatory reason and is audited. A released hold no longer
+// blocks its aggregate. Requires `retention.manage`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/legal-holds/{id}/release (the `ReleaseLegalHold` operationId).
+func (c *ClientWithResponses) ReleaseLegalHoldWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ReleaseLegalHoldResponse, error) {
+	rsp, err := c.ReleaseLegalHoldWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseLegalHoldResponse(rsp)
+}
+
+// ReleaseLegalHoldWithResponse Release a legal hold
+//
+// Release one hold by its id (ARCH-007 §2.1): the release is set-once,
+// takes a mandatory reason and is audited. A released hold no longer
+// blocks its aggregate. Requires `retention.manage`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/legal-holds/{id}/release (the `ReleaseLegalHold` operationId).
+func (c *ClientWithResponses) ReleaseLegalHoldWithResponse(ctx context.Context, id string, body ReleaseLegalHoldJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseLegalHoldResponse, error) {
+	rsp, err := c.ReleaseLegalHold(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReleaseLegalHoldResponse(rsp)
+}
+
+// ListRetentionRunsWithResponse List the retention-run report
+//
+// The retention-run report (ARCH-007 §2.2 step 4): every stored run
+// with its counts-only dry-run report, its four-eyes approval and its
+// final counts. The rows survive the deletion they report on. Requires
+// `retention.manage`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/retention/runs (the `ListRetentionRuns` operationId).
+func (c *ClientWithResponses) ListRetentionRunsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListRetentionRunsResponse, error) {
+	rsp, err := c.ListRetentionRuns(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListRetentionRunsResponse(rsp)
+}
+
+// CreateRetentionRunWithBodyWithResponse Propose a retention dry-run
+//
+// Run a retention dry-run (ARCH-007 §2.2 step 1): scan the closed
+// signals due at the cutoff, count the actionable and held candidates
+// and store a counts-only `retention_runs` row (`status='dry_run'`). A
+// dry-run changes nothing (reads only, no audit row) — it is the
+// mandatory proposal the four-eyes approval acts on. Requires
+// `retention.manage`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/retention/runs (the `CreateRetentionRun` operationId).
+func (c *ClientWithResponses) CreateRetentionRunWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateRetentionRunResponse, error) {
+	rsp, err := c.CreateRetentionRunWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateRetentionRunResponse(rsp)
+}
+
+// CreateRetentionRunWithResponse Propose a retention dry-run
+//
+// Run a retention dry-run (ARCH-007 §2.2 step 1): scan the closed
+// signals due at the cutoff, count the actionable and held candidates
+// and store a counts-only `retention_runs` row (`status='dry_run'`). A
+// dry-run changes nothing (reads only, no audit row) — it is the
+// mandatory proposal the four-eyes approval acts on. Requires
+// `retention.manage`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/retention/runs (the `CreateRetentionRun` operationId).
+func (c *ClientWithResponses) CreateRetentionRunWithResponse(ctx context.Context, body CreateRetentionRunJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateRetentionRunResponse, error) {
+	rsp, err := c.CreateRetentionRun(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateRetentionRunResponse(rsp)
+}
+
+// GetRetentionRunWithResponse Get one retention run
+//
+// The status read of one retention run (ARCH-007 §2.2): its counts-only
+// dry-run report, its four-eyes approval and its final counts. Requires
+// `retention.manage`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/retention/runs/{id} (the `GetRetentionRun` operationId).
+func (c *ClientWithResponses) GetRetentionRunWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetRetentionRunResponse, error) {
+	rsp, err := c.GetRetentionRun(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetRetentionRunResponse(rsp)
+}
+
+// ApproveRetentionRunWithBodyWithResponse Approve (or reject) a retention dry-run
+//
+// The four-eyes approval of a stored dry-run (ARCH-007 §2.2 step 2): the
+// Product Owner reviews the report and decides with a mandatory reason,
+// flipping the run `dry_run → approved` (or `→ rejected`). Only an
+// approved run may be executed, and the approval enqueues exactly one
+// `retention.execute` job. Requires `settings.approve`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/retention/runs/{id}/approve (the `ApproveRetentionRun` operationId).
+func (c *ClientWithResponses) ApproveRetentionRunWithBodyWithResponse(ctx context.Context, id string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApproveRetentionRunResponse, error) {
+	rsp, err := c.ApproveRetentionRunWithBody(ctx, id, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseApproveRetentionRunResponse(rsp)
+}
+
+// ApproveRetentionRunWithResponse Approve (or reject) a retention dry-run
+//
+// The four-eyes approval of a stored dry-run (ARCH-007 §2.2 step 2): the
+// Product Owner reviews the report and decides with a mandatory reason,
+// flipping the run `dry_run → approved` (or `→ rejected`). Only an
+// approved run may be executed, and the approval enqueues exactly one
+// `retention.execute` job. Requires `settings.approve`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/retention/runs/{id}/approve (the `ApproveRetentionRun` operationId).
+func (c *ClientWithResponses) ApproveRetentionRunWithResponse(ctx context.Context, id string, body ApproveRetentionRunJSONRequestBody, reqEditors ...RequestEditorFn) (*ApproveRetentionRunResponse, error) {
+	rsp, err := c.ApproveRetentionRun(ctx, id, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseApproveRetentionRunResponse(rsp)
+}
+
 // ListRolesWithResponse List the role vocabulary
 //
 // The role catalogue (ARCH-006 §3.3, ARCH-005 §1): the fixed five-role
@@ -4632,6 +6242,13 @@ func ParseDownloadExportResponse(rsp *http.Response) (*DownloadExportResponse, e
 		}
 		response.JSON404 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 410:
 		var dest ProblemDetails
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -4788,6 +6405,356 @@ func ParseCommitInventoryImportResponse(rsp *http.Response) (*CommitInventoryImp
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest InventoryImport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListLegalHoldsResponse parses an HTTP response from a ListLegalHoldsWithResponse call
+func ParseListLegalHoldsResponse(rsp *http.Response) (*ListLegalHoldsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListLegalHoldsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LegalHoldList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateLegalHoldResponse parses an HTTP response from a CreateLegalHoldWithResponse call
+func ParseCreateLegalHoldResponse(rsp *http.Response) (*CreateLegalHoldResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateLegalHoldResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LegalHold
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseReleaseLegalHoldResponse parses an HTTP response from a ReleaseLegalHoldWithResponse call
+func ParseReleaseLegalHoldResponse(rsp *http.Response) (*ReleaseLegalHoldResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReleaseLegalHoldResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LegalHold
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListRetentionRunsResponse parses an HTTP response from a ListRetentionRunsWithResponse call
+func ParseListRetentionRunsResponse(rsp *http.Response) (*ListRetentionRunsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListRetentionRunsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RetentionRunList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateRetentionRunResponse parses an HTTP response from a CreateRetentionRunWithResponse call
+func ParseCreateRetentionRunResponse(rsp *http.Response) (*CreateRetentionRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateRetentionRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RetentionRun
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetRetentionRunResponse parses an HTTP response from a GetRetentionRunWithResponse call
+func ParseGetRetentionRunResponse(rsp *http.Response) (*GetRetentionRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetRetentionRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RetentionRun
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest ProblemDetails
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseApproveRetentionRunResponse parses an HTTP response from a ApproveRetentionRunWithResponse call
+func ParseApproveRetentionRunResponse(rsp *http.Response) (*ApproveRetentionRunResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ApproveRetentionRunResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest RetentionRun
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -5219,6 +7186,27 @@ type ServerInterface interface {
 	// CommitInventoryImport Commit a staged inventory import
 	// (POST /api/v1/inventory/imports/{id}/commit)
 	CommitInventoryImport(w http.ResponseWriter, r *http.Request, id string)
+	// ListLegalHolds List the legal holds
+	// (GET /api/v1/legal-holds)
+	ListLegalHolds(w http.ResponseWriter, r *http.Request)
+	// CreateLegalHold Set a documented legal hold
+	// (POST /api/v1/legal-holds)
+	CreateLegalHold(w http.ResponseWriter, r *http.Request)
+	// ReleaseLegalHold Release a legal hold
+	// (POST /api/v1/legal-holds/{id}/release)
+	ReleaseLegalHold(w http.ResponseWriter, r *http.Request, id string)
+	// ListRetentionRuns List the retention-run report
+	// (GET /api/v1/retention/runs)
+	ListRetentionRuns(w http.ResponseWriter, r *http.Request)
+	// CreateRetentionRun Propose a retention dry-run
+	// (POST /api/v1/retention/runs)
+	CreateRetentionRun(w http.ResponseWriter, r *http.Request)
+	// GetRetentionRun Get one retention run
+	// (GET /api/v1/retention/runs/{id})
+	GetRetentionRun(w http.ResponseWriter, r *http.Request, id string)
+	// ApproveRetentionRun Approve (or reject) a retention dry-run
+	// (POST /api/v1/retention/runs/{id}/approve)
+	ApproveRetentionRun(w http.ResponseWriter, r *http.Request, id string)
 	// ListRoles List the role vocabulary
 	// (GET /api/v1/roles)
 	ListRoles(w http.ResponseWriter, r *http.Request)
@@ -5550,6 +7538,140 @@ func (siw *ServerInterfaceWrapper) CommitInventoryImport(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CommitInventoryImport(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLegalHolds operation middleware
+func (siw *ServerInterfaceWrapper) ListLegalHolds(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLegalHolds(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateLegalHold operation middleware
+func (siw *ServerInterfaceWrapper) CreateLegalHold(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateLegalHold(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReleaseLegalHold operation middleware
+func (siw *ServerInterfaceWrapper) ReleaseLegalHold(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReleaseLegalHold(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRetentionRuns operation middleware
+func (siw *ServerInterfaceWrapper) ListRetentionRuns(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRetentionRuns(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateRetentionRun operation middleware
+func (siw *ServerInterfaceWrapper) CreateRetentionRun(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateRetentionRun(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRetentionRun operation middleware
+func (siw *ServerInterfaceWrapper) GetRetentionRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRetentionRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApproveRetentionRun operation middleware
+func (siw *ServerInterfaceWrapper) ApproveRetentionRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApproveRetentionRun(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5931,6 +8053,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/exports", wrapper.CreateExport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/exports/{id}", wrapper.GetExport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/exports/{id}/download", wrapper.DownloadExport)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/retention/runs", wrapper.ListRetentionRuns)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/retention/runs", wrapper.CreateRetentionRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/retention/runs/{id}", wrapper.GetRetentionRun)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/retention/runs/{id}/approve", wrapper.ApproveRetentionRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/legal-holds", wrapper.ListLegalHolds)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/legal-holds", wrapper.CreateLegalHold)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/legal-holds/{id}/release", wrapper.ReleaseLegalHold)
 
 	return m
 }
@@ -6376,6 +8505,20 @@ func (response DownloadExport404JSONResponse) VisitDownloadExportResponse(w http
 	return err
 }
 
+type DownloadExport409JSONResponse ProblemDetails
+
+func (response DownloadExport409JSONResponse) VisitDownloadExportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type DownloadExport410JSONResponse ProblemDetails
 
 func (response DownloadExport410JSONResponse) VisitDownloadExportResponse(w http.ResponseWriter) error {
@@ -6641,6 +8784,496 @@ func (response CommitInventoryImport409JSONResponse) VisitCommitInventoryImportR
 type CommitInventoryImport500JSONResponse ProblemDetails
 
 func (response CommitInventoryImport500JSONResponse) VisitCommitInventoryImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLegalHoldsRequestObject struct {
+}
+
+type ListLegalHoldsResponseObject interface {
+	VisitListLegalHoldsResponse(w http.ResponseWriter) error
+}
+
+type ListLegalHolds200JSONResponse LegalHoldList
+
+func (response ListLegalHolds200JSONResponse) VisitListLegalHoldsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLegalHolds403JSONResponse ProblemDetails
+
+func (response ListLegalHolds403JSONResponse) VisitListLegalHoldsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListLegalHolds500JSONResponse ProblemDetails
+
+func (response ListLegalHolds500JSONResponse) VisitListLegalHoldsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLegalHoldRequestObject struct {
+	Body *CreateLegalHoldJSONRequestBody
+}
+
+type CreateLegalHoldResponseObject interface {
+	VisitCreateLegalHoldResponse(w http.ResponseWriter) error
+}
+
+type CreateLegalHold200JSONResponse LegalHold
+
+func (response CreateLegalHold200JSONResponse) VisitCreateLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLegalHold400JSONResponse ProblemDetails
+
+func (response CreateLegalHold400JSONResponse) VisitCreateLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLegalHold403JSONResponse ProblemDetails
+
+func (response CreateLegalHold403JSONResponse) VisitCreateLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateLegalHold500JSONResponse ProblemDetails
+
+func (response CreateLegalHold500JSONResponse) VisitCreateLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseLegalHoldRequestObject struct {
+	Id   string `json:"id"`
+	Body *ReleaseLegalHoldJSONRequestBody
+}
+
+type ReleaseLegalHoldResponseObject interface {
+	VisitReleaseLegalHoldResponse(w http.ResponseWriter) error
+}
+
+type ReleaseLegalHold200JSONResponse LegalHold
+
+func (response ReleaseLegalHold200JSONResponse) VisitReleaseLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseLegalHold400JSONResponse ProblemDetails
+
+func (response ReleaseLegalHold400JSONResponse) VisitReleaseLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseLegalHold403JSONResponse ProblemDetails
+
+func (response ReleaseLegalHold403JSONResponse) VisitReleaseLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseLegalHold404JSONResponse ProblemDetails
+
+func (response ReleaseLegalHold404JSONResponse) VisitReleaseLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseLegalHold409JSONResponse ProblemDetails
+
+func (response ReleaseLegalHold409JSONResponse) VisitReleaseLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReleaseLegalHold500JSONResponse ProblemDetails
+
+func (response ReleaseLegalHold500JSONResponse) VisitReleaseLegalHoldResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRetentionRunsRequestObject struct {
+}
+
+type ListRetentionRunsResponseObject interface {
+	VisitListRetentionRunsResponse(w http.ResponseWriter) error
+}
+
+type ListRetentionRuns200JSONResponse RetentionRunList
+
+func (response ListRetentionRuns200JSONResponse) VisitListRetentionRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRetentionRuns403JSONResponse ProblemDetails
+
+func (response ListRetentionRuns403JSONResponse) VisitListRetentionRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListRetentionRuns500JSONResponse ProblemDetails
+
+func (response ListRetentionRuns500JSONResponse) VisitListRetentionRunsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRetentionRunRequestObject struct {
+	Body *CreateRetentionRunJSONRequestBody
+}
+
+type CreateRetentionRunResponseObject interface {
+	VisitCreateRetentionRunResponse(w http.ResponseWriter) error
+}
+
+type CreateRetentionRun200JSONResponse RetentionRun
+
+func (response CreateRetentionRun200JSONResponse) VisitCreateRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRetentionRun400JSONResponse ProblemDetails
+
+func (response CreateRetentionRun400JSONResponse) VisitCreateRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRetentionRun403JSONResponse ProblemDetails
+
+func (response CreateRetentionRun403JSONResponse) VisitCreateRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateRetentionRun500JSONResponse ProblemDetails
+
+func (response CreateRetentionRun500JSONResponse) VisitCreateRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRetentionRunRequestObject struct {
+	Id string `json:"id"`
+}
+
+type GetRetentionRunResponseObject interface {
+	VisitGetRetentionRunResponse(w http.ResponseWriter) error
+}
+
+type GetRetentionRun200JSONResponse RetentionRun
+
+func (response GetRetentionRun200JSONResponse) VisitGetRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRetentionRun400JSONResponse ProblemDetails
+
+func (response GetRetentionRun400JSONResponse) VisitGetRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRetentionRun403JSONResponse ProblemDetails
+
+func (response GetRetentionRun403JSONResponse) VisitGetRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRetentionRun404JSONResponse ProblemDetails
+
+func (response GetRetentionRun404JSONResponse) VisitGetRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetRetentionRun500JSONResponse ProblemDetails
+
+func (response GetRetentionRun500JSONResponse) VisitGetRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveRetentionRunRequestObject struct {
+	Id   string `json:"id"`
+	Body *ApproveRetentionRunJSONRequestBody
+}
+
+type ApproveRetentionRunResponseObject interface {
+	VisitApproveRetentionRunResponse(w http.ResponseWriter) error
+}
+
+type ApproveRetentionRun200JSONResponse RetentionRun
+
+func (response ApproveRetentionRun200JSONResponse) VisitApproveRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveRetentionRun400JSONResponse ProblemDetails
+
+func (response ApproveRetentionRun400JSONResponse) VisitApproveRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveRetentionRun403JSONResponse ProblemDetails
+
+func (response ApproveRetentionRun403JSONResponse) VisitApproveRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveRetentionRun404JSONResponse ProblemDetails
+
+func (response ApproveRetentionRun404JSONResponse) VisitApproveRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveRetentionRun409JSONResponse ProblemDetails
+
+func (response ApproveRetentionRun409JSONResponse) VisitApproveRetentionRunResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApproveRetentionRun500JSONResponse ProblemDetails
+
+func (response ApproveRetentionRun500JSONResponse) VisitApproveRetentionRunResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -7186,6 +9819,27 @@ type StrictServerInterface interface {
 	// CommitInventoryImport Commit a staged inventory import
 	// (POST /api/v1/inventory/imports/{id}/commit)
 	CommitInventoryImport(ctx context.Context, request CommitInventoryImportRequestObject) (CommitInventoryImportResponseObject, error)
+	// ListLegalHolds List the legal holds
+	// (GET /api/v1/legal-holds)
+	ListLegalHolds(ctx context.Context, request ListLegalHoldsRequestObject) (ListLegalHoldsResponseObject, error)
+	// CreateLegalHold Set a documented legal hold
+	// (POST /api/v1/legal-holds)
+	CreateLegalHold(ctx context.Context, request CreateLegalHoldRequestObject) (CreateLegalHoldResponseObject, error)
+	// ReleaseLegalHold Release a legal hold
+	// (POST /api/v1/legal-holds/{id}/release)
+	ReleaseLegalHold(ctx context.Context, request ReleaseLegalHoldRequestObject) (ReleaseLegalHoldResponseObject, error)
+	// ListRetentionRuns List the retention-run report
+	// (GET /api/v1/retention/runs)
+	ListRetentionRuns(ctx context.Context, request ListRetentionRunsRequestObject) (ListRetentionRunsResponseObject, error)
+	// CreateRetentionRun Propose a retention dry-run
+	// (POST /api/v1/retention/runs)
+	CreateRetentionRun(ctx context.Context, request CreateRetentionRunRequestObject) (CreateRetentionRunResponseObject, error)
+	// GetRetentionRun Get one retention run
+	// (GET /api/v1/retention/runs/{id})
+	GetRetentionRun(ctx context.Context, request GetRetentionRunRequestObject) (GetRetentionRunResponseObject, error)
+	// ApproveRetentionRun Approve (or reject) a retention dry-run
+	// (POST /api/v1/retention/runs/{id}/approve)
+	ApproveRetentionRun(ctx context.Context, request ApproveRetentionRunRequestObject) (ApproveRetentionRunResponseObject, error)
 	// ListRoles List the role vocabulary
 	// (GET /api/v1/roles)
 	ListRoles(ctx context.Context, request ListRolesRequestObject) (ListRolesResponseObject, error)
@@ -7494,6 +10148,211 @@ func (sh *strictHandler) CommitInventoryImport(w http.ResponseWriter, r *http.Re
 	}
 }
 
+// ListLegalHolds operation middleware
+func (sh *strictHandler) ListLegalHolds(w http.ResponseWriter, r *http.Request) {
+	var request ListLegalHoldsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListLegalHolds(ctx, request.(ListLegalHoldsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListLegalHolds")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListLegalHoldsResponseObject); ok {
+		if err := validResponse.VisitListLegalHoldsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateLegalHold operation middleware
+func (sh *strictHandler) CreateLegalHold(w http.ResponseWriter, r *http.Request) {
+	var request CreateLegalHoldRequestObject
+
+	var body CreateLegalHoldJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateLegalHold(ctx, request.(CreateLegalHoldRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateLegalHold")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateLegalHoldResponseObject); ok {
+		if err := validResponse.VisitCreateLegalHoldResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReleaseLegalHold operation middleware
+func (sh *strictHandler) ReleaseLegalHold(w http.ResponseWriter, r *http.Request, id string) {
+	var request ReleaseLegalHoldRequestObject
+
+	request.Id = id
+
+	var body ReleaseLegalHoldJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReleaseLegalHold(ctx, request.(ReleaseLegalHoldRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReleaseLegalHold")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReleaseLegalHoldResponseObject); ok {
+		if err := validResponse.VisitReleaseLegalHoldResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListRetentionRuns operation middleware
+func (sh *strictHandler) ListRetentionRuns(w http.ResponseWriter, r *http.Request) {
+	var request ListRetentionRunsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListRetentionRuns(ctx, request.(ListRetentionRunsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListRetentionRuns")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListRetentionRunsResponseObject); ok {
+		if err := validResponse.VisitListRetentionRunsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateRetentionRun operation middleware
+func (sh *strictHandler) CreateRetentionRun(w http.ResponseWriter, r *http.Request) {
+	var request CreateRetentionRunRequestObject
+
+	var body CreateRetentionRunJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateRetentionRun(ctx, request.(CreateRetentionRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateRetentionRun")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateRetentionRunResponseObject); ok {
+		if err := validResponse.VisitCreateRetentionRunResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetRetentionRun operation middleware
+func (sh *strictHandler) GetRetentionRun(w http.ResponseWriter, r *http.Request, id string) {
+	var request GetRetentionRunRequestObject
+
+	request.Id = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetRetentionRun(ctx, request.(GetRetentionRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetRetentionRun")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetRetentionRunResponseObject); ok {
+		if err := validResponse.VisitGetRetentionRunResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApproveRetentionRun operation middleware
+func (sh *strictHandler) ApproveRetentionRun(w http.ResponseWriter, r *http.Request, id string) {
+	var request ApproveRetentionRunRequestObject
+
+	request.Id = id
+
+	var body ApproveRetentionRunJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApproveRetentionRun(ctx, request.(ApproveRetentionRunRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApproveRetentionRun")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApproveRetentionRunResponseObject); ok {
+		if err := validResponse.VisitApproveRetentionRunResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListRoles operation middleware
 func (sh *strictHandler) ListRoles(w http.ResponseWriter, r *http.Request) {
 	var request ListRolesRequestObject
@@ -7693,167 +10552,204 @@ func (sh *strictHandler) UpdateUserRoles(w http.ResponseWriter, r *http.Request,
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"L2glZHw3y0Sc8XAeJEqhX8v/HwA=",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

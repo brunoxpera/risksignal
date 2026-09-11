@@ -129,7 +129,7 @@ func newI5BAPI(t *testing.T, f *fakeI5B, id domain.Identity, withIdentity bool) 
 	t.Helper()
 	logger, _ := testLogger(t)
 	mux := http.NewServeMux()
-	RegisterAPIRoutes(mux, NewAPIHandler(&fakeSignals{}, nil, nil, logger, I5BAPI{Inventory: f, Assets: f, Users: f}))
+	RegisterAPIRoutes(mux, NewAPIHandler(&fakeSignals{}, nil, nil, logger, APISurfaces{Inventory: f, Assets: f, Users: f}))
 	auth := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if withIdentity {
@@ -508,7 +508,7 @@ func TestI5BRoutePermissionsBound(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterAPIRoutes(gate.Decorate(mux), NewAPIHandler(&fakeSignals{}, nil, nil, logger, I5BAPI{}))
+	RegisterAPIRoutes(gate.Decorate(mux), NewAPIHandler(&fakeSignals{}, nil, nil, logger, APISurfaces{}))
 	h := NewHandlerWithAuth(mux, logger, func(next http.Handler) http.Handler { return next })
 
 	reqs := []*http.Request{

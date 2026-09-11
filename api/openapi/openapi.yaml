@@ -963,10 +963,352 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: |
+            The export exists but is not completed yet (status pending or
+            failed), so there is no artifact to stream. Nothing was streamed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '410':
           description: |
             The export artifact has expired (checked against the injected
             clock, NFR-015) and is no longer downloadable. Nothing is streamed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server: the
+            problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  # --- I6 retention runs (ARCH-007 §2.1/§2.2) ----------------------------
+  /api/v1/retention/runs:
+    post:
+      operationId: createRetentionRun
+      summary: Propose a retention dry-run
+      description: |
+        Run a retention dry-run (ARCH-007 §2.2 step 1): scan the closed
+        signals due at the cutoff, count the actionable and held candidates
+        and store a counts-only `retention_runs` row (`status='dry_run'`). A
+        dry-run changes nothing (reads only, no audit row) — it is the
+        mandatory proposal the four-eyes approval acts on. Requires
+        `retention.manage`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetentionDryRunRequest'
+      responses:
+        '200':
+          description: The stored dry-run report (status dry_run).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetentionRun'
+        '400':
+          description: |
+            The request is not acceptable as given (an unknown stage).
+            Rendered as an RFC 9457 problem detail; nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `retention.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server: the
+            problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    get:
+      operationId: listRetentionRuns
+      summary: List the retention-run report
+      description: |
+        The retention-run report (ARCH-007 §2.2 step 4): every stored run
+        with its counts-only dry-run report, its four-eyes approval and its
+        final counts. The rows survive the deletion they report on. Requires
+        `retention.manage`.
+      responses:
+        '200':
+          description: One page of the retention-run report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetentionRunList'
+        '403':
+          description: The authenticated principal may not exercise `retention.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server: the
+            problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/retention/runs/{id}:
+    get:
+      operationId: getRetentionRun
+      summary: Get one retention run
+      description: |
+        The status read of one retention run (ARCH-007 §2.2): its counts-only
+        dry-run report, its four-eyes approval and its final counts. Requires
+        `retention.manage`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Retention run identifier (uuid).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The requested retention run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetentionRun'
+        '400':
+          description: The id path parameter is not a well-formed identifier (uuid).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `retention.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No retention run exists for this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server: the
+            problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/retention/runs/{id}/approve:
+    post:
+      operationId: approveRetentionRun
+      summary: Approve (or reject) a retention dry-run
+      description: |
+        The four-eyes approval of a stored dry-run (ARCH-007 §2.2 step 2): the
+        Product Owner reviews the report and decides with a mandatory reason,
+        flipping the run `dry_run → approved` (or `→ rejected`). Only an
+        approved run may be executed, and the approval enqueues exactly one
+        `retention.execute` job. Requires `settings.approve`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Retention run identifier (uuid).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetentionApproveRequest'
+      responses:
+        '200':
+          description: The approved (or rejected) retention run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetentionRun'
+        '400':
+          description: |
+            The request is not acceptable as given (a missing/blank reason).
+            Rendered as an RFC 9457 problem detail; nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `settings.approve`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No retention run exists for this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: |
+            The run is not in the `dry_run` state (already decided), so the
+            decision conflicts with the current state. Nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server: the
+            problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  # --- I6 legal holds (ARCH-007 §2.1) ------------------------------------
+  /api/v1/legal-holds:
+    post:
+      operationId: createLegalHold
+      summary: Set a documented legal hold
+      description: |
+        Set one documented legal hold (ARCH-007 §2.1, §13.4 step 2): an active
+        hold blocks both the deletion and the pseudonymisation of its
+        aggregate and preserves the original record as-is. The mandatory
+        reason is the audit record. Requires `retention.manage`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LegalHoldCreateRequest'
+      responses:
+        '200':
+          description: The stored (active) legal hold.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegalHold'
+        '400':
+          description: |
+            The request is not acceptable as given (a missing aggregate id or
+            a blank reason). Rendered as an RFC 9457 problem detail; nothing
+            was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `retention.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server: the
+            problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    get:
+      operationId: listLegalHolds
+      summary: List the legal holds
+      description: |
+        The legal-hold read (ARCH-007 §2.1): every hold matching the filter,
+        ordered by creation instant. Requires `retention.manage`.
+      responses:
+        '200':
+          description: One page of the legal-hold read.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegalHoldList'
+        '403':
+          description: The authenticated principal may not exercise `retention.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '500':
+          description: |
+            Unexpected internal error. The cause never leaves the server: the
+            problem detail is the generic internal-error shape without a
+            detail field (concept ch. 5.2).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/legal-holds/{id}/release:
+    post:
+      operationId: releaseLegalHold
+      summary: Release a legal hold
+      description: |
+        Release one hold by its id (ARCH-007 §2.1): the release is set-once,
+        takes a mandatory reason and is audited. A released hold no longer
+        blocks its aggregate. Requires `retention.manage`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Legal hold identifier (uuid).
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LegalHoldReleaseRequest'
+      responses:
+        '200':
+          description: The released legal hold.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegalHold'
+        '400':
+          description: |
+            The request is not acceptable as given (a blank reason). Rendered
+            as an RFC 9457 problem detail; nothing was written.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The authenticated principal may not exercise `retention.manage`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No legal hold exists for this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: |
+            The hold is already released (the release is set-once), so the
+            request conflicts with the current state. Nothing was written.
           content:
             application/json:
               schema:
