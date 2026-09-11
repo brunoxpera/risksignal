@@ -50,3 +50,7 @@ node_modules/
 
 # scratch dirs from other local tools
 Claude outputs/
+
+# --- Local runtime data ---------------------------------------------------
+# server-local spools and off-host backup roots created by local runs
+/var/

@@ -1,0 +1,30 @@
+# RiskSignal — off-host backup sidecar (WP-6.09 / DEV-122, ARCH-007 §4).
+#
+# A minimal, deliberately separate container that runs the encrypted off-host
+# logical backup on a schedule. It is NEVER part of the application process:
+# the server/worker images carry no pg_dump and no backup schedule. The image
+# is the postgres:16 client (so pg_dump matches the server major version) plus
+# the risksignal binary (the `diagnose backup` command, which does the age
+# encryption in-process) and the backup entrypoint.
+#
+# The deployment (a cron/systemd timer on the demo host, or a Compose service
+# with a scheduler) provides: RISKSIGNAL_DATABASE_URL, RISKSIGNAL_OIDC_ISSUER,
+# RISKSIGNAL_BACKUP_DIR (an off-host volume/mount), and
+# RISKSIGNAL_BACKUP_ENCRYPTION_KEY_REF + the referenced identity secret. The
+# demo overlay that wires this sidecar is WP-6.11.
+
+FROM golang:1.27 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/risksignal ./cmd/risksignal
+
+FROM postgres:16-alpine
+COPY --from=build /out/risksignal /usr/local/bin/risksignal
+COPY scripts/backup.sh /usr/local/bin/backup.sh
+RUN chmod 0755 /usr/local/bin/backup.sh
+# Run once per container start; the platform scheduler (cron/systemd timer)
+# provides the daily cadence. No long-running loop, no TTY.
+USER postgres
+ENTRYPOINT ["/usr/local/bin/backup.sh"]

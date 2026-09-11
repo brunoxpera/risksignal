@@ -1,0 +1,14 @@
+#!/bin/sh
+# pg_dump shim for `make backup` / `make restore-test` (WP-6.09 / DEV-122).
+#
+# The host may carry a PostgreSQL client of a different major version than the
+# compose server (postgres:16). pg_dump refuses to dump a newer server, so the
+# local targets run the client inside the compose `db` service — where the
+# client and server versions always match — transparently, by putting this
+# directory first on PATH.
+#
+# Credentials travel through PGPASSWORD/PGSSLMODE (the backup tool never puts
+# them on the command line); they are forwarded into the container explicitly.
+set -eu
+root=$(cd "$(dirname "$0")/../.." && pwd)
+exec docker compose -f "$root/compose.yaml" exec -T -e PGPASSWORD -e PGSSLMODE db pg_dump "$@"

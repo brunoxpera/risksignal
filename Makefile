@@ -83,7 +83,7 @@ SCAN_DIR := $(ARTIFACT_DIR)/scan
 
 .PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
 	verify-connectivity ci-lint ci-test test-exit-criteria test-i5a-exit-criteria test-i5b-exit-criteria test-contract ci-build demo check-gofmt vet lint-golangci \
-	lint-licenses lint-secrets lint-openapi-validate lint-openapi-diff up-db image sbom scan sign
+	lint-licenses lint-secrets lint-openapi-validate lint-openapi-diff up-db image sbom scan sign backup restore-test
 
 ## build: compile all three binaries into bin/ with build metadata injected
 build:
@@ -449,6 +449,42 @@ migrate: build
 	RISKSIGNAL_DATABASE_URL='postgres://risksignal:risksignal@127.0.0.1:5432/risksignal?sslmode=disable' \
 	RISKSIGNAL_OIDC_ISSUER='http://127.0.0.1:9000/oidc' \
 	./bin/risksignal maintenance migrate
+
+## backup: WP-6.09 / DEV-122 — run the encrypted off-host logical backup once
+##         (`pg_dump -Fc` piped through `age`, ARCH-007 §4) against the compose
+##         database, writing under backup.dir and pruning to backup.retain_days.
+##         The pg client runs inside the compose db container
+##         (scripts/pg-client) so its major version matches the postgres:16
+##         server. When RISKSIGNAL_BACKUP_AGE_IDENTITY is unset the target
+##         injects a throwaway identity (scripts/age-keygen) — production
+##         injects the real key through backup.encryption_key_ref.
+backup: build up-db
+	@identity="$${RISKSIGNAL_BACKUP_AGE_IDENTITY:-$$($(GO) run ./scripts/age-keygen)}"; \
+	PATH="$(CURDIR)/scripts/pg-client:$$PATH" \
+	RISKSIGNAL_DATABASE_URL='postgres://risksignal:risksignal@127.0.0.1:5432/risksignal?sslmode=disable' \
+	RISKSIGNAL_OIDC_ISSUER='http://127.0.0.1:9000/oidc' \
+	RISKSIGNAL_BACKUP_DIR="$${RISKSIGNAL_BACKUP_DIR:-$(CURDIR)/var/backups}" \
+	RISKSIGNAL_BACKUP_ENCRYPTION_KEY_REF=RISKSIGNAL_BACKUP_AGE_IDENTITY \
+	RISKSIGNAL_BACKUP_AGE_IDENTITY="$$identity" \
+	./bin/risksignal diagnose backup $(ARGS)
+
+## restore-test: WP-6.09 / DEV-122 — AT-015: back up the reference instance,
+##         restore it into a throwaway empty database, run the checksum-guarded
+##         migration runner (ADR-010) and assert schema/counts/sample-hashes/
+##         open-signals/audit-chain, recording a backup.restored audit event.
+##         Self-contained: it takes a fresh backup first (with the same identity)
+##         and then runs `diagnose restore-test`. Requires the compose database;
+##         the db starts automatically (up-db) and migrations are applied.
+restore-test: build up-db migrate
+	@identity="$${RISKSIGNAL_BACKUP_AGE_IDENTITY:-$$($(GO) run ./scripts/age-keygen)}"; \
+	export PATH="$(CURDIR)/scripts/pg-client:$$PATH" \
+	  RISKSIGNAL_DATABASE_URL='postgres://risksignal:risksignal@127.0.0.1:5432/risksignal?sslmode=disable' \
+	  RISKSIGNAL_OIDC_ISSUER='http://127.0.0.1:9000/oidc' \
+	  RISKSIGNAL_BACKUP_DIR="$${RISKSIGNAL_BACKUP_DIR:-$(CURDIR)/var/backups}" \
+	  RISKSIGNAL_BACKUP_ENCRYPTION_KEY_REF=RISKSIGNAL_BACKUP_AGE_IDENTITY \
+	  RISKSIGNAL_BACKUP_AGE_IDENTITY="$$identity"; \
+	./bin/risksignal diagnose backup && \
+	./bin/risksignal diagnose restore-test $(ARGS)
 
 ## up: build and start the local compose environment in the background.
 ##     db, mail and oidc stay up; server serves HTTP through the WP-1a.06
