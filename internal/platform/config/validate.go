@@ -77,6 +77,14 @@ func Validate(c *Config) []error {
 		}
 	}
 
+	// sources.allow_private relaxes the source-fetch SSRF guard to reach the
+	// local environment's mock sources on loopback. Like the auth bypass it
+	// locks the online modes out: demo and production refuse it (ARCH-007 §7
+	// control 1). The check is independent of the bypass flag.
+	if c.Sources.AllowPrivate && env != "local" {
+		errs = append(errs, errors.New("sources.allow_private: may only be enabled in local mode (ARCH-007 §7)"))
+	}
+
 	// oidc.session_ttl must be positive: a non-positive session lifetime
 	// would make every browser session expire at once (or never).
 	if c.OIDC.SessionTTL <= 0 {

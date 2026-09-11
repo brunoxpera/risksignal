@@ -59,6 +59,7 @@ func (c *Config) summaryRows() []summaryRow {
 		{key: "oidc.session_ttl", state: c.OIDC.SessionTTL.String(), source: src("oidc.session_ttl")},
 		{key: "auth.bypass_enabled", state: strconv.FormatBool(c.Auth.BypassEnabled), source: src("auth.bypass_enabled")},
 		{key: "auth.bypass_principal", state: c.Auth.BypassPrincipal, source: src("auth.bypass_principal")},
+		{key: "sources.allow_private", state: strconv.FormatBool(c.Sources.AllowPrivate), source: src("sources.allow_private")},
 		{key: "worker.interval", state: c.Worker.Interval.String(), source: src("worker.interval")},
 		{key: "worker.sla_evaluate_interval", state: c.Worker.SLAEvaluateInterval.String(), source: src("worker.sla_evaluate_interval")},
 		{key: "worker.sla_reminder_cadence", state: c.Worker.SLAReminderCadence.String(), source: src("worker.sla_reminder_cadence")},
@@ -70,6 +71,7 @@ func (c *Config) summaryRows() []summaryRow {
 		{key: "retention.pseudonymise_years", state: strconv.Itoa(c.Retention.PseudonymiseYears), source: src("retention.pseudonymise_years")},
 		{key: "retention.batch_size", state: strconv.Itoa(c.Retention.BatchSize), source: src("retention.batch_size")},
 		{key: "retention.schedule", state: c.Retention.Schedule.String(), source: src("retention.schedule")},
+		{key: "retention.hash_chain_enabled", state: strconv.FormatBool(c.Retention.HashChainEnabled), source: src("retention.hash_chain_enabled")},
 		{key: "notify.p2_active", state: strconv.FormatBool(c.Notify.P2Active), source: src("notify.p2_active")},
 		{key: "notify.smtp.enabled", state: strconv.FormatBool(c.Notify.SMTP.Enabled), source: src("notify.smtp.enabled")},
 		{key: "notify.smtp.addr", state: "set", source: src("notify.smtp.addr")},
@@ -109,6 +111,7 @@ type JSONSummary struct {
 	OIDCSessionTTL      ScalarSummary[string] `json:"oidc.session_ttl"`
 	AuthBypassEnabled   ScalarSummary[bool]   `json:"auth.bypass_enabled"`
 	AuthBypassPrincipal ScalarSummary[string] `json:"auth.bypass_principal"`
+	SourcesAllowPrivate ScalarSummary[bool]   `json:"sources.allow_private"`
 	WorkerInterval      ScalarSummary[string] `json:"worker.interval"`
 	WorkerSLAEval       ScalarSummary[string] `json:"worker.sla_evaluate_interval"`
 	WorkerSLAReminder   ScalarSummary[string] `json:"worker.sla_reminder_cadence"`
@@ -122,6 +125,7 @@ type JSONSummary struct {
 	RetentionPseudonymiseYears ScalarSummary[int]    `json:"retention.pseudonymise_years"`
 	RetentionBatchSize         ScalarSummary[int]    `json:"retention.batch_size"`
 	RetentionSchedule          ScalarSummary[string] `json:"retention.schedule"`
+	RetentionHashChainEnabled  ScalarSummary[bool]   `json:"retention.hash_chain_enabled"`
 
 	NotifyP2Active    ScalarSummary[bool] `json:"notify.p2_active"`
 	NotifySMTPEnabled ScalarSummary[bool] `json:"notify.smtp.enabled"`
@@ -182,6 +186,7 @@ func (c *Config) JSONSummary() JSONSummary {
 		OIDCSessionTTL:      ScalarSummary[string]{Value: c.OIDC.SessionTTL.String(), Source: c.sourceOf("oidc.session_ttl")},
 		AuthBypassEnabled:   ScalarSummary[bool]{Value: c.Auth.BypassEnabled, Source: c.sourceOf("auth.bypass_enabled")},
 		AuthBypassPrincipal: ScalarSummary[string]{Value: c.Auth.BypassPrincipal, Source: c.sourceOf("auth.bypass_principal")},
+		SourcesAllowPrivate: ScalarSummary[bool]{Value: c.Sources.AllowPrivate, Source: c.sourceOf("sources.allow_private")},
 		WorkerInterval:      ScalarSummary[string]{Value: c.Worker.Interval.String(), Source: c.sourceOf("worker.interval")},
 		WorkerSLAEval:       ScalarSummary[string]{Value: c.Worker.SLAEvaluateInterval.String(), Source: c.sourceOf("worker.sla_evaluate_interval")},
 		WorkerSLAReminder:   ScalarSummary[string]{Value: c.Worker.SLAReminderCadence.String(), Source: c.sourceOf("worker.sla_reminder_cadence")},
@@ -194,6 +199,7 @@ func (c *Config) JSONSummary() JSONSummary {
 		RetentionPseudonymiseYears: ScalarSummary[int]{Value: c.Retention.PseudonymiseYears, Source: c.sourceOf("retention.pseudonymise_years")},
 		RetentionBatchSize:         ScalarSummary[int]{Value: c.Retention.BatchSize, Source: c.sourceOf("retention.batch_size")},
 		RetentionSchedule:          ScalarSummary[string]{Value: c.Retention.Schedule.String(), Source: c.sourceOf("retention.schedule")},
+		RetentionHashChainEnabled:  ScalarSummary[bool]{Value: c.Retention.HashChainEnabled, Source: c.sourceOf("retention.hash_chain_enabled")},
 		NotifyP2Active:             ScalarSummary[bool]{Value: c.Notify.P2Active, Source: c.sourceOf("notify.p2_active")},
 		NotifySMTPEnabled:          ScalarSummary[bool]{Value: c.Notify.SMTP.Enabled, Source: c.sourceOf("notify.smtp.enabled")},
 		NotifySMTPAddr:             PresenceSummary{Set: true, Source: c.sourceOf("notify.smtp.addr")},

@@ -108,6 +108,7 @@ type Config struct {
 	Export        Export    `json:"export"`
 	Retention     Retention `json:"retention"`
 	Backup        Backup    `json:"backup"`
+	Sources       Sources   `json:"sources"`
 
 	Observability Observability `json:"observability"`
 
@@ -213,6 +214,20 @@ type Export struct {
 	MaxRows int `json:"max_rows"`
 }
 
+// Sources carries the I6 source-fetch configuration (ARCH-007 §7 control 1,
+// §10; WP-6.10 / DEV-123). It is the single knob of the source-fetch SSRF
+// guard: whether the guard may reach a private, loopback or link-local
+// target. It exists only for the local environment's mock sources on
+// loopback — demo and production refuse it (Validate) — and defaults to
+// false (fail secure).
+type Sources struct {
+	// AllowPrivate permits the source-fetch guard to reach private
+	// (RFC 1918/ULA), loopback and link-local-unicast targets
+	// (sources.allow_private). It is valid only in local mode; multicast and
+	// unspecified targets are refused regardless. Default false.
+	AllowPrivate bool `json:"allow_private"`
+}
+
 // Retention carries the I6 retention configuration (ARCH-007 §2.4/§10,
 // WP-6.07 / DEV-119). It is the config-not-table-state vocabulary of the
 // governed retention run: the five-year period, the pseudonymisation period,
@@ -236,6 +251,12 @@ type Retention struct {
 	// the injected clock. It is configuration, never table state. The default
 	// is monthly (30 days).
 	Schedule time.Duration `json:"schedule"`
+	// HashChainEnabled gates the optional audit hash chain
+	// (retention.hash_chain_enabled, ARCH-007 §7 control 3b): when on,
+	// AuditRepo.Append stamps prev_hash/row_hash on every new audit row and
+	// the chain-verify command checks the whole trail end-to-end. Off by
+	// default; the append path is otherwise unchanged.
+	HashChainEnabled bool `json:"hash_chain_enabled"`
 }
 
 // Backup carries the I6 encrypted off-host backup configuration (ARCH-007
@@ -392,11 +413,20 @@ func Defaults() Config {
 			// (ARCH-007 §2.4: retention.closed_signal_years/batch_size/schedule).
 			// pseudonymise_years defaults to 0 = the same period as
 			// closed_signal_years (pseudonymisation and deletion run in the
-			// same pass for the MVP).
+			// same pass for the MVP). The optional audit hash chain is off by
+			// default (retention.hash_chain_enabled, ARCH-007 §7 control 3b).
 			ClosedSignalYears: defaultRetentionClosedSignalYears,
 			PseudonymiseYears: 0,
 			BatchSize:         defaultRetentionBatchSize,
 			Schedule:          defaultRetentionSchedule,
+			HashChainEnabled:  false,
+		},
+		Sources: Sources{
+			// The source-fetch SSRF guard is fail secure by default: private,
+			// loopback and link-local targets are refused. Local mode opts in
+			// (sources.allow_private) for its mock sources on loopback;
+			// demo/production refuse the flag (ARCH-007 §7 control 1).
+			AllowPrivate: false,
 		},
 		Observability: Observability{
 			// The metrics exposition is opt-in and binds loopback by default;
@@ -532,6 +562,22 @@ var envBindings = []struct {
 		c.Retention.Schedule = d
 		return nil
 	}},
+	{"retention.hash_chain_enabled", func(c *Config, v string) error {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("retention.hash_chain_enabled: %s: must be a boolean (true or false)", envName("retention.hash_chain_enabled"))
+		}
+		c.Retention.HashChainEnabled = b
+		return nil
+	}},
+	{"sources.allow_private", func(c *Config, v string) error {
+		b, err := strconv.ParseBool(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("sources.allow_private: %s: must be a boolean (true or false)", envName("sources.allow_private"))
+		}
+		c.Sources.AllowPrivate = b
+		return nil
+	}},
 	{"worker.export_sweep_interval", func(c *Config, v string) error {
 		d, err := time.ParseDuration(strings.TrimSpace(v))
 		if err != nil {
@@ -647,33 +693,35 @@ func trimEach(in []string) []string {
 func Load() (*Config, error) {
 	cfg := Defaults()
 	prov := map[string]Source{
-		"schema_version":            SourceDefault,
-		"env":                       SourceDefault,
-		"http.addr":                 SourceDefault,
-		"database.url":              SourceDefault,
-		"oidc.issuer":               SourceDefault,
-		"oidc.client_id":            SourceDefault,
-		"oidc.client_secret_ref":    SourceDefault,
-		"oidc.redirect_url":         SourceDefault,
-		"oidc.scopes":               SourceDefault,
-		"oidc.roles_claim":          SourceDefault,
-		"oidc.role_mappings":        SourceDefault,
-		"oidc.audience":             SourceDefault,
-		"oidc.session_cookie_name":  SourceDefault,
-		"oidc.session_ttl":          SourceDefault,
-		"auth.bypass_enabled":       SourceDefault,
-		"auth.bypass_principal":     SourceDefault,
-		"notify.p2_active":          SourceDefault,
-		"notify.smtp.enabled":       SourceDefault,
-		"notify.smtp.addr":          SourceDefault,
-		"notify.smtp.from":          SourceDefault,
-		"notify.smtp.to":            SourceDefault,
-		"notify.webhook.enabled":    SourceDefault,
-		"notify.webhook.url":        SourceDefault,
-		"notify.webhook.secret":     SourceDefault,
-		"backup.encryption_key_ref": SourceDefault,
-		"backup.dir":                SourceDefault,
-		"backup.retain_days":        SourceDefault,
+		"schema_version":               SourceDefault,
+		"env":                          SourceDefault,
+		"http.addr":                    SourceDefault,
+		"database.url":                 SourceDefault,
+		"oidc.issuer":                  SourceDefault,
+		"oidc.client_id":               SourceDefault,
+		"oidc.client_secret_ref":       SourceDefault,
+		"oidc.redirect_url":            SourceDefault,
+		"oidc.scopes":                  SourceDefault,
+		"oidc.roles_claim":             SourceDefault,
+		"oidc.role_mappings":           SourceDefault,
+		"oidc.audience":                SourceDefault,
+		"oidc.session_cookie_name":     SourceDefault,
+		"oidc.session_ttl":             SourceDefault,
+		"auth.bypass_enabled":          SourceDefault,
+		"auth.bypass_principal":        SourceDefault,
+		"notify.p2_active":             SourceDefault,
+		"notify.smtp.enabled":          SourceDefault,
+		"notify.smtp.addr":             SourceDefault,
+		"notify.smtp.from":             SourceDefault,
+		"notify.smtp.to":               SourceDefault,
+		"notify.webhook.enabled":       SourceDefault,
+		"notify.webhook.url":           SourceDefault,
+		"notify.webhook.secret":        SourceDefault,
+		"backup.encryption_key_ref":    SourceDefault,
+		"backup.dir":                   SourceDefault,
+		"backup.retain_days":           SourceDefault,
+		"sources.allow_private":        SourceDefault,
+		"retention.hash_chain_enabled": SourceDefault,
 	}
 
 	if path := os.Getenv(envVarConfigFile); path != "" {
@@ -722,7 +770,12 @@ type configFile struct {
 	Export        *fileExport        `json:"export"`
 	Retention     *fileRetention     `json:"retention"`
 	Backup        *fileBackup        `json:"backup"`
+	Sources       *fileSources       `json:"sources"`
 	Observability *fileObservability `json:"observability"`
+}
+
+type fileSources struct {
+	AllowPrivate *bool `json:"allow_private"`
 }
 
 type fileBackup struct {
@@ -775,6 +828,7 @@ type fileRetention struct {
 	PseudonymiseYears *int    `json:"pseudonymise_years"`
 	BatchSize         *int    `json:"batch_size"`
 	Schedule          *string `json:"schedule"` // Go duration, e.g. "720h" (monthly)
+	HashChainEnabled  *bool   `json:"hash_chain_enabled"`
 }
 
 type fileObservability struct {
@@ -974,6 +1028,14 @@ func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
 			cfg.Retention.Schedule = d
 			prov["retention.schedule"] = SourceFile
 		}
+		if fc.Retention.HashChainEnabled != nil {
+			cfg.Retention.HashChainEnabled = *fc.Retention.HashChainEnabled
+			prov["retention.hash_chain_enabled"] = SourceFile
+		}
+	}
+	if fc.Sources != nil && fc.Sources.AllowPrivate != nil {
+		cfg.Sources.AllowPrivate = *fc.Sources.AllowPrivate
+		prov["sources.allow_private"] = SourceFile
 	}
 	if fc.Backup != nil {
 		if fc.Backup.EncryptionKeyRef != nil {

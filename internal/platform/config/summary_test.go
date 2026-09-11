@@ -90,6 +90,7 @@ func TestJSONSummaryIsDeterministic(t *testing.T) {
 		`"oidc.session_ttl":{"value":"8h0m0s","source":"default"},` +
 		`"auth.bypass_enabled":{"value":false,"source":"default"},` +
 		`"auth.bypass_principal":{"value":"local-developer","source":"default"},` +
+		`"sources.allow_private":{"value":false,"source":"default"},` +
 		`"worker.interval":{"value":"30s","source":"default"},` +
 		`"worker.sla_evaluate_interval":{"value":"1m0s","source":"default"},` +
 		`"worker.sla_reminder_cadence":{"value":"1h0m0s","source":"default"},` +
@@ -101,6 +102,7 @@ func TestJSONSummaryIsDeterministic(t *testing.T) {
 		`"retention.pseudonymise_years":{"value":0,"source":"default"},` +
 		`"retention.batch_size":{"value":500,"source":"default"},` +
 		`"retention.schedule":{"value":"720h0m0s","source":"default"},` +
+		`"retention.hash_chain_enabled":{"value":false,"source":"default"},` +
 		`"notify.p2_active":{"value":true,"source":"default"},` +
 		`"notify.smtp.enabled":{"value":false,"source":"default"},` +
 		`"notify.smtp.addr":{"set":true,"source":"default"},` +
