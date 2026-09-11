@@ -359,6 +359,45 @@ func newAppService(cfg *config.Config, pool *pgxpool.Pool, clk clock.Clock) *app
 	})
 }
 
+// newRetentionAppService wires the retention-bound application service the
+// `maintenance identity-pseudonymize --commit` path drives on the short-lived
+// dedicated retention connection (ARCH-007 §7 control 3a amendment): the
+// retention, audit and transaction ports run on retentionPool — authenticated
+// as the dedicated retention login — while the identity read port (users) is
+// supplied by the caller and stays on the application runtime role, so the
+// authoriser's authorise-time principal re-read never touches the retention
+// connection (the retention role holds no grant on users). The clock is the
+// real clock; the retention period/batch/pseudonymisation values are the same
+// injected configuration the app-role service carries.
+func newRetentionAppService(cfg *config.Config, retentionPool *pgxpool.Pool, users application.UserRepo, clk clock.Clock) *application.Service {
+	q := gen.New(retentionPool)
+	return application.NewService(application.ServiceDeps{
+		Signals:         repo.NewSignalRepo(q),
+		Audit:           repo.NewAuditRepo(q),
+		Outbox:          repo.NewOutboxRepo(q),
+		Vulnerabilities: repo.NewVulnerabilityRepo(q),
+		Matches:         repo.NewMatchRepo(q),
+		SourceRuns:      repo.NewSourceRunRepo(q),
+		RawRecords:      repo.NewRawRecordRepo(q),
+		Sources:         repo.NewSourceRepo(q),
+		Quarantine:      repo.NewQuarantineRepo(q),
+		Components:      repo.NewComponentRepo(q),
+		Inventory:       repo.NewInventoryRepo(q),
+		// The identity read port stays on the application runtime role: the
+		// authoriser's principal re-read (users + user_roles) is an app-role
+		// read, and the retention role has no grant on users.
+		Users:                      users,
+		Retention:                  repo.NewRetentionRepo(q),
+		RetentionClosedSignalYears: cfg.Retention.ClosedSignalYears,
+		RetentionBatchSize:         cfg.Retention.BatchSize,
+		RetentionPseudonymiseYears: cfg.Retention.PseudonymiseYears,
+		Clock:                      clk,
+		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
+			return postgres.WithTx(ctx, retentionPool, fn)
+		},
+	})
+}
+
 // seedDemoInventory registers the synthetic source and seeds the demo
 // assets/components in one transaction and returns the source id plus the
 // counts of seeded assets and components. Sources and assets upsert by

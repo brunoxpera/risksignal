@@ -29,7 +29,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
 	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/platform/clock"
 )
 
 // retentionCommandTimeout bounds one retention/pseudonymisation command: a
@@ -186,13 +190,23 @@ func (e *cmdEnv) cmdIdentityPseudonymize(args []string) outcome {
 	if strings.TrimSpace(*user) == "" {
 		return e.fail(exitValidation, classValidation, "--user is mandatory (the user id to pseudonymise)")
 	}
-	if (*commit || *yes) && strings.TrimSpace(*reason) == "" {
+	committing := *commit || *yes
+	if committing && strings.TrimSpace(*reason) == "" {
 		return e.fail(exitValidation, classValidation, "--reason is mandatory and must not be blank for a real pseudonymisation")
 	}
 
 	cfg, out := loadConfig(e)
 	if !out.ok() {
 		return out
+	}
+	// Fail closed: a real pseudonymisation must run on the dedicated retention
+	// connection (never the application runtime role, never SET ROLE). When
+	// database.retention_url is unset the commit path refuses to start rather
+	// than fall back to the app role. The dry-run preview stays on the app-role
+	// connection and needs no retention DSN.
+	if committing && strings.TrimSpace(cfg.Database.RetentionURL) == "" {
+		return e.fail(exitValidation, classValidation,
+			"database.retention_url: not configured — pseudonymisation --commit is disabled (set RISKSIGNAL_DATABASE_RETENTION_URL; fails closed rather than use the application role)")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), retentionCommandTimeout)
 	defer cancel()
@@ -202,13 +216,44 @@ func (e *cmdEnv) cmdIdentityPseudonymize(args []string) outcome {
 	}
 	defer pool.Close()
 
+	// Actor resolution (--as → ResolveActor, which reads users) stays on the
+	// application runtime role, before any switch to the retention connection.
 	actor, out := e.resolveSignalActor(ctx, svc, cfg, *as)
 	if !out.ok() {
 		return out
 	}
+
+	if committing {
+		// The real run opens a short-lived dedicated retention connection
+		// (authenticated as risksignal_retention_login), drives the commit and
+		// closes it. Only the retention/audit/transaction ports move onto that
+		// connection; the users read the authoriser performs stays app-role.
+		retentionPool, err := postgres.OpenPool(ctx, cfg.Database.RetentionURL)
+		if err != nil {
+			return e.fail(exitInfrastructure, classInfrastructure, "%v", err)
+		}
+		defer retentionPool.Close()
+		retentionSvc := newRetentionAppService(cfg, retentionPool, repo.NewUserRepo(gen.New(pool)), clock.RealClock{})
+		res, err := retentionSvc.PseudonymizeIdentity(ctx, application.PseudonymizeIdentityInput{
+			UserID: *user,
+			DryRun: false,
+			Reason: *reason,
+			Actor:  actor,
+		})
+		if err != nil {
+			return applicationErrorOutcome(err)
+		}
+		view := pseudonymiseViewOf(res)
+		if e.format == formatText {
+			fmt.Fprintf(e.stdout, "identity-pseudonymize %s: cleared %d display name(s), redacted %d comment(s), %d override reason(s), %d snapshot reason(s)\n",
+				view.UserID, view.Redaction.DisplayNamesCleared, view.Redaction.CommentBodiesRedacted, view.Redaction.OverrideReasonsRedacted, view.Redaction.SnapshotReasonsRedacted)
+		}
+		return e.ok(view)
+	}
+
 	res, err := svc.PseudonymizeIdentity(ctx, application.PseudonymizeIdentityInput{
 		UserID: *user,
-		DryRun: !*commit && !*yes,
+		DryRun: true,
 		Reason: *reason,
 		Actor:  actor,
 	})
@@ -217,13 +262,8 @@ func (e *cmdEnv) cmdIdentityPseudonymize(args []string) outcome {
 	}
 	view := pseudonymiseViewOf(res)
 	if e.format == formatText {
-		if view.DryRun {
-			fmt.Fprintf(e.stdout, "identity-pseudonymize (dry run) %s: would clear %d display name(s), redact %d comment(s), %d override reason(s), %d snapshot reason(s)\n",
-				view.UserID, view.Redaction.DisplayNamesCleared, view.Redaction.CommentBodiesRedacted, view.Redaction.OverrideReasonsRedacted, view.Redaction.SnapshotReasonsRedacted)
-		} else {
-			fmt.Fprintf(e.stdout, "identity-pseudonymize %s: cleared %d display name(s), redacted %d comment(s), %d override reason(s), %d snapshot reason(s)\n",
-				view.UserID, view.Redaction.DisplayNamesCleared, view.Redaction.CommentBodiesRedacted, view.Redaction.OverrideReasonsRedacted, view.Redaction.SnapshotReasonsRedacted)
-		}
+		fmt.Fprintf(e.stdout, "identity-pseudonymize (dry run) %s: would clear %d display name(s), redact %d comment(s), %d override reason(s), %d snapshot reason(s)\n",
+			view.UserID, view.Redaction.DisplayNamesCleared, view.Redaction.CommentBodiesRedacted, view.Redaction.OverrideReasonsRedacted, view.Redaction.SnapshotReasonsRedacted)
 	}
 	return e.ok(view)
 }

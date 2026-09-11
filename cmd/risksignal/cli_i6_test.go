@@ -83,6 +83,17 @@ func TestIdentityPseudonymizeCommitRequiresReason(t *testing.T) {
 	assertValidationFailure(t, code, stdout, stderr, "--reason is mandatory")
 }
 
+// TestIdentityPseudonymizeCommitRequiresRetentionURL proves the fail-closed
+// rule (ARCH-007 §7 control 3a amendment, DEV-128): a real pseudonymisation
+// must run on the dedicated retention connection, so with
+// database.retention_url unset the command refuses before opening any pool
+// rather than fall back to the application role. The dry run is unaffected.
+func TestIdentityPseudonymizeCommitRequiresRetentionURL(t *testing.T) {
+	code, stdout, stderr := runCLI(t, cliValidEnv(),
+		"maintenance", "identity-pseudonymize", "--user", "u-1", "--reason", "reviewed", "--commit")
+	assertValidationFailure(t, code, stdout, stderr, "database.retention_url")
+}
+
 func TestLegalHoldCreateRequiresAggregateAndReason(t *testing.T) {
 	code, stdout, stderr := runCLI(t, cliValidEnv(), "legal-hold", "create")
 	assertValidationFailure(t, code, stdout, stderr, "--aggregate is mandatory")
