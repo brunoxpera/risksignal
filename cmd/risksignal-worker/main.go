@@ -48,6 +48,8 @@ import (
 	"github.com/brunoxpera/risksignal/internal/platform/logging"
 	"github.com/brunoxpera/risksignal/internal/platform/metrics"
 	"github.com/brunoxpera/risksignal/internal/platform/tracing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // buildNotifyPort assembles the notification channel dispatcher from the
@@ -92,6 +94,50 @@ func otlpExporter(cfg *config.Config, service string) tracing.Exporter {
 		return nil
 	}
 	return tracing.NewOTLPExporter(cfg.Observability.OTLPEndpoint, service)
+}
+
+// unconfiguredRetentionRunner is the fail-closed stand-in for the
+// retention.execute handler when database.retention_url is unset: the run
+// refuses to start (a validation error is permanent, so the job dead-letters
+// with the message recorded) rather than silently falling back to the
+// application-role connection, which must never hold the retention deletes.
+type unconfiguredRetentionRunner struct{}
+
+func (unconfiguredRetentionRunner) ExecuteRetention(context.Context, application.ExecuteRetentionInput) (application.ExecuteRetentionResult, error) {
+	return application.ExecuteRetentionResult{}, application.Validationf("execute_retention",
+		"database.retention_url is not configured: retention execution is disabled (fails closed rather than use the application role)")
+}
+
+// newRetentionService wires the retention-bound application service the
+// retention.execute handler drives on the dedicated retention pool
+// (ARCH-007 §7 control 3a amendment, DEV-128). Every port runs on the
+// retention connection; the handler runs as a system actor, so no identity read
+// port is wired (the authoriser gate is a no-op for a non-user actor). The
+// audit repository honours the optional hash chain so the retention.* rows it
+// appends stay on the same chain as every other audit row.
+func newRetentionService(cfg *config.Config, pool *pgxpool.Pool) *application.Service {
+	q := gen.New(pool)
+	return application.NewService(application.ServiceDeps{
+		Signals:                    repo.NewSignalRepo(q),
+		Audit:                      repo.NewAuditRepoWithHashChain(q, cfg.Retention.HashChainEnabled),
+		Outbox:                     repo.NewOutboxRepo(q),
+		Vulnerabilities:            repo.NewVulnerabilityRepo(q),
+		Matches:                    repo.NewMatchRepo(q),
+		SourceRuns:                 repo.NewSourceRunRepo(q),
+		RawRecords:                 repo.NewRawRecordRepo(q),
+		Sources:                    repo.NewSourceRepo(q),
+		Quarantine:                 repo.NewQuarantineRepo(q),
+		Components:                 repo.NewComponentRepo(q),
+		Inventory:                  repo.NewInventoryRepo(q),
+		Retention:                  repo.NewRetentionRepo(q),
+		RetentionClosedSignalYears: cfg.Retention.ClosedSignalYears,
+		RetentionBatchSize:         cfg.Retention.BatchSize,
+		RetentionPseudonymiseYears: cfg.Retention.PseudonymiseYears,
+		Clock:                      clock.RealClock{},
+		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
+			return postgres.WithTx(ctx, pool, fn)
+		},
+	})
 }
 
 func main() {
@@ -236,6 +282,29 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 			return postgres.WithTx(ctx, pool, fn)
 		},
 	})
+
+	// The dedicated retention connection (ARCH-007 §7 control 3a amendment,
+	// DEV-128): the governed retention.execute job deletes and redacts rows the
+	// append-only application role may not touch, so it runs on its own pool
+	// authenticated as the dedicated retention login (database.retention_url) —
+	// never the app-role pool and never via SET ROLE. It is optional: when
+	// database.retention_url is unset the worker still starts and every other
+	// job keeps the app-role pool, but the retention.execute handler refuses
+	// (fail closed) instead of falling back to the application role. The pool is
+	// lazy like the app pool: a database that is down at startup does not stop
+	// the worker.
+	var retentionRunner worker.RetentionExecuteRunner = unconfiguredRetentionRunner{}
+	if cfg.Database.RetentionURL != "" {
+		retentionPool, err := postgres.NewPool(context.Background(), cfg.Database.RetentionURL)
+		if err != nil {
+			return fmt.Errorf("create retention database pool: %w", err)
+		}
+		defer retentionPool.Close()
+		retentionRunner = newRetentionService(cfg, retentionPool)
+	} else {
+		logger.Warn("database.retention_url is not configured; the retention.execute handler is disabled (fail closed)")
+	}
+
 	// The source adapters share one SSRF-guarded transport (ARCH-007 §7
 	// control 1, WP-6.10 / DEV-123): the scheme allowlist, the resolve + IP
 	// check and the ≤5 re-checked redirects apply to every fetch. The guard
@@ -377,7 +446,7 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	if err := exportJobs.RegisterHandlers(relay); err != nil {
 		return fmt.Errorf("configure export jobs: %w", err)
 	}
-	retentionJobs, err := worker.NewRetentionJobs(svc, svc, clock.RealClock{}, cfg.Retention.Schedule, logger)
+	retentionJobs, err := worker.NewRetentionJobs(retentionRunner, svc, clock.RealClock{}, cfg.Retention.Schedule, logger)
 	if err != nil {
 		return fmt.Errorf("configure retention jobs: %w", err)
 	}
