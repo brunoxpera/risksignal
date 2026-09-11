@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
@@ -87,10 +88,18 @@ func writeChainField(b *bytes.Buffer, s string) {
 }
 
 // canonicalJSON normalises a jsonb value to a stable byte form: object keys
-// sorted (encoding/json), no insignificant whitespace, numbers preserved as
-// written (UseNumber). An empty value stays empty (NULL); a value that is not
-// valid JSON falls back to the raw bytes so the hash is at least
+// sorted (encoding/json), no insignificant whitespace, and every number
+// rendered in the canonical decimal form jsonb's numeric type stores and
+// prints (normaliseJSONNumber). An empty value stays empty (NULL); a value that
+// is not valid JSON falls back to the raw bytes so the hash is at least
 // deterministic.
+//
+// The numeric normalisation is what makes the stamp-time and verify-time byte
+// strings agree: stamping hashes the raw input lexeme, but the before/after
+// columns are jsonb, and PostgreSQL canonicalises their numbers on the way in
+// (1e2 becomes 100). Without this step a snapshot holding an exponent-form or
+// extreme-magnitude number hashed differently at stamp time than when read back,
+// so an untampered chain reported a false mismatch.
 func canonicalJSON(raw []byte) []byte {
 	if len(raw) == 0 {
 		return nil
@@ -101,11 +110,87 @@ func canonicalJSON(raw []byte) []byte {
 	if err := dec.Decode(&v); err != nil {
 		return raw
 	}
-	out, err := json.Marshal(v)
+	out, err := json.Marshal(normaliseJSONNumbers(v))
 	if err != nil {
 		return raw
 	}
 	return out
+}
+
+// normaliseJSONNumbers walks a decoded JSON value and rewrites every number to
+// its canonical decimal form (normaliseJSONNumber); objects, arrays and the
+// non-number scalars pass through unchanged.
+func normaliseJSONNumbers(v any) any {
+	switch t := v.(type) {
+	case json.Number:
+		return normaliseJSONNumber(t)
+	case []any:
+		for i := range t {
+			t[i] = normaliseJSONNumbers(t[i])
+		}
+		return t
+	case map[string]any:
+		for k := range t {
+			t[k] = normaliseJSONNumbers(t[k])
+		}
+		return t
+	default:
+		return v
+	}
+}
+
+// normaliseJSONNumber renders a JSON number in the canonical decimal form
+// PostgreSQL's jsonb (the numeric type) stores and prints: no exponent, no
+// leading zeros, no sign on zero, and the input's scale preserved (a trailing
+// fractional zero is kept; a positive exponent's implied zeros are made
+// explicit). It mirrors numeric_in's scale rule — digits after the point minus
+// the exponent, clamped at zero — and numeric_out's plain-decimal rendering,
+// so a value that round-trips through a jsonb column hashes identically before
+// and after the round trip.
+func normaliseJSONNumber(n json.Number) json.Number {
+	s := n.String()
+	neg := false
+	if len(s) > 0 && (s[0] == '-' || s[0] == '+') {
+		neg = s[0] == '-'
+		s = s[1:]
+	}
+	exp := 0
+	if i := strings.IndexAny(s, "eE"); i >= 0 {
+		if e, err := strconv.Atoi(s[i+1:]); err == nil {
+			exp = e
+		}
+		s = s[:i]
+	}
+	intPart, fracPart := s, ""
+	if i := strings.IndexByte(s, '.'); i >= 0 {
+		intPart, fracPart = s[:i], s[i+1:]
+	}
+	digits := intPart + fracPart
+	scale := len(fracPart) - exp
+	if scale < 0 {
+		digits += strings.Repeat("0", -scale)
+		scale = 0
+	}
+	var out string
+	if scale == 0 {
+		out = strings.TrimLeft(digits, "0")
+		if out == "" {
+			out = "0"
+		}
+	} else {
+		if len(digits) < scale {
+			digits = strings.Repeat("0", scale-len(digits)) + digits
+		}
+		whole := strings.TrimLeft(digits[:len(digits)-scale], "0")
+		if whole == "" {
+			whole = "0"
+		}
+		out = whole + "." + digits[len(digits)-scale:]
+	}
+	if neg && strings.Trim(out, "0.") != "" {
+		out = "-" + out
+	}
+	return json.Number(out)
 }
 
 // ChainStatus reports one end-to-end chain verification.

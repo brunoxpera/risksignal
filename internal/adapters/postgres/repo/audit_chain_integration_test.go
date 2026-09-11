@@ -100,6 +100,63 @@ func TestAuditHashChainStampsAndVerifies(t *testing.T) {
 	}
 }
 
+// TestAuditHashChainNormalisesExponentNumbers is the DEV-125 regression (the
+// DEV-123 review's finding #2): a before/after jsonb snapshot holding an
+// exponent-form number (e.g. 1e2) is hashed over its raw input lexeme at stamp
+// time, but read back from jsonb in decimal form (100) at verify time — so the
+// two canonical byte strings disagreed and an untampered chain reported a
+// false "row_hash does not match the recomputed value". canonicalJSON now
+// renders numbers exactly as jsonb's numeric type prints them, so the
+// exponent-form, trailing-zero and already-canonical snapshots all verify.
+func TestAuditHashChainNormalisesExponentNumbers(t *testing.T) {
+	pool := newI4TestPool(t)
+	ctx := context.Background()
+	q := gen.New(pool)
+	repo := NewAuditRepoWithHashChain(q, true)
+	base := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+
+	events := []struct{ before, after string }{
+		{`{"n":1e2}`, `{"n":1e-2}`},
+		{`{"n":1.50e1,"m":1E2}`, `{"n":-0.0}`},
+		{`{"status":"open","version":1}`, `{"status":"closed","version":2}`}, // already canonical
+		{`{"z":1,"a":2}`, `{"a":1,"z":2}`},                                   // key order
+	}
+	for i, ev := range events {
+		ae := application.AuditEvent{
+			AggregateType: "risk_signal",
+			AggregateID:   fmt.Sprintf("00000000-0000-0000-0000-0000000000%02d", i),
+			ActorType:     "user",
+			ActorID:       "subject-1",
+			Action:        fmt.Sprintf("signal.action_%02d", i),
+			OccurredAt:    base.Add(time.Duration(i) * time.Minute),
+			Before:        json.RawMessage(ev.before),
+			After:         json.RawMessage(ev.after),
+			CorrelationID: fmt.Sprintf("corr-%02d", i),
+		}
+		if err := postgres.WithTx(ctx, pool, func(tx pgx.Tx) error { return repo.Append(ctx, tx, ae) }); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	// The database canonicalised the exponent form on the way in: the stored
+	// jsonb no longer holds 1e2 but 100.
+	var stored string
+	if err := pool.QueryRow(ctx, `SELECT before::text FROM audit_events WHERE action = 'signal.action_00'`).Scan(&stored); err != nil {
+		t.Fatalf("read stored before: %v", err)
+	}
+	if stored != `{"n": 100}` {
+		t.Fatalf("stored before = %q, want %q", stored, `{"n": 100}`)
+	}
+
+	st, err := repo.VerifyChain(ctx)
+	if err != nil {
+		t.Fatalf("VerifyChain on an untampered chain with jsonb numbers: %v", err)
+	}
+	if st.Rows != len(events) || st.Chained != len(events) || st.Unchained != 0 {
+		t.Fatalf("chain status = %+v, want %d rows / %d chained / 0 unchained", st, len(events), len(events))
+	}
+}
+
 // TestAuditHashChainDisabledLeavesRowsUnchained proves the config gate: with
 // the chain off the append path is unchanged (no prev_hash/row_hash) and the
 // verifier reports an all-unchained, intact trail.
