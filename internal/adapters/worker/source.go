@@ -70,11 +70,15 @@ import (
 // age is derived from the projection (a scrape-time computation of the I6
 // endpoint / the status read).
 const (
-	metricSourceRunDurationSeconds = "source_run_duration_seconds" // duration of one completed pass
-	metricSourceRecordsTotal       = "source_records_total"        // raw documents stored by fetch passes
-	metricSourceErrorsTotal        = "source_errors_total"         // records isolated by normalize passes
-	metricSourceRateLimited        = "source_rate_limited"         // latest fetch outcome was rate-limited
-	metricEpssRowsTotal            = "epss_rows_total"             // rows loaded by epss normalize passes
+	// The §16.2 source families reuse the canonical names/help of
+	// internal/platform/metrics (RegisterStandard declares them at startup),
+	// so a re-declaration can never drift; the rate-limit and EPSS extensions
+	// are not part of the §16.2 vocabulary and stay local.
+	metricSourceRunDurationSeconds = metrics.NameSourceRunDuration  // duration of one completed pass
+	metricSourceRecordsTotal       = metrics.NameSourceRecordsTotal // raw documents stored by fetch passes
+	metricSourceErrorsTotal        = metrics.NameSourceErrorsTotal  // records isolated by normalize passes
+	metricSourceRateLimited        = "source_rate_limited"          // latest fetch outcome was rate-limited
+	metricEpssRowsTotal            = "epss_rows_total"              // rows loaded by epss normalize passes
 )
 
 // SourceJobRunner is the application surface the source job handlers drive
@@ -266,12 +270,12 @@ func (j *SourceJobs) observeFetchOutcome(labels metrics.Labels, startedAt time.T
 	if rateLimited {
 		limited = 1
 	}
-	j.metrics.Seconds(metricSourceRunDurationSeconds, "duration of one completed source.fetch pass").With(labels).
+	j.metrics.Seconds(metricSourceRunDurationSeconds, metrics.HelpSourceRunDuration).With(labels).
 		Observe(time.Since(startedAt).Seconds())
 	j.metrics.Gauge(metricSourceRateLimited, "latest fetch outcome of the source was rate-limited").With(labels).
 		Set(limited)
 	if storedRecords > 0 {
-		j.metrics.Counter(metricSourceRecordsTotal, "raw documents the source's fetch passes stored in this process").With(labels).
+		j.metrics.Counter(metricSourceRecordsTotal, metrics.HelpSourceRecordsTotal).With(labels).
 			Add(storedRecords)
 	}
 }
@@ -284,7 +288,7 @@ func (j *SourceJobs) observeFetchFailure(labels metrics.Labels, startedAt time.T
 	if j.metrics == nil {
 		return
 	}
-	j.metrics.Seconds(metricSourceRunDurationSeconds, "duration of one completed source.fetch pass").With(labels).
+	j.metrics.Seconds(metricSourceRunDurationSeconds, metrics.HelpSourceRunDuration).With(labels).
 		Observe(time.Since(startedAt).Seconds())
 	j.metrics.Gauge(metricSourceRateLimited, "latest fetch outcome of the source was rate-limited").With(labels).
 		Set(0)
@@ -299,10 +303,10 @@ func (j *SourceJobs) observeNormalizeOutcome(labels metrics.Labels, startedAt ti
 	if j.metrics == nil {
 		return
 	}
-	j.metrics.Seconds(metricSourceRunDurationSeconds, "duration of one completed source.normalize pass").With(labels).
+	j.metrics.Seconds(metricSourceRunDurationSeconds, metrics.HelpSourceRunDuration).With(labels).
 		Observe(time.Since(startedAt).Seconds())
 	if res.Counters.Errors > 0 {
-		j.metrics.Counter(metricSourceErrorsTotal, "records the source's normalize passes isolated in this process").With(labels).
+		j.metrics.Counter(metricSourceErrorsTotal, metrics.HelpSourceErrorsTotal).With(labels).
 			Add(float64(res.Counters.Errors))
 	}
 	if epss && res.Counters.Normalized > 0 {
@@ -317,7 +321,7 @@ func (j *SourceJobs) observeNormalizeFailure(labels metrics.Labels, startedAt ti
 	if j.metrics == nil {
 		return
 	}
-	j.metrics.Seconds(metricSourceRunDurationSeconds, "duration of one completed source.normalize pass").With(labels).
+	j.metrics.Seconds(metricSourceRunDurationSeconds, metrics.HelpSourceRunDuration).With(labels).
 		Observe(time.Since(startedAt).Seconds())
 }
 
