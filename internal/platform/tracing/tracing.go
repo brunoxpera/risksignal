@@ -91,6 +91,24 @@ func (t *Tracer) Enabled() bool { return t != nil && t.exporter != nil }
 // spanContextKey is the unexported context key carrying the active span.
 type spanContextKey struct{}
 
+// traceIDContextKey is the unexported context key carrying an injected trace
+// id (an inbound W3C traceparent adopted at the process boundary).
+type traceIDContextKey struct{}
+
+// WithTraceID returns a copy of ctx carrying traceID as the trace id of the
+// next root span started from it. It is the inbound-propagation hook: the
+// HTTP middleware adopts a valid inbound traceparent this way. A non-canonical
+// value is ignored by Start.
+func WithTraceID(ctx context.Context, traceID string) context.Context {
+	return context.WithValue(ctx, traceIDContextKey{}, traceID)
+}
+
+// TraceIDFrom returns the injected trace id of ctx, if any.
+func TraceIDFrom(ctx context.Context) (string, bool) {
+	id, ok := ctx.Value(traceIDContextKey{}).(string)
+	return id, ok && id != ""
+}
+
 // Span is one traced operation. It is created by Start and ended exactly
 // once by End; a span is not safe for concurrent use (one span belongs to one
 // goroutine's operation).
@@ -117,6 +135,11 @@ func (t *Tracer) Start(ctx context.Context, name string) (context.Context, *Span
 	if parent := SpanFromContext(ctx); parent != nil {
 		traceID = parent.traceID
 		parentID = parent.spanID
+	}
+	if traceID == "" {
+		if injected, ok := TraceIDFrom(ctx); ok && isHex(injected, 32) {
+			traceID = strings.ToLower(injected)
+		}
 	}
 	if traceID == "" {
 		if cid, ok := logging.CorrelationIDFrom(ctx); ok && cid != "" {
@@ -229,7 +252,7 @@ func isHex(s string, n int) bool {
 	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}
