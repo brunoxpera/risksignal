@@ -204,9 +204,10 @@ test-exit-criteria: up-db
 ##          to the landed per-work-package proof, so the suite is a
 ##          consolidation over the same assertions, not a re-implementation. The
 ##          AT-013 evidence is produced by `make perf` (the versioned report
-##          under dist/perf/); override the profile with
-##          `PERF_SCALE=smoke make test-i6-exit-criteria`. The integration proofs
-##          skip cleanly without a reachable database.
+##          under dist/perf/). This target runs that full 250k-row profile by
+##          default; `PERF_SCALE=smoke make test-i6-exit-criteria` is the quick
+##          path (a smoke subset, not the full evidence profile). The
+##          integration proofs skip cleanly without a reachable database.
 test-i6-exit-criteria: up-db
 	$(GO) test -race -count=1 -run 'I6ExitCriteria' ./internal/application ./internal/application/export ./internal/platform/metrics ./internal/platform/tracing ./internal/platform/config ./internal/adapters/httpapi ./internal/adapters/worker ./internal/adapters/sources/fetchguard ./internal/adapters/postgres/repo ./cmd/risksignal ./cmd/risksignal-server
 	$(MAKE) perf

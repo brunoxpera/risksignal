@@ -13,7 +13,7 @@ interaction channel. Estimates are made at work-package level, not here.
 | **I4** | Signals, priority & SLA | `priority_rules`, P1–P4 rules, state machine, owner, comments, SLA clocks, outbox and notification. | P1–P4 demonstrable including an accelerated SLA test and audit evidence. |
 | **I5a** | Identity & authorisation | OIDC integration, role and permission matrix including `audit.reveal_identity`, authorisation at use-case level, local protection mode and online bypass lock. | Role matrix passes; API/CLI channel parity demonstrated; negative startup test with bypass enabled. |
 | **I5b** | Web & CLI | Triage interface, administration, complete CLI. | API/web/CLI channel parity passes; UX guardrails from ch. 11.2 met. |
-| **I6** | Operations & acceptance | Exports, retention including the pseudonymisation stage, backup/restore, observability, performance, security hardening, private demo. | All mandatory acceptance cases pass; operations and user documentation complete. |
+| **I6** | Operations & acceptance | Exports, retention including the pseudonymisation stage, backup/restore, observability, performance, security hardening, private demo. | All mandatory acceptance cases pass; operations and user documentation complete. — ✅ satisfied (2026-09-11): `make test-i6-exit-criteria` (AT-013/014/015/021 + NFR-010/011/015 + §7 + §4.3), the perf report `dist/perf/dev.md` and `make demo-smoke`. Post-I6 follow-ups tracked, non-blocking: DEV-136 (export spool volume), DEV-137 (Caddy digest pin), DEV-138 (gauge families). |
 
 ## Changes against chapter 18.1
 

@@ -20,7 +20,16 @@ the concept document itself, which is maintained in German.
 | `docs/concept/` | The implementation concept v0.2 and the functional concept v0.2 (Markdown, German); v0.1 is archive, the change log is history |
 | `docs/adr/` | Architecture decision records from ADR-008 onwards (ADR-001 to 007 live in implementation concept ch. 1.2) |
 | `docs/plan/` | Iteration plan and work packages |
+| `docs/operations/` | Operator runbooks: security hardening, backup/restore, retention, export |
 | `docs/prompts/` | Prompts handed to the implementation orchestrator |
+
+## Operations
+
+- [Security hardening](operations/security-hardening.md) — the append-only database roles, the SSRF guard, the audit hash chain and the TLS/secure-headers surface.
+- [Backup and restore](operations/backup-restore.md) — the encrypted off-host backup and the restore verification.
+- [Retention and pseudonymisation](operations/retention.md) — the governed four-eyes retention procedure and the pseudonymisation stage.
+- [Export and CSV neutralisation](operations/export.md) — the asynchronous export lifecycle, the artifact spool and the spreadsheet-formula neutralisation.
+- [Private demo deployment](../deploy/demo/README.md) — the hardened single-host demo topology and its runbook.
 
 ## Status
 
