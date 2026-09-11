@@ -119,7 +119,11 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16.15-alpine
+        # Pinned by digest (multi-arch index digest, resolved 2026-09-11,
+        # DEV-141; pinned in DEV-143) for supply-chain parity with the pinned
+        # demo/backup/proxy images; the mutable tag is kept here for humans:
+        # postgres:16.15-alpine
+        image: postgres@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
         env:
           POSTGRES_USER: risksignal
           POSTGRES_PASSWORD: risksignal
