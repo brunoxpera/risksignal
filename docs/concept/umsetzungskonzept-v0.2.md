@@ -788,7 +788,7 @@ RiskSignal stellt technische Telemetrie bereit, ohne Fach- oder Sicherheitsdaten
 | HTTP | requests_total, duration_seconds, responses_by_status, inflight | Verfügbarkeit und Performance. |
 | Quellen | run_duration, records_total, errors_total, data_age_seconds | Aktualität und Adapterqualität. |
 | Jobs | queue_depth, oldest_age, attempts, dead_letters | Verarbeitungsrückstand und Fehler. |
-| Signale | open_by_priority, sla_remaining, sla_breaches, unassigned | Betriebliche Triagefähigkeit. |
+| Signale | open_by_priority, sla_remaining, sla_escalations, unassigned | Betriebliche Triagefähigkeit. |
 | Datenbank | connections, query_duration, transaction_errors, size | Kapazität und Engpässe. |
 | Benachrichtigung | deliveries, failures, retry_age | Aktive Alarmierungsfähigkeit. |
 

@@ -100,10 +100,11 @@ func TestNewSlaScheduleRejectsWiringErrors(t *testing.T) {
 	}
 }
 
-// TestSlaScheduleRecordsBreachTransitions proves the DEV-142 SLA-breach
-// recording: each escalation transition of an evaluation pass is counted in
-// signals_sla_breaches_total (the exactly-once breach transition).
-func TestSlaScheduleRecordsBreachTransitions(t *testing.T) {
+// TestSlaScheduleRecordsEscalationTransitions proves the DEV-142/DEV-144 SLA
+// escalation recording: each escalation transition of an evaluation pass is
+// counted in signals_sla_escalations_total (the exactly-once breach
+// transition).
+func TestSlaScheduleRecordsEscalationTransitions(t *testing.T) {
 	clk := clock.NewFakeClock(time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC))
 	eval := &scriptedSlaEvaluator{res: application.SlaEvaluateResult{Due: 3, Escalated: 2, Reminders: 1}}
 
@@ -122,11 +123,11 @@ func TestSlaScheduleRecordsBreachTransitions(t *testing.T) {
 
 	var got float64
 	for _, s := range reg.Snapshot() {
-		if s.Name == metrics.NameSignalsSLABreachesTotal {
+		if s.Name == metrics.NameSignalsSLAEscalationsTotal {
 			got = s.Value
 		}
 	}
 	if got != 2 {
-		t.Fatalf("signals_sla_breaches_total = %v, want 2 (the escalation transitions)", got)
+		t.Fatalf("signals_sla_escalations_total = %v, want 2 (the escalation transitions)", got)
 	}
 }

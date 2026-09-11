@@ -30,10 +30,10 @@ const (
 	NameJobsDeadLettersTotal = "jobs_dead_letters_total"
 
 	// Signal-state metrics.
-	NameSignalsOpenByPriority   = "signals_open_by_priority"
-	NameSignalsSLARemaining     = "signals_sla_remaining_seconds"
-	NameSignalsSLABreachesTotal = "signals_sla_breaches_total"
-	NameSignalsUnassigned       = "signals_unassigned"
+	NameSignalsOpenByPriority      = "signals_open_by_priority"
+	NameSignalsSLARemaining        = "signals_sla_remaining_seconds"
+	NameSignalsSLAEscalationsTotal = "signals_sla_escalations_total"
+	NameSignalsUnassigned          = "signals_unassigned"
 
 	// Database metrics.
 	NameDatabaseConnections       = "database_connections"
@@ -50,29 +50,29 @@ const (
 // The canonical help texts of the §16.2 families (same lockstep rule as the
 // names above).
 const (
-	HelpHTTPRequestsTotal         = "HTTP requests served, by method and path"
-	HelpHTTPRequestDuration       = "duration of one served HTTP request in seconds"
-	HelpHTTPResponsesByStatus     = "HTTP responses by status class, by method and status"
-	HelpHTTPInflight              = "HTTP requests currently being served"
-	HelpSourceRunDuration         = "duration of one completed source run pass"
-	HelpSourceRecordsTotal        = "raw documents the source's fetch passes stored in this process"
-	HelpSourceErrorsTotal         = "records the source's normalize passes isolated in this process"
-	HelpSourceDataAge             = "age in seconds of the newest record of the source"
-	HelpJobsQueueDepth            = "outbox jobs claimed in the most recent relay drain"
-	HelpJobsOldestAge             = "age in seconds of the oldest due outbox job"
-	HelpJobsAttemptsTotal         = "outbox delivery attempts made in this process"
-	HelpJobsDeadLettersTotal      = "outbox jobs dead-lettered in this process"
-	HelpSignalsOpenByPriority     = "open signals by priority"
-	HelpSignalsSLARemaining       = "remaining seconds of the tightest open SLA clock of the signal"
-	HelpSignalsSLABreachesTotal   = "SLA breaches recorded in this process"
-	HelpSignalsUnassigned         = "open signals without an owner"
-	HelpDatabaseConnections       = "database connections held by the pool"
-	HelpDatabaseQueryDuration     = "duration of one database query in seconds"
-	HelpDatabaseTransactionErrors = "database transaction errors in this process"
-	HelpDatabaseSizeBytes         = "size of the database in bytes"
-	HelpNotificationsDeliveries   = "notifications delivered in this process"
-	HelpNotificationsFailures     = "notification delivery failures in this process"
-	HelpNotificationsRetryAge     = "age in seconds of the oldest pending notification retry"
+	HelpHTTPRequestsTotal          = "HTTP requests served, by method and path"
+	HelpHTTPRequestDuration        = "duration of one served HTTP request in seconds"
+	HelpHTTPResponsesByStatus      = "HTTP responses by status class, by method and status"
+	HelpHTTPInflight               = "HTTP requests currently being served"
+	HelpSourceRunDuration          = "duration of one completed source run pass"
+	HelpSourceRecordsTotal         = "raw documents the source's fetch passes stored in this process"
+	HelpSourceErrorsTotal          = "records the source's normalize passes isolated in this process"
+	HelpSourceDataAge              = "age in seconds of the newest record of the source"
+	HelpJobsQueueDepth             = "outbox jobs claimed in the most recent relay drain"
+	HelpJobsOldestAge              = "age in seconds of the oldest due outbox job"
+	HelpJobsAttemptsTotal          = "outbox delivery attempts made in this process"
+	HelpJobsDeadLettersTotal       = "outbox jobs dead-lettered in this process"
+	HelpSignalsOpenByPriority      = "open signals by priority"
+	HelpSignalsSLARemaining        = "remaining seconds of the tightest open SLA clock of the signal"
+	HelpSignalsSLAEscalationsTotal = "P1 SLA escalations recorded in this process (FR-031 §6.3; the exactly-once breach transition)"
+	HelpSignalsUnassigned          = "open signals without an owner"
+	HelpDatabaseConnections        = "database connections held by the pool"
+	HelpDatabaseQueryDuration      = "duration of one database query in seconds"
+	HelpDatabaseTransactionErrors  = "database transaction errors in this process"
+	HelpDatabaseSizeBytes          = "size of the database in bytes"
+	HelpNotificationsDeliveries    = "notifications delivered in this process"
+	HelpNotificationsFailures      = "notification delivery failures in this process"
+	HelpNotificationsRetryAge      = "age in seconds of the oldest pending notification retry"
 )
 
 // RegisterStandard declares every §16.2 family on r. It is idempotent (a
@@ -102,7 +102,7 @@ func RegisterStandard(r *Registry) {
 
 	r.Gauge(NameSignalsOpenByPriority, HelpSignalsOpenByPriority)
 	r.Gauge(NameSignalsSLARemaining, HelpSignalsSLARemaining)
-	r.Counter(NameSignalsSLABreachesTotal, HelpSignalsSLABreachesTotal)
+	r.Counter(NameSignalsSLAEscalationsTotal, HelpSignalsSLAEscalationsTotal)
 	r.Gauge(NameSignalsUnassigned, HelpSignalsUnassigned)
 
 	r.Gauge(NameDatabaseConnections, HelpDatabaseConnections)

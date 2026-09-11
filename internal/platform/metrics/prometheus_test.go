@@ -37,7 +37,7 @@ func TestRegisterStandardRendersEveryFamily(t *testing.T) {
 		{NameJobsDeadLettersTotal, "counter"},
 		{NameSignalsOpenByPriority, "gauge"},
 		{NameSignalsSLARemaining, "gauge"},
-		{NameSignalsSLABreachesTotal, "counter"},
+		{NameSignalsSLAEscalationsTotal, "counter"},
 		{NameSignalsUnassigned, "gauge"},
 		{NameDatabaseConnections, "gauge"},
 		{NameDatabaseQueryDuration, "summary"},

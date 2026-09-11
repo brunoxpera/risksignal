@@ -3,9 +3,9 @@ package worker
 // The worker's §16.2 event-recorded families (implementation concept ch.
 // 16.2, ARCH-007 §5, WP-6.08/6.12). The worker records the source run-loop
 // completion points (source.go), the outbox relay dispatch points (relay.go)
-// and the SLA-breach transitions of the evaluation scheduler (sla.go) on the
-// process registry. The families whose value is current state rather than an
-// event — the source data age, the due-job backlog age — are sampled by
+// and the SLA-escalation transitions of the evaluation scheduler (sla.go) on
+// the process registry. The families whose value is current state rather than
+// an event — the source data age, the due-job backlog age — are sampled by
 // internal/adapters/observability instead and are not listed here.
 
 import "github.com/brunoxpera/risksignal/internal/platform/metrics"
@@ -24,7 +24,7 @@ func MetricFamilies() []string {
 		metrics.NameJobsQueueDepth,
 		metrics.NameJobsAttemptsTotal,
 		metrics.NameJobsDeadLettersTotal,
-		// SLA-breach transitions of the evaluation scheduler (sla.go).
-		metrics.NameSignalsSLABreachesTotal,
+		// SLA-escalation transitions of the evaluation scheduler (sla.go).
+		metrics.NameSignalsSLAEscalationsTotal,
 	}
 }

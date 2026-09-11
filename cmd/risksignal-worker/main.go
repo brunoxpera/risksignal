@@ -438,8 +438,8 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	if err != nil {
 		return fmt.Errorf("configure sla scheduler: %w", err)
 	}
-	// The evaluation scheduler records the SLA-breach transitions of each pass
-	// on the process registry (DEV-142).
+	// The evaluation scheduler records the SLA-escalation transitions of each
+	// pass on the process registry (DEV-142, DEV-144).
 	slaSchedule.SetMetrics(reg)
 
 	// The I6 export/retention jobs (ARCH-007 §1.2/§2.2, WP-6.06 / DEV-118): the
