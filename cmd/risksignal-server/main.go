@@ -49,6 +49,8 @@ import (
 	"github.com/brunoxpera/risksignal/internal/platform/clock"
 	"github.com/brunoxpera/risksignal/internal/platform/config"
 	"github.com/brunoxpera/risksignal/internal/platform/logging"
+	"github.com/brunoxpera/risksignal/internal/platform/metrics"
+	"github.com/brunoxpera/risksignal/internal/platform/tracing"
 	webassets "github.com/brunoxpera/risksignal/web"
 )
 
@@ -92,7 +94,17 @@ func serve(cfg *config.Config, logger *slog.Logger) error {
 	}
 	defer pool.Close()
 
-	handler, err := newHandler(cfg, pool, logger)
+	// The process metrics registry (ARCH-007 §5, WP-6.08 / DEV-120): one
+	// registry, shared by the request middleware (which records) and the
+	// internal /metrics listener (which renders). Every §16.2 family is
+	// declared up front so the exposition is complete before the first
+	// request.
+	reg := observabilityRegistry()
+	tracer := tracing.New(otlpExporter(cfg, "risksignal-server"))
+
+	handler, err := newHandler(cfg, pool, logger,
+		httpapi.WithMiddleware(httpapi.TraceMiddleware(tracer)),
+		httpapi.WithMiddleware(httpapi.MetricsMiddleware(reg)))
 	if err != nil {
 		return err
 	}
@@ -117,6 +129,18 @@ func serve(cfg *config.Config, logger *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// The internal metrics exposition (ARCH-007 §5, WP-6.08 / DEV-120): served
+	// on its own listener (observability.metrics_addr, never public — config
+	// validation enforces loopback in local and a non-wildcard host outside)
+	// and only when observability.metrics_enabled is set.
+	if cfg.Observability.MetricsEnabled {
+		go func() {
+			if err := httpapi.ServeMetrics(ctx, cfg.Observability.MetricsAddr, reg, logger); err != nil {
+				logger.Error("metrics listener stopped", slog.Any("error", err))
+			}
+		}()
+	}
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ln) }()
@@ -157,7 +181,7 @@ func serve(cfg *config.Config, logger *slog.Logger) error {
 // mode + loopback bind, enforced by config.Validate); otherwise it verifies
 // Bearer tokens through the OIDC verifier, and a misconfigured oidc.* fails
 // here — before the process binds.
-func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (http.Handler, error) {
+func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger, opts ...httpapi.HandlerOption) (http.Handler, error) {
 	auth, err := buildAuthMiddleware(cfg, logger)
 	if err != nil {
 		return nil, err
@@ -251,10 +275,33 @@ func newHandler(cfg *config.Config, pool *pgxpool.Pool, logger *slog.Logger) (ht
 
 	// The inventory-import upload is bounded by InventoryMaxBytes (the I5b
 	// staged CSV), not by the 1 MiB JSON default of the chain — for both the
-	// API upload and the server-rendered web upload.
-	return httpapi.NewHandlerWithAuth(mux, logger, auth,
+	// API upload and the server-rendered web upload. The observability
+	// middlewares (metrics + trace) arrive as opts and are inserted just after
+	// the correlation middleware (ARCH-007 §5, WP-6.08 / DEV-120).
+	chainOpts := []httpapi.HandlerOption{
 		httpapi.BodyLimitOverride("POST /api/v1/inventory/imports", application.InventoryMaxBytes),
-		httpapi.BodyLimitOverride("POST /inventory/imports", application.InventoryMaxBytes)), nil
+		httpapi.BodyLimitOverride("POST /inventory/imports", application.InventoryMaxBytes),
+	}
+	chainOpts = append(chainOpts, opts...)
+	return httpapi.NewHandlerWithAuth(mux, logger, auth, chainOpts...), nil
+}
+
+// observabilityRegistry builds the process metrics registry with every §16.2
+// family declared, so the exposition is complete before the first request.
+func observabilityRegistry() *metrics.Registry {
+	reg := metrics.New()
+	metrics.RegisterStandard(reg)
+	return reg
+}
+
+// otlpExporter returns the OTLP exporter for the configured endpoint, or nil
+// when observability.otlp_endpoint is empty (export off — the default build
+// links no SDK and makes no network call).
+func otlpExporter(cfg *config.Config, service string) tracing.Exporter {
+	if cfg.Observability.OTLPEndpoint == "" {
+		return nil
+	}
+	return tracing.NewOTLPExporter(cfg.Observability.OTLPEndpoint, service)
 }
 
 // buildAuthMiddleware assembles the I5a authentication middleware from the

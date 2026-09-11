@@ -30,6 +30,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/brunoxpera/risksignal/internal/adapters/httpapi"
 	"github.com/brunoxpera/risksignal/internal/adapters/notify"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
@@ -45,6 +46,7 @@ import (
 	"github.com/brunoxpera/risksignal/internal/platform/config"
 	"github.com/brunoxpera/risksignal/internal/platform/logging"
 	"github.com/brunoxpera/risksignal/internal/platform/metrics"
+	"github.com/brunoxpera/risksignal/internal/platform/tracing"
 )
 
 // buildNotifyPort assembles the notification channel dispatcher from the
@@ -80,6 +82,16 @@ func buildNotifyPort(cfg *config.Config) (notify.NotifyPort, error) {
 // scheduler run before it gives up — the same convention as
 // cmd/risksignal-server.
 const shutdownGracePeriod = 10 * time.Second
+
+// otlpExporter returns the OTLP exporter for the configured endpoint, or nil
+// when observability.otlp_endpoint is empty (export off — the default build
+// links no SDK and makes no network call).
+func otlpExporter(cfg *config.Config, service string) tracing.Exporter {
+	if cfg.Observability.OTLPEndpoint == "" {
+		return nil
+	}
+	return tracing.NewOTLPExporter(cfg.Observability.OTLPEndpoint, service)
+}
 
 func main() {
 	cfg, err := config.Load()
@@ -136,6 +148,23 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	// I4 notification kinds (ARCH-004 §6.3, WP-4.06) — which replaced the
 	// I1b signal.created no-op sink on the same registry key.
 	q := gen.New(pool)
+
+	// The process metrics registry and tracer (ARCH-007 §5, WP-6.08 /
+	// DEV-120): one registry shared by the source jobs, the outbox relay and
+	// the internal /metrics listener; every §16.2 family is declared up front
+	// so the exposition is complete. The OTLP exporter is wired only when
+	// observability.otlp_endpoint is set (empty = off, no SDK linked).
+	reg := metrics.New()
+	metrics.RegisterStandard(reg)
+	tracer := tracing.New(otlpExporter(cfg, "risksignal-worker"))
+	if cfg.Observability.MetricsEnabled {
+		go func() {
+			if err := httpapi.ServeMetrics(ctx, cfg.Observability.MetricsAddr, reg, logger); err != nil {
+				logger.Error("metrics listener stopped", slog.Any("error", err))
+			}
+		}()
+	}
+
 	relay, err := worker.NewRelay(repo.NewOutboxRelay(q), logger)
 	if err != nil {
 		return fmt.Errorf("configure outbox relay: %w", err)
@@ -215,13 +244,18 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	// handlers record every completed fetch/normalize pass on it — the
 	// in-process substrate of the /metrics exposition of the later
 	// iteration I6 (source status renders the durable projection).
-	sourceJobs, err := worker.NewSourceJobs(svc, repo.NewSourceRepo(q), adapters, metrics.New(), logger)
+	sourceJobs, err := worker.NewSourceJobs(svc, repo.NewSourceRepo(q), adapters, reg, logger)
 	if err != nil {
 		return fmt.Errorf("configure source jobs: %w", err)
 	}
+	sourceJobs.SetTracer(tracer)
 	if err := sourceJobs.RegisterHandlers(relay); err != nil {
 		return fmt.Errorf("configure source jobs: %w", err)
 	}
+	// The relay's job-dispatch observability (ARCH-007 §5): the dispatch
+	// metrics (attempts, dead letters, queue depth) and the job-dispatch span
+	// whose trace id is the job payload's correlation id.
+	relay.SetObservability(reg, tracer)
 
 	// The matching job handlers (ARCH-003 §5, DEV-064/DEV-065) run the
 	// WP-3.08 bulk matching runs on the application service (the matching
