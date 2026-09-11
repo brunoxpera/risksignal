@@ -19,6 +19,14 @@
 // secret or complete payload (TR-013). Logged objects carry only their
 // internal ID; whole objects are redacted regardless of their key.
 //
+// # Log-injection neutralisation
+//
+// Besides redaction, every string field value and the record message pass
+// through CR/LF neutralisation (redact.go, concept ch. 12.3): a carriage
+// return or line feed in a value is emitted escaped (\r, \n), so a crafted
+// request value can never terminate a record early or forge a second one —
+// in either output format.
+//
 // # Security events
 //
 // Security logs security-relevant events under the dedicated category

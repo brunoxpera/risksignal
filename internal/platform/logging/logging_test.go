@@ -118,6 +118,37 @@ func TestSecurityCategory(t *testing.T) {
 	}
 }
 
+// TestLogFieldCRLFNeutralised is the log-injection gate (concept ch. 12.3,
+// WP-6.08 / DEV-120): a CR or LF embedded in a field value or the record
+// message is emitted escaped, so a crafted value can never terminate a
+// record early or forge a second one.
+func TestLogFieldCRLFNeutralised(t *testing.T) {
+	ctx := WithCorrelationID(context.Background(), "corr-1")
+	buf, l := captureLogger(t, EnvDemo)
+	l.Log(ctx, slog.LevelInfo, "access\nforged", slog.String("path", "/a\nb\rc"))
+
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("record is not valid JSON: %v\n%s", err, buf.String())
+	}
+	if got, _ := rec["path"].(string); got != `/a\nb\rc` {
+		t.Errorf("path = %q, want the CR/LF escaped as \\n and \\r", got)
+	}
+	if got, _ := rec["msg"].(string); got != `access\nforged` {
+		t.Errorf("msg = %q, want the LF escaped", got)
+	}
+}
+
+// TestLogFieldNoCRLFUnchanged: a value without CR/LF passes through
+// untouched (the neutraliser never alters legitimate content).
+func TestLogFieldNoCRLFUnchanged(t *testing.T) {
+	ctx := WithCorrelationID(context.Background(), "corr-1")
+	rec := jsonRecord(t, ctx, "event", slog.String("path", "/api/v1/signals"))
+	if got, _ := rec["path"].(string); got != "/api/v1/signals" {
+		t.Errorf("path = %q, want unchanged", got)
+	}
+}
+
 // jsonRecordWith logs one record via the given emit function through a fresh
 // JSON-mode logger and returns the decoded JSON object.
 func jsonRecordWith(t *testing.T, ctx context.Context, emit func(*slog.Logger)) map[string]any {

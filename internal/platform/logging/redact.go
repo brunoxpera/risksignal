@@ -48,6 +48,12 @@ import (
 // Redaction never drops or reorders safe content: the attribute key stays in
 // place so operators see which field was withheld, and only the classified
 // secret is replaced by the redaction marker.
+//
+// Log-injection neutralisation (concept ch. 12.3, WP-6.08 / DEV-120): every
+// string field value and the record message additionally pass through
+// neutralizeControl, which turns a CR or LF into its escaped form (\r, \n).
+// A value can therefore never forge a second log record or break the one
+// record/one line guarantee — independent of the output handler.
 
 // redacted is the value replacing every redacted attribute or message.
 const redacted = "[REDACTED]"
@@ -163,7 +169,16 @@ func (h *redactHandler) WithGroup(name string) slog.Handler {
 // When nothing changed, r itself is returned.
 func redactRecord(r slog.Record) slog.Record {
 	msgRedacted := secretShape.MatchString(r.Message)
-	changed := msgRedacted
+	msg := r.Message
+	if msgRedacted {
+		msg = redacted
+	}
+	// Log injection: a CR/LF in the message is neutralised (escaped) so it
+	// can never terminate the record early.
+	if n := neutralizeControl(msg); n != msg {
+		msg = n
+	}
+	changed := msg != r.Message
 
 	var attrs []slog.Attr
 	if n := r.NumAttrs(); n > 0 {
@@ -181,10 +196,6 @@ func redactRecord(r slog.Record) slog.Record {
 		return r
 	}
 
-	msg := r.Message
-	if msgRedacted {
-		msg = redacted
-	}
 	nr := slog.NewRecord(r.Time, r.Level, msg, r.PC)
 	nr.AddAttrs(attrs...)
 	return nr
@@ -211,8 +222,12 @@ func redactAttr(a slog.Attr) slog.Attr {
 func redactValue(v slog.Value) (slog.Value, bool) {
 	switch v.Kind() {
 	case slog.KindString:
-		if secretShape.MatchString(v.String()) {
+		s := v.String()
+		if secretShape.MatchString(s) {
 			return slog.StringValue(redacted), true
+		}
+		if n := neutralizeControl(s); n != s {
+			return slog.StringValue(n), true
 		}
 	case slog.KindGroup:
 		group := v.Group()
@@ -250,6 +265,30 @@ func redactValue(v slog.Value) (slog.Value, bool) {
 		}
 	}
 	return v, false
+}
+
+// neutralizeControl replaces a carriage return or line feed in a log string
+// with its escaped form (\r, \n), neutralising log injection (concept
+// ch. 12.3, WP-6.08 / DEV-120): a crafted value can never terminate a record
+// early or forge a second one. Every other character passes through
+// unchanged, so a legitimate value is never altered.
+func neutralizeControl(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	for _, r := range s {
+		switch r {
+		case '\r':
+			b.WriteString(`\r`)
+		case '\n':
+			b.WriteString(`\n`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // classifyKey classifies an attribute key. Keys are matched as word parts so
