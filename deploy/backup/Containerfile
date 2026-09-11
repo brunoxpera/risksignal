@@ -24,6 +24,14 @@ FROM postgres:16-alpine
 COPY --from=build /out/risksignal /usr/local/bin/risksignal
 COPY scripts/backup.sh /usr/local/bin/backup.sh
 RUN chmod 0755 /usr/local/bin/backup.sh
+# The off-host backup root (backup.dir) is mounted at /backup from the `backups`
+# named volume (deploy/demo/compose.yaml). The path does not exist in the
+# postgres base image, so Docker would create the mount point root-owned and the
+# sidecar — USER postgres, uid 70 — could not write the encrypted dump to it.
+# Pre-create the directory owned by the runtime user so a fresh named volume is
+# seeded with writable ownership (DEV-140; the same class of fix as the DEV-136
+# export spool).
+RUN mkdir -p /backup && chown 70:70 /backup
 # Run once per container start; the platform scheduler (cron/systemd timer)
 # provides the daily cadence. No long-running loop, no TTY.
 USER postgres
