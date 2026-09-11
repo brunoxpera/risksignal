@@ -141,6 +141,7 @@ func (h signalCommandHandler) SignalCommand(ctx context.Context, request gen.Sig
 			SignalID:        request.SignalId,
 			ExpectedVersion: expectedVersion,
 			Actor:           actor,
+			CorrelationID:   correlationIDFromContext(ctx),
 		})
 		if err != nil {
 			return h.signalCommandError(ctx, err)
@@ -154,6 +155,7 @@ func (h signalCommandHandler) SignalCommand(ctx context.Context, request gen.Sig
 			Reason:          optString(request.Body.Reason),
 			ExpectedVersion: expectedVersion,
 			Actor:           actor,
+			CorrelationID:   correlationIDFromContext(ctx),
 		})
 		if err != nil {
 			return h.signalCommandError(ctx, err)
@@ -166,6 +168,7 @@ func (h signalCommandHandler) SignalCommand(ctx context.Context, request gen.Sig
 			Owner:           optString(request.Body.OwnerId),
 			ExpectedVersion: expectedVersion,
 			Actor:           actor,
+			CorrelationID:   correlationIDFromContext(ctx),
 		})
 		if err != nil {
 			return h.signalCommandError(ctx, err)
@@ -175,9 +178,10 @@ func (h signalCommandHandler) SignalCommand(ctx context.Context, request gen.Sig
 
 	case gen.AddComment:
 		if _, err := h.commands.AddComment(ctx, application.AddCommentInput{
-			SignalID: request.SignalId,
-			Body:     optString(request.Body.Comment),
-			Actor:    actor,
+			SignalID:      request.SignalId,
+			Body:          optString(request.Body.Comment),
+			Actor:         actor,
+			CorrelationID: correlationIDFromContext(ctx),
 		}); err != nil {
 			return h.signalCommandError(ctx, err)
 		}
@@ -192,6 +196,7 @@ func (h signalCommandHandler) SignalCommand(ctx context.Context, request gen.Sig
 			Reason:          optString(request.Body.Reason),
 			ExpectedVersion: expectedVersion,
 			Actor:           actor,
+			CorrelationID:   correlationIDFromContext(ctx),
 		})
 		if err != nil {
 			return h.signalCommandError(ctx, err)
@@ -204,6 +209,7 @@ func (h signalCommandHandler) SignalCommand(ctx context.Context, request gen.Sig
 			SignalID:        request.SignalId,
 			ExpectedVersion: expectedVersion,
 			Actor:           actor,
+			CorrelationID:   correlationIDFromContext(ctx),
 		})
 		if err != nil {
 			return h.signalCommandError(ctx, err)
@@ -219,17 +225,19 @@ func (h signalCommandHandler) SignalCommand(ctx context.Context, request gen.Sig
 		)
 		if request.Body.Command == gen.PauseSla {
 			clock, err = h.commands.PauseSla(ctx, application.PauseSlaInput{
-				SignalID: request.SignalId,
-				Target:   targetValue,
-				Reason:   optString(request.Body.Reason),
-				Actor:    actor,
+				SignalID:      request.SignalId,
+				Target:        targetValue,
+				Reason:        optString(request.Body.Reason),
+				Actor:         actor,
+				CorrelationID: correlationIDFromContext(ctx),
 			})
 		} else {
 			clock, err = h.commands.ResumeSla(ctx, application.ResumeSlaInput{
-				SignalID: request.SignalId,
-				Target:   targetValue,
-				Reason:   optString(request.Body.Reason),
-				Actor:    actor,
+				SignalID:      request.SignalId,
+				Target:        targetValue,
+				Reason:        optString(request.Body.Reason),
+				Actor:         actor,
+				CorrelationID: correlationIDFromContext(ctx),
 			})
 		}
 		if err != nil {
