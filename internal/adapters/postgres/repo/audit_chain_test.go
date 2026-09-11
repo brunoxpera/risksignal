@@ -140,6 +140,83 @@ func TestNormaliseJSONNumberExponentBound(t *testing.T) {
 	}
 }
 
+// TestNormaliseJSONNumberZeroMantissa pins the all-zero-mantissa short-circuit
+// (DEV-130, a DEV-127 corrective). PostgreSQL numeric renders an all-zero
+// mantissa as plain 0 whatever the exponent: a positive exponent is swallowed
+// (there is no integer part to expand, so 0e999999999 is 0) and a negative one
+// is kept only as scale (0e-3 is 0.000), with the sign always dropped. Before
+// the fix the integer-digits arm of the exponent bound fired for these values
+// (a zero-width integer part minus a hugely negative scale) and leaked the raw
+// exponent lexeme, re-introducing the stamp-vs-verify divergence DEV-125
+// eliminated. Every expectation below is what jsonb emits on PostgreSQL 16.15.
+func TestNormaliseJSONNumberZeroMantissa(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		// Positive exponents (past the integer limit): swallowed to 0.
+		{"0e131072", "0"},       // the accepted boundary, no expansion
+		{"0e131073", "0"},       // one past it: the DEV-130 bug
+		{"0e999999999", "0"},    // ~1 GB if the guard let it expand
+		{"-0e999999999", "0"},   // negative zero, sign dropped
+		{"0.00e999999999", "0"}, // fractional zero, sign/scale swallowed
+		{"0.0000e999999", "0"},  // zero mantissa, any exponent
+		{"0e0", "0"},
+		{"-0e0", "0"},
+		// Non-positive exponents: scale preserved, sign dropped.
+		{"0e-3", "0.000"},
+		{"0.00e-5", "0.0000000"},
+		{"-0.00e-3", "0.00000"},
+		{"0.000", "0.000"},
+		{"-0.000", "0.000"},
+		{"0.000e5", "0"}, // positive exponent swallows the fractional zeros
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got := normaliseJSONNumber(json.Number(tc.in)).String()
+			if got != tc.want {
+				t.Fatalf("normaliseJSONNumber(%s) = %s, want %s", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// The scale boundary is still enforced for a zero mantissa: jsonb rejects
+	// 0e-16384 as a numeric overflow, so it stays raw (and is never expanded).
+	if got := normaliseJSONNumber(json.Number("0e-16383")).String(); got != "0."+strings.Repeat("0", 16383) {
+		t.Fatalf("normaliseJSONNumber(0e-16383) = %d bytes, want 0.<16383 zeros>", len(got))
+	}
+	if got := normaliseJSONNumber(json.Number("0e-16384")).String(); got != "0e-16384" {
+		t.Fatalf("normaliseJSONNumber(0e-16384) = %s, want the raw lexeme unchanged", got)
+	}
+}
+
+// TestCanonicalJSONZeroMantissa drives the short-circuit through the public
+// entry point: an out-of-range zero exponent inside a jsonb snapshot must
+// canonicalise to 0 (bounded, valid JSON), not leak its raw exponent lexeme.
+func TestCanonicalJSONZeroMantissa(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{`{"n":0e999999999}`, `{"n":0}`},
+		{`{"n":-0e999999999}`, `{"n":0}`},
+		{`{"n":0.00e999999999}`, `{"n":0}`},
+		{`{"n":0e131073}`, `{"n":0}`},
+		{`{"n":0e-3}`, `{"n":0.000}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			out := canonicalJSON([]byte(tc.in))
+			if string(out) != tc.want {
+				t.Fatalf("canonicalJSON(%s) = %s, want %s", tc.in, out, tc.want)
+			}
+			if !json.Valid(out) {
+				t.Fatalf("canonicalJSON(%s) = %s, not valid JSON", tc.in, out)
+			}
+		})
+	}
+}
+
 // TestCanonicalJSONExponentBound drives the guard through the public entry
 // point: an out-of-range exponent inside a jsonb snapshot must yield a bounded
 // canonical form (not a gigabyte of zeros) and stay valid JSON.

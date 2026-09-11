@@ -187,6 +187,24 @@ func normaliseJSONNumber(n json.Number) json.Number {
 	}
 	digits := intPart + fracPart
 	scale := len(fracPart) - exp
+	// An all-zero mantissa is plain 0 in jsonb whatever the exponent: numeric
+	// keeps the input scale as digits after the point (0e-3 is 0.000) but
+	// swallows any positive exponent (there is no integer part to expand, so
+	// 0e999999999 is 0). This must precede the integer-digits bound below — that
+	// arm measures the post-exponent integer width, which for a zero mantissa is
+	// a zero-width integer part regardless of scale, so it would otherwise
+	// misfire (0 - (negative scale) > maxNumericIntegerDigits) and return
+	// 0e999999999 raw. The scale bound still applies: jsonb rejects 0e-16384 as
+	// a numeric overflow, so it stays raw like any other out-of-range value.
+	if strings.Trim(digits, "0") == "" {
+		if scale > maxNumericScale {
+			return n
+		}
+		if scale <= 0 {
+			return json.Number("0")
+		}
+		return json.Number("0." + strings.Repeat("0", scale))
+	}
 	// Bound the expansion to PostgreSQL numeric's limits before either
 	// strings.Repeat below can allocate. scale > maxNumericScale is a negative
 	// exponent past the scale limit (1e-16384); a negative scale whose trimmed
