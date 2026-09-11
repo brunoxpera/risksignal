@@ -138,7 +138,10 @@ services:
         condition: service_healthy
 
   proxy:
-    image: caddy:2.9.1-alpine
+    # Pinned by digest (multi-arch index digest, resolved 2026-09-11,
+    # DEV-137) for consistency with the digest-pinned distroless server/worker
+    # runtimes; the mutable tag is kept here for humans: caddy:2.9.1-alpine
+    image: caddy@sha256:b4e3952384eb9524a887633ce65c752dd7c71314d2c2acf98cd5c715aaa534f0
     # The ONLY published surface: the clear-text listener that redirects to
     # HTTPS, and the HTTPS listener that terminates TLS. No database, metrics
     # or admin port is published.
