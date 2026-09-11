@@ -1,0 +1,190 @@
+# RiskSignal — private demo deployment (ARCH-007 §8; implementation concept
+# ch. 4.3 "Private Online-Demoumgebung" and §4.4, DEV-131 / WP-6.11).
+#
+# The hardened single-host demo topology: a TLS-terminating reverse proxy
+# (Caddy) in front of the application tier, with the server, the worker and
+# PostgreSQL in separate containers behind it. Only the proxy's listeners are
+# published; the database, the worker, the internal metrics listener and any
+# administrative port stay on the internal service network and are never
+# reachable from the host or the public network (ARCH-007 §8).
+#
+#   proxy   0.0.0.0:80, 0.0.0.0:443   Caddy: HTTP→HTTPS redirect + TLS + HSTS
+#   server, worker, db, backup        internal service network only (no host ports)
+#
+# This is deliberately a self-contained stack, not an override of the root
+# compose.yaml: the demo runs with env=demo, a mandatory OIDC issuer, roles
+# mapped from claims and no local authentication bypass, whereas the root
+# compose.yaml is the loopback-only local-development environment. The
+# retention DSN wiring (DEV-129) mirrors the root compose.yaml so the demo
+# worker opens the dedicated retention connection the same way.
+#
+# Bring it up with:
+#
+#   cp deploy/demo/.env.example deploy/demo/.env    # then edit the placeholders
+#   docker compose -f deploy/demo/compose.yaml up -d --build
+#
+# Secrets (the OIDC client secret, the age backup identity, the database
+# passwords) are runtime-injected through the environment and are never
+# committed; the configuration keys that name them (oidc.client_secret_ref,
+# backup.encryption_key_ref) are presence-only. The defaults below are
+# dev-only placeholders for the private demo — never reuse them in a real
+# deployment.
+
+name: risksignal-demo
+
+services:
+  db:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_USER: risksignal
+      POSTGRES_PASSWORD: "${DEMO_DB_PASSWORD:-risksignal}"
+      POSTGRES_DB: risksignal
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      # The database sits on its own internal (no-egress) segment.
+      - data
+    # No `ports:` — PostgreSQL is reachable only from the data segment
+    # (server/worker/backup), never from the host or the proxy.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U risksignal -d risksignal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  server:
+    build:
+      context: ../..
+      dockerfile: deploy/server/Containerfile
+    environment:
+      RISKSIGNAL_ENV: demo
+      # The proxy reaches the server over the service network, so it binds the
+      # container interface. No public host port exists — the proxy is the
+      # only published surface.
+      RISKSIGNAL_HTTP_ADDR: "0.0.0.0:8080"
+      RISKSIGNAL_DATABASE_URL: "postgres://risksignal:${DEMO_DB_PASSWORD:-risksignal}@db:5432/risksignal?sslmode=disable"
+      # DEV-129: the dedicated retention connection, wired exactly like the
+      # root compose.yaml. It authenticates as the migration-created
+      # risksignal_retention_login; the operator provisions that login's
+      # password (see README.md and docs/operations/security-hardening.md).
+      RISKSIGNAL_DATABASE_RETENTION_URL: "postgres://risksignal_retention_login:${DEMO_RETENTION_PASSWORD:-risksignal_retention}@db:5432/risksignal?sslmode=disable"
+      # OIDC is mandatory in demo mode (ARCH-007 §8): roles are mapped from the
+      # issuer's claims, the local bypass stays off and private source targets
+      # stay refused. No bypass env is set.
+      RISKSIGNAL_OIDC_ISSUER: "${DEMO_OIDC_ISSUER:-https://id.demo.example/realms/risksignal}"
+      RISKSIGNAL_OIDC_CLIENT_ID: "${DEMO_OIDC_CLIENT_ID:-risksignal-demo}"
+      # Presence-only: names the environment variable that carries the client
+      # secret; the secret itself is runtime-injected and never committed.
+      RISKSIGNAL_OIDC_CLIENT_SECRET_REF: DEMO_OIDC_CLIENT_SECRET
+      RISKSIGNAL_OIDC_REDIRECT_URL: "https://${DEMO_DOMAIN:-localhost}/auth/callback"
+      RISKSIGNAL_OIDC_ROLES_CLAIM: "roles"
+      RISKSIGNAL_OIDC_ROLE_MAPPINGS: '{"risksignal_security_analyst":"security_analyst","risksignal_administrator":"administrator","risksignal_auditor":"auditor","risksignal_product_owner":"product_owner","risksignal_system_responsible":"system_responsible"}'
+      RISKSIGNAL_AUTH_BYPASS_ENABLED: "false"
+      RISKSIGNAL_SOURCES_ALLOW_PRIVATE: "false"
+      DEMO_OIDC_CLIENT_SECRET: "${DEMO_OIDC_CLIENT_SECRET:-}"
+    networks:
+      - internal
+      - data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/worker/Containerfile
+    environment:
+      RISKSIGNAL_ENV: demo
+      RISKSIGNAL_DATABASE_URL: "postgres://risksignal:${DEMO_DB_PASSWORD:-risksignal}@db:5432/risksignal?sslmode=disable"
+      # DEV-129: the dedicated retention connection (see the server comment).
+      RISKSIGNAL_DATABASE_RETENTION_URL: "postgres://risksignal_retention_login:${DEMO_RETENTION_PASSWORD:-risksignal_retention}@db:5432/risksignal?sslmode=disable"
+      RISKSIGNAL_OIDC_ISSUER: "${DEMO_OIDC_ISSUER:-https://id.demo.example/realms/risksignal}"
+      RISKSIGNAL_OIDC_CLIENT_ID: "${DEMO_OIDC_CLIENT_ID:-risksignal-demo}"
+      RISKSIGNAL_OIDC_CLIENT_SECRET_REF: DEMO_OIDC_CLIENT_SECRET
+      RISKSIGNAL_OIDC_ROLES_CLAIM: "roles"
+      RISKSIGNAL_AUTH_BYPASS_ENABLED: "false"
+      RISKSIGNAL_SOURCES_ALLOW_PRIVATE: "false"
+      DEMO_OIDC_CLIENT_SECRET: "${DEMO_OIDC_CLIENT_SECRET:-}"
+    networks:
+      - internal
+      - data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  proxy:
+    image: caddy:2.9.1-alpine
+    # The ONLY published surface: the clear-text listener that redirects to
+    # HTTPS, and the HTTPS listener that terminates TLS. No database, metrics
+    # or admin port is published.
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DEMO_DOMAIN: "${DEMO_DOMAIN:-localhost}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - edge
+      - internal
+    depends_on:
+      - server
+
+  backup:
+    build:
+      context: ../..
+      dockerfile: deploy/backup/Containerfile
+    # One-shot: the entrypoint runs a single encrypted backup and exits; the
+    # host scheduler (cron/systemd timer) provides the daily cadence
+    # (deploy/backup/Containerfile). Run it with
+    #   docker compose -f deploy/demo/compose.yaml run --rm backup
+    # The root compose.yaml is the local environment and never backs up.
+    restart: "no"
+    environment:
+      RISKSIGNAL_ENV: demo
+      RISKSIGNAL_DATABASE_URL: "postgres://risksignal:${DEMO_DB_PASSWORD:-risksignal}@db:5432/risksignal?sslmode=disable"
+      RISKSIGNAL_OIDC_ISSUER: "${DEMO_OIDC_ISSUER:-https://id.demo.example/realms/risksignal}"
+      # Off-host root: a separate volume (mount an off-host path or NFS in a
+      # real deployment; never the database data volume; ARCH-007 §4).
+      RISKSIGNAL_BACKUP_DIR: /backup
+      # Presence-only reference: names the environment variable that holds the
+      # age identity. The secret is runtime-injected (through the .env or the
+      # orchestrator's secret mechanism) and never committed.
+      RISKSIGNAL_BACKUP_ENCRYPTION_KEY_REF: RISKSIGNAL_BACKUP_AGE_IDENTITY
+      RISKSIGNAL_BACKUP_AGE_IDENTITY: "${RISKSIGNAL_BACKUP_AGE_IDENTITY:-}"
+    volumes:
+      - backups:/backup
+    networks:
+      # The sidecar only talks to the database; it needs no egress.
+      - data
+    depends_on:
+      db:
+        condition: service_healthy
+
+networks:
+  # The edge network carries the proxy only; its published listeners are the
+  # public boundary.
+  edge:
+    driver: bridge
+  # The application tier network (server/worker/backup, plus the proxy so it
+  # can reach the server). None of these publishes a host port, so
+  # reachability is the proxy's listener alone. Egress is left open so the
+  # server can reach the mandatory OIDC issuer (and, later, real sources); the
+  # demo is isolated by having no inbound port surface, not by being
+  # air-gapped.
+  internal:
+    driver: bridge
+  # The database segment: marked internal so PostgreSQL has no route off the
+  # host. Only the server, worker and backup attach to it.
+  data:
+    driver: bridge
+    internal: true
+
+volumes:
+  pgdata:
+  backups:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,49 @@
+# RiskSignal — demo reverse proxy (ARCH-007 §8, DEV-131 / WP-6.11).
+#
+# Terminates TLS and is the only publicly reachable surface of the private
+# demo: it redirects clear-text HTTP to HTTPS, forces HSTS and forwards to the
+# application server. The database, the worker (a background process with no
+# inbound HTTP surface), the internal metrics listener and any administrative
+# port are never upstreams.
+#
+# {$DEMO_DOMAIN} is injected by the compose service (deploy/demo/compose.yaml):
+# "localhost" for a local trial (Caddy's internal CA) or the demo hostname
+# (Caddy obtains an ACME certificate). To use an explicit ACME account
+# contact, add an `email` line to the global block below.
+
+{
+	# No admin API surface: Caddy's admin endpoint (default 127.0.0.1:2019) is
+	# disabled so no administrative port exists (ARCH-007 §8: admin ports are
+	# not exposed).
+	admin off
+}
+
+# Explicit clear-text listener: every request is redirected to HTTPS.
+http://{$DEMO_DOMAIN} {
+	redir https://{host}{uri} permanent
+}
+
+# The HTTPS listener: the only publicly reachable surface.
+{$DEMO_DOMAIN} {
+	# Force HSTS on every response (ARCH-007 §7 control 4 / §8). The
+	# application also sets these headers (server middleware); this is the edge
+	# copy, so a proxied response can never drop them.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	encode zstd gzip
+
+	# The application tier: only the server has an inbound HTTP surface. The
+	# worker is a background process (its only listener is the internal
+	# /metrics endpoint, which is deliberately NOT proxied), and the database
+	# is never an upstream. No db/metrics/admin upstream exists.
+	reverse_proxy server:8080 {
+		health_uri /health/live
+		health_interval 30s
+	}
+}
