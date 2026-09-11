@@ -232,6 +232,17 @@ change, without touching the database:
     RISKSIGNAL_OIDC_ISSUER='http://127.0.0.1:9000/oidc' \
     bin/risksignal maintenance migrate --dry-run
 
+Once the migrations have created the governed retention roles, one target
+injects the local development password into the dedicated retention login the
+compose `server`/`worker` connect as for the retention/pseudonymisation commits
+(`RISKSIGNAL_DATABASE_RETENTION_URL`; DEV-129):
+
+    make provision-retention-login
+
+The operator runbook — including the production-correct, secret-injected form —
+lives in `docs/operations/security-hardening.md` ("Provisioning the retention
+login").
+
 The Compose `oidc` service is the mock OIDC test provider (`cmd/mock-oidc`,
 WP-5a.04, D-003). It issues id tokens for one configurable test user, so the
 role matrix is exercised by restarting the sidecar with a different user. Its

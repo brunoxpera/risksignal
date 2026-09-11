@@ -101,6 +101,41 @@ Everything else is revoked: nothing on `users`, `outbox`, `epss_current` or
 `schema_migration_log`; no `TRUNCATE`/`REFERENCES`/`TRIGGER`; no `CREATE` on
 `public`; not a superuser.
 
+#### Provisioning the retention login
+
+Migration `00015` creates both roles but carries no password (credentials are
+runtime-injected, ch. 3.3), so the operator supplies the login's password and
+points the retention DSN at it. In **production** the password comes from the
+secret store — never a migration, never a file in the repository:
+
+```sql
+-- run as the migration login, after `risksignal maintenance migrate`
+ALTER ROLE risksignal_retention_login WITH LOGIN PASSWORD '<from the secret store>';
+-- migration 00015 already issued this grant; re-asserting it is a no-op
+GRANT risksignal_retention TO risksignal_retention_login;
+```
+
+Then set `RISKSIGNAL_DATABASE_RETENTION_URL` to a DSN that authenticates as
+`risksignal_retention_login` (and only it). The runtime login is never granted
+`risksignal_retention`, and no path `SET ROLE`s to it — the retention and
+pseudonymisation commits authenticate as this login on a dedicated connection.
+
+In the **local compose environment** the same statements are wrapped in an
+idempotent `make` target. The migration already created the roles and the
+grant, so the target only injects the dev password and re-asserts the grant:
+
+```
+make up && make migrate          # db up + schema applied (creates the roles)
+make provision-retention-login   # inject the dev password into the login
+```
+
+`make provision-retention-login` runs `scripts/db/provision-retention-login.sql`
+inside the compose `db` service after the migrations; the password defaults to
+the loopback dev placeholder (`RETENTION_PASSWORD` overrides it), and compose's
+`server` and `worker` already carry the matching
+`RISKSIGNAL_DATABASE_RETENTION_URL`. These are loopback-only dev credentials —
+never reuse them outside the local environment.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `database.retention_url` (`RISKSIGNAL_DATABASE_RETENTION_URL`) | *unset* | The separate DSN the retention and pseudonymisation commits authenticate as the dedicated retention login on. Optional and credential-redacted (presence-only in `Summary`/`diagnose config`). When **unset** the commit paths fail closed: the worker's `retention.execute` handler refuses (the job dead-letters) and `risksignal maintenance identity-pseudonymize --commit` is refused, rather than falling back to the application role. |
