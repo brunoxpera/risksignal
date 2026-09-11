@@ -180,6 +180,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runQuarantine(e, commandArgs[1:])
 	case "signal":
 		return runSignal(e, commandArgs[1:])
+	case "export":
+		return runExport(e, commandArgs[1:])
+	case "legal-hold":
+		return runLegalHold(e, commandArgs[1:])
 	case "user":
 		return runUser(e, commandArgs[1:])
 	case "auth":
@@ -278,8 +282,36 @@ commands:
                                     permission-gated; --as selects the acting
                                     identity, default local::<bypass>
                                     principal)
-  maintenance retention             delete expired data (not yet implemented)
+  maintenance identity-pseudonymize pseudonymise one identity in place
+        --user <id> [--reason <t>]   (ADR-014, retention.manage): dry run by
+        [--commit|--yes]             default (report the redaction counts,
+        [--as <subject>]             nothing written); --commit (or --yes)
+                                    runs the audited redaction, --reason is
+                                    then mandatory
+  maintenance retention             the governed retention run (select one):
+        --dry-run|--list             --dry-run scans + stores a counts-only
+        |--approve <id> [--reason]   report (reads only); --list prints the
+        [--stage <s>] [--yes]        stored report; --approve <id> is the
+        [--as <subject>]             four-eyes approval (settings.approve,
+                                    destructive: --reason + --yes), which
+                                    enqueues the retention.execute job
   maintenance recompute             recompute derived signals (not yet implemented)
+  export create                     schedule an asynchronous CSV/JSON export
+        --format csv|json            (exports.create); the frozen ch. 10.4
+        [filter flags]               filter flags freeze the context
+        [--as <subject>]
+  export download                   stream a materialised export to a file
+        --export <id> --out <file>   (time-limited: an expired export fails;
+        [--as <subject>]             audited)
+  legal-hold create                 set a documented legal hold
+        --aggregate <id> [--type]    (retention.manage): blocks deletion and
+        --reason <t> [--as]          pseudonymisation of the aggregate
+  legal-hold release                release a legal hold (destructive:
+        --hold <id> --reason <t>     --reason + --yes)
+        --yes [--as]
+  legal-hold list                   the legal-hold read
+        [--aggregate <id>]           (filter by aggregate / --active)
+        [--aggregate-type <t>] [--active] [--as]
   diagnose config                   print the configuration provenance report
                                     (sources, never secret values)
   diagnose connectivity             probe TCP reachability of the database host

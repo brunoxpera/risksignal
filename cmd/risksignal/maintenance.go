@@ -1,7 +1,9 @@
-// maintenance subcommands (WP-1a.09): migrate is the real command wrapping
-// the checksum-guarded migration runner of WP-1a.04; retention and recompute
-// are recognised but not yet implemented and fail with exit code 1 instead
-// of pretending to work. All maintenance commands are strictly
+// maintenance subcommands (WP-1a.09; extended I6 WP-6.07): migrate is the
+// real command wrapping the checksum-guarded migration runner of WP-1a.04;
+// identity-lookup, identity-pseudonymize and retention are the governed I5a/I6
+// operator commands (each driving its application use case, the gate of
+// record); recompute is recognised but not yet implemented and fails with exit
+// code 1 instead of pretending to work. All maintenance commands are strictly
 // non-interactive: they take complete parameters on the command line and
 // never read a terminal.
 
@@ -24,7 +26,7 @@ import (
 func runMaintenance(e *cmdEnv, args []string) int {
 	if len(args) < 1 {
 		return e.emit("maintenance", e.fail(exitValidation, classValidation,
-			"missing subcommand (supported: migrate, identity-lookup, retention, recompute)"))
+			"missing subcommand (supported: migrate, identity-lookup, identity-pseudonymize, retention, recompute)"))
 	}
 	command := "maintenance " + args[0]
 	switch args[0] {
@@ -32,11 +34,15 @@ func runMaintenance(e *cmdEnv, args []string) int {
 		return e.emit(command, e.cmdMigrate(args[1:]))
 	case "identity-lookup":
 		return e.emit(command, e.cmdIdentityLookup(args[1:]))
-	case "retention", "recompute":
+	case "identity-pseudonymize":
+		return e.emit(command, e.cmdIdentityPseudonymize(args[1:]))
+	case "retention":
+		return e.emit(command, e.cmdRetention(args[1:]))
+	case "recompute":
 		return e.emit(command, e.cmdNotImplemented(args[1:]))
 	default:
 		return e.emit(command, e.fail(exitValidation, classValidation,
-			"unknown subcommand (supported: migrate, identity-lookup, retention, recompute)"))
+			"unknown subcommand (supported: migrate, identity-lookup, identity-pseudonymize, retention, recompute)"))
 	}
 }
 

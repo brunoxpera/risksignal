@@ -351,8 +351,27 @@ ch. 11.3, WP-1a.09): `risksignal <command> <subcommand>`.
         bin/risksignal signal pause --signal <id> --target acknowledgement --reason "vendor outage"
       RISKSIGNAL_DATABASE_URL=... RISKSIGNAL_OIDC_ISSUER=... \
         bin/risksignal signal resume --signal <id> --target acknowledgement --reason "vendor back"
-- `maintenance retention`, `maintenance recompute` — recognised but not yet
-  implemented; they print "not yet implemented" and exit 1.
+- `maintenance identity-pseudonymize` — the governed in-place pseudonymisation
+  of one identity (ADR-014, `retention.manage`): dry run by default (report the
+  per-target redaction counts, nothing written), `--commit`/`--yes` runs the
+  audited redaction (`--reason` then mandatory).
+- `maintenance retention` — the governed retention run (`retention.manage` for
+  the dry-run/list, `settings.approve` for the four-eyes approval):
+  `--dry-run` scans and stores a counts-only report (reads only), `--list`
+  prints the stored report, `--approve <id> --reason <t> --yes` approves
+  (destructive: it enqueues the `retention.execute` deletion job).
+- `maintenance recompute` — recognised but not yet implemented; it prints
+  "not yet implemented" and exits 1.
+- `export create` — schedule an asynchronous CSV/JSON export
+  (`exports.create`): `--format csv|json` plus the frozen ch. 10.4 filter
+  flags; a worker job materialises the artifact.
+- `export download` — stream a materialised export to a file
+  (`--export <id> --out <file>`); time-limited (an expired export fails) and
+  audited.
+- `legal-hold create|release|list` — the documented legal holds
+  (`retention.manage`): an active hold blocks both the deletion and the
+  pseudonymisation of its aggregate; `release` is destructive (`--reason` +
+  `--yes`).
 - `diagnose config` — the WP-1a.02 provenance report: source of every
   configuration leaf, never the content of a secret-capable value.
 - `diagnose connectivity` — TCP-dial the database host:port from
