@@ -934,14 +934,18 @@ paths:
             type: string
       responses:
         '200':
-          description: The export artifact as a file download.
+          description: |
+            The export artifact as a file download. The media type is the
+            stored format's: `text/csv; charset=utf-8` for a CSV export and
+            `application/json; charset=utf-8` for a JSON export (never
+            negotiated).
           headers:
             Content-Disposition:
               description: Attachment filename of the artifact.
               schema:
                 type: string
           content:
-            application/octet-stream:
+            '*/*':
               schema:
                 type: string
                 format: binary

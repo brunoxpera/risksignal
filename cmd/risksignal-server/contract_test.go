@@ -722,7 +722,8 @@ func validateI6Contract(t *testing.T, doc *openapi3.T) {
 	}
 
 	// createExport/getExport 200 carry the ExportRecord; the download 200 is a
-	// binary attachment (application/octet-stream), never JSON.
+	// binary attachment of any media type (the stored format decides the
+	// content type), never JSON-encoded.
 	for _, tc := range []struct {
 		op     string
 		method string
@@ -764,8 +765,8 @@ func validateI6Contract(t *testing.T, doc *openapi3.T) {
 		respRef := dl.Get.Responses.Value("200")
 		if respRef == nil || respRef.Value == nil {
 			t.Error("downloadExport: response 200 is not declared")
-		} else if bin := respRef.Value.Content.Get("application/octet-stream"); bin == nil || bin.Schema == nil {
-			t.Error("downloadExport: response 200 has no application/octet-stream schema")
+		} else if bin := respRef.Value.Content.Get("*/*"); bin == nil || bin.Schema == nil {
+			t.Error("downloadExport: response 200 has no */* schema")
 		}
 	}
 

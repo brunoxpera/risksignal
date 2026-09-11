@@ -137,7 +137,10 @@ func (h exportHandler) GetExport(ctx context.Context, request gen.GetExportReque
 // /api/v1/exports/{id}/download, ARCH-007 §1.1): the time-limited stream of a
 // materialised artifact. An expired artifact answers the declared 410 (Gone);
 // an export that is not completed yet answers 409 (Conflict) — the use case
-// checks both against the injected clock before opening the artifact.
+// checks both against the injected clock before opening the artifact. The
+// response content type is the stored format's (the use case computes it:
+// text/csv; charset=utf-8 or application/json; charset=utf-8), never a
+// hardcoded application/octet-stream.
 func (h exportHandler) DownloadExport(ctx context.Context, request gen.DownloadExportRequestObject) (gen.DownloadExportResponseObject, error) {
 	if h.exports == nil {
 		return gen.DownloadExport500JSONResponse(problemFromContext(ctx, http.StatusInternalServerError, titleInternalError, "")), nil
@@ -156,8 +159,9 @@ func (h exportHandler) DownloadExport(ctx context.Context, request gen.DownloadE
 		return downloadExportProblem(ctx, status, title, detail), nil
 	}
 	filename := res.Filename
-	return gen.DownloadExport200ApplicationoctetStreamResponse{
+	return gen.DownloadExport200AsteriskResponse{
 		Body:          res.Reader,
+		ContentType:   res.ContentType,
 		Headers:       gen.DownloadExport200ResponseHeaders{ContentDisposition: &filename},
 		ContentLength: res.SizeBytes,
 	}, nil

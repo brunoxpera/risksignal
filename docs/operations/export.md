@@ -105,8 +105,10 @@ snapshot, never the frozen filter's free text); a denied, not-ready or expired
 download writes no audit row. The spool reader is closed on every path, so a
 write failure is an infrastructure failure, never a silent partial file.
 
-The response is the file `export-<id>.<format>` with content type `text/csv` or
-`application/json`.
+The response is the file `export-<id>.<format>` with the stored format's
+content type — `text/csv; charset=utf-8` for a CSV export and
+`application/json; charset=utf-8` for a JSON export (never negotiated, never
+the generic `application/octet-stream`).
 
 ## 4. Artifact lifetime and sweep
 

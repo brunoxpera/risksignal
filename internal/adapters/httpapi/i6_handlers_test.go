@@ -216,22 +216,39 @@ func TestExportDownloadNotCompleted(t *testing.T) {
 }
 
 func TestExportDownloadStreams(t *testing.T) {
-	f := &fakeI6{actor: application.Actor{Type: application.ActorTypeUser, ID: "u-1"}}
-	f.download = application.DownloadExportResult{
-		Reader:    io.NopCloser(strings.NewReader("a,b\n1,2\n")),
-		Filename:  "export-exp-1.csv",
-		SizeBytes: 8,
-	}
-	h := newI6API(t, f, i6Identity, true)
-	rec := do(h, httptest.NewRequest(http.MethodGet, "/api/v1/exports/exp-1/download", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Disposition"); !strings.Contains(got, "export-exp-1.csv") {
-		t.Fatalf("Content-Disposition = %q, want the attachment filename", got)
-	}
-	if rec.Body.String() != "a,b\n1,2\n" {
-		t.Fatalf("body = %q, want the streamed artifact", rec.Body.String())
+	for _, tc := range []struct {
+		name        string
+		filename    string
+		contentType string
+	}{
+		{"csv", "export-exp-1.csv", "text/csv; charset=utf-8"},
+		{"json", "export-exp-1.json", "application/json; charset=utf-8"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeI6{actor: application.Actor{Type: application.ActorTypeUser, ID: "u-1"}}
+			f.download = application.DownloadExportResult{
+				Reader:      io.NopCloser(strings.NewReader("a,b\n1,2\n")),
+				Filename:    tc.filename,
+				ContentType: tc.contentType,
+				SizeBytes:   8,
+			}
+			h := newI6API(t, f, i6Identity, true)
+			rec := do(h, httptest.NewRequest(http.MethodGet, "/api/v1/exports/exp-1/download", nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+			}
+			// The handler must emit the application-computed content type, not a
+			// hardcoded application/octet-stream (DEV-139).
+			if got := rec.Header().Get("Content-Type"); got != tc.contentType {
+				t.Fatalf("Content-Type = %q, want %q", got, tc.contentType)
+			}
+			if got := rec.Header().Get("Content-Disposition"); !strings.Contains(got, tc.filename) {
+				t.Fatalf("Content-Disposition = %q, want the attachment filename", got)
+			}
+			if rec.Body.String() != "a,b\n1,2\n" {
+				t.Fatalf("body = %q, want the streamed artifact", rec.Body.String())
+			}
+		})
 	}
 }
 
