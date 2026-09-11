@@ -56,6 +56,12 @@ COSIGN_VERSION := v2.6.5
 COSIGN_BIN := $(or $(shell command -v $(COSIGN) 2>/dev/null),$(shell $(GO) env GOPATH)/bin/$(COSIGN))
 COMPOSE ?= docker compose
 
+# Performance harness scale (AT-013 / ARCH-007 §17.1): `full` is the reference
+# profile (250 000 CVEs, 10 000 assets) and the report source; `smoke` is a
+# reduced, structurally identical profile for a quick CI check. Override with
+# e.g. `PERF_SCALE=smoke make perf`.
+PERF_SCALE ?= full
+
 # Build metadata (WP-1a.07): injected into every binary at link time and
 # served by GET /version. VERSION defaults to dev like the buildinfo package
 # itself; override with e.g. `make VERSION=0.1.0`. GIT_COMMIT and BUILD_TIME
@@ -84,7 +90,7 @@ SCAN_DIR := $(ARTIFACT_DIR)/scan
 .PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
 	verify-connectivity ci-lint ci-test test-exit-criteria test-i5a-exit-criteria test-i5b-exit-criteria test-contract ci-build demo demo-smoke check-gofmt vet lint-golangci \
 	lint-licenses lint-secrets lint-openapi-validate lint-openapi-diff up-db image sbom scan sign backup restore-test \
-	provision-retention-login
+	provision-retention-login perf
 
 ## build: compile all three binaries into bin/ with build metadata injected
 build:
@@ -204,6 +210,21 @@ ci-build: build
 ##       RISKSIGNAL_HTTP_ADDR).
 demo: build
 	@scripts/demo.sh
+
+## perf: AT-013 / ARCH-007 §6, §17.1 performance harness (NFR-003/NFR-004).
+##       Deterministically loads the reference volume (250 000 CVEs +
+##       10 000 assets by default) on a fresh scratch database, runs the
+##       §10.4 reference list queries and an incremental NVD run, measures
+##       the list-query p95 (NFR-003, ≤ 2 s), the incremental-run duration
+##       (NFR-004, ≤ 15 min) and the bulk-import job count (§17.1: far below
+##       the order of magnitude of the CVE count), and writes the versioned
+##       evidence report dist/perf/<VERSION>.md with explicit pass/fail. The
+##       full run is slow; use PERF_SCALE=smoke for a quick subset (writes
+##       dist/perf/<VERSION>-smoke.md). Requires the compose db (up-db); the
+##       harness creates and drops its own scratch database (network-free,
+##       deterministic, ARCH-007 §17.2). See cmd/perf for the env knobs.
+perf: up-db
+	PERF_SCALE=$(PERF_SCALE) PERF_VERSION=$(VERSION) $(GO) run ./cmd/perf
 
 ## demo-smoke: DEV-132 / ARCH-007 §8 proofs + §4.4 step-5 smoke. Two parts:
 ##             (a) the §8 negative-startup proof — the risksignal-server
