@@ -522,6 +522,10 @@ const goldenDiagnoseConfigJSON = `{
       "value": "local-developer",
       "source": "default"
     },
+    "sources.allow_private": {
+      "value": false,
+      "source": "default"
+    },
     "worker.interval": {
       "value": "30s",
       "source": "default"
@@ -564,6 +568,10 @@ const goldenDiagnoseConfigJSON = `{
     },
     "retention.schedule": {
       "value": "720h0m0s",
+      "source": "default"
+    },
+    "retention.hash_chain_enabled": {
+      "value": false,
       "source": "default"
     },
     "notify.p2_active": {
