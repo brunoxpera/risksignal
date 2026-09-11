@@ -50,6 +50,22 @@ type handlerConfig struct {
 	// bodyLimitOverrides raises (or lowers) the request-body cap of an exact
 	// request path above the chain default (MaxBodyBytes).
 	bodyLimitOverrides map[string]int64
+	// extra holds middlewares inserted just after the correlation middleware
+	// (see WithMiddleware) — the observability layers of the composition root.
+	extra []Middleware
+}
+
+// WithMiddleware appends an extra middleware to the WP-1a.06 chain, inserted
+// just after the correlation middleware (so it sees the effective correlation
+// id and trace context) and before the access log. It is how the composition
+// root adds the observability layers — metrics and trace — without changing
+// the fixed chain order. A nil middleware is ignored.
+func WithMiddleware(mw Middleware) HandlerOption {
+	return func(c *handlerConfig) {
+		if mw != nil {
+			c.extra = append(c.extra, mw)
+		}
+	}
 }
 
 // BodyLimitOverride raises the request-body cap of one exact request path
@@ -72,15 +88,22 @@ func BodyLimitOverride(path string, maxBytes int64) HandlerOption {
 // is a *log/slog.Logger from internal/platform/logging).
 func NewHandler(h http.Handler, logger *slog.Logger, opts ...HandlerOption) http.Handler {
 	cfg := newHandlerConfig(opts)
-	return Chain(
-		CorrelationID,
-		AccessLog(logger),
-		RecoverPanic(logger),
-		SecurityHeaders,
-		ContentSecurityPolicy,
-		CORSDisabled,
-		LimitBodyFor(MaxBodyBytes, cfg.bodyLimitOverrides),
-	)(h)
+	mws := cfg.baseChain(logger)
+	mws = append(mws, LimitBodyFor(MaxBodyBytes, cfg.bodyLimitOverrides))
+	return Chain(mws...)(h)
+}
+
+// baseChain builds the fixed WP-1a.06 chain: correlation ID first (so the
+// observability middlewares see the effective id), then the extra
+// observability layers, then the access log, panic recovery, security
+// headers, CSP and CORS. The per-route body limit and the optional auth
+// middleware are appended by the callers.
+func (cfg handlerConfig) baseChain(logger *slog.Logger) []Middleware {
+	mws := make([]Middleware, 0, 6+len(cfg.extra))
+	mws = append(mws, CorrelationID)
+	mws = append(mws, cfg.extra...)
+	mws = append(mws, AccessLog(logger), RecoverPanic(logger), SecurityHeaders, ContentSecurityPolicy, CORSDisabled)
+	return mws
 }
 
 // newHandlerConfig folds the options into the chain configuration.
@@ -100,16 +123,9 @@ func newHandlerConfig(opts []HandlerOption) handlerConfig {
 // security headers and the access-log record of the chain.
 func NewHandlerWithAuth(h http.Handler, logger *slog.Logger, auth Middleware, opts ...HandlerOption) http.Handler {
 	cfg := newHandlerConfig(opts)
-	return Chain(
-		CorrelationID,
-		AccessLog(logger),
-		RecoverPanic(logger),
-		SecurityHeaders,
-		ContentSecurityPolicy,
-		CORSDisabled,
-		LimitBodyFor(MaxBodyBytes, cfg.bodyLimitOverrides),
-		auth,
-	)(h)
+	mws := cfg.baseChain(logger)
+	mws = append(mws, LimitBodyFor(MaxBodyBytes, cfg.bodyLimitOverrides), auth)
+	return Chain(mws...)(h)
 }
 
 // statusRecorder records the first response status while writing through to
