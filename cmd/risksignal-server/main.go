@@ -84,6 +84,16 @@ func main() {
 // the process cleanly. It returns nil after a graceful shutdown, and an error
 // for anything else (bind failure, serve failure, shutdown timeout).
 func serve(cfg *config.Config, logger *slog.Logger) error {
+	// The process metrics registry (ARCH-007 §5, WP-6.08 / DEV-120): one
+	// registry, shared by the request middleware (which records) and the
+	// internal /metrics listener (which renders). Every §16.2 family is
+	// declared up front so the exposition is complete before the first
+	// request. It is installed on the data-access layer (DEV-142) before the
+	// pool is built, so the pgx query tracer and the error mapping of the
+	// pool's own connections record on it.
+	reg := observabilityRegistry()
+	postgres.SetMetrics(reg)
+
 	// The pool is lazy (postgres.NewPool, WP-1a.05/1a.07): pgx connects only
 	// when a probe or query needs it, so a database that is down at startup
 	// must not kill the server. Readiness reports the state instead — red
@@ -95,12 +105,6 @@ func serve(cfg *config.Config, logger *slog.Logger) error {
 	}
 	defer pool.Close()
 
-	// The process metrics registry (ARCH-007 §5, WP-6.08 / DEV-120): one
-	// registry, shared by the request middleware (which records) and the
-	// internal /metrics listener (which renders). Every §16.2 family is
-	// declared up front so the exposition is complete before the first
-	// request.
-	reg := observabilityRegistry()
 	tracer := tracing.New(otlpExporter(cfg, "risksignal-server"))
 
 	handler, err := newHandler(cfg, pool, logger,

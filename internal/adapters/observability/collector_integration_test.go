@@ -228,6 +228,12 @@ func TestI6ExitCriteriaGaugeFamiliesPopulated(t *testing.T) {
 	if v := gaugeValue(t, byName, metrics.NameSourceDataAge, "nvd"); v < 250 {
 		t.Errorf("source_data_age_seconds = %v, want >= ~300s (the cursor basis is 5 minutes old)", v)
 	}
+	// The DEV-138 review polish: assert the SLA-remaining value, not just its
+	// presence. The seeded acknowledgement clock is ~20 minutes out, so the
+	// tightest open clock of the P1 signal is well over 1000 seconds.
+	if v := gaugeValue(t, byName, metrics.NameSignalsSLARemaining, "P1"); v <= 1000 {
+		t.Errorf("signals_sla_remaining_seconds{P1} = %v, want > 1000 (the seeded deadline is ~20 minutes out)", v)
+	}
 }
 
 // gaugeValue returns the value of the series of a family carrying label=value

@@ -13,6 +13,7 @@ import (
 
 	"github.com/brunoxpera/risksignal/internal/application"
 	"github.com/brunoxpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/platform/metrics"
 )
 
 // scriptedSlaEvaluator is a SlaEvaluatorRunner whose outcome the test fixes;
@@ -96,5 +97,36 @@ func TestNewSlaScheduleRejectsWiringErrors(t *testing.T) {
 	}
 	if s, err := NewSlaSchedule(&scriptedSlaEvaluator{}, clock.NewFakeClock(time.Now()), 0, discardLogger()); err == nil || s != nil {
 		t.Fatalf("NewSlaSchedule(zero interval) = %v/%v, want a wiring error", s, err)
+	}
+}
+
+// TestSlaScheduleRecordsBreachTransitions proves the DEV-142 SLA-breach
+// recording: each escalation transition of an evaluation pass is counted in
+// signals_sla_breaches_total (the exactly-once breach transition).
+func TestSlaScheduleRecordsBreachTransitions(t *testing.T) {
+	clk := clock.NewFakeClock(time.Date(2026, 9, 10, 0, 0, 0, 0, time.UTC))
+	eval := &scriptedSlaEvaluator{res: application.SlaEvaluateResult{Due: 3, Escalated: 2, Reminders: 1}}
+
+	reg := metrics.New()
+	metrics.RegisterStandard(reg)
+
+	sched, err := NewSlaSchedule(eval, clk, time.Minute, discardLogger())
+	if err != nil {
+		t.Fatalf("NewSlaSchedule: %v", err)
+	}
+	sched.SetMetrics(reg)
+
+	if err := sched.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+
+	var got float64
+	for _, s := range reg.Snapshot() {
+		if s.Name == metrics.NameSignalsSLABreachesTotal {
+			got = s.Value
+		}
+	}
+	if got != 2 {
+		t.Fatalf("signals_sla_breaches_total = %v, want 2 (the escalation transitions)", got)
 	}
 }

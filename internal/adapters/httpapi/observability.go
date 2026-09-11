@@ -120,6 +120,18 @@ func MetricsMiddleware(reg *metrics.Registry) Middleware {
 	}
 }
 
+// MetricFamilies returns the §16.2 families the HTTP metrics middleware
+// records (MetricsMiddleware). It is the writer declaration the NFR-010
+// coverage guard reads (DEV-142). The slice is a copy.
+func MetricFamilies() []string {
+	return []string{
+		metrics.NameHTTPRequestsTotal,
+		metrics.NameHTTPRequestDuration,
+		metrics.NameHTTPResponsesByStatus,
+		metrics.NameHTTPInflight,
+	}
+}
+
 // TraceMiddleware opens the HTTP request span (ARCH-007 §5, WP-6.08). The
 // trace id is the correlation id (via the tracer's correlation-id-as-trace-id
 // mapping), an inbound valid W3C traceparent when one is propagated, or a

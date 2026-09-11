@@ -27,6 +27,7 @@ import (
 
 	"github.com/brunoxpera/risksignal/internal/application"
 	"github.com/brunoxpera/risksignal/internal/platform/clock"
+	"github.com/brunoxpera/risksignal/internal/platform/metrics"
 )
 
 // SlaEvaluatorRunner is the application surface the sla.evaluate scheduler
@@ -45,6 +46,12 @@ type SlaSchedule struct {
 	interval time.Duration
 	logger   *slog.Logger
 
+	// reg is the optional process metrics registry the scheduler records the
+	// §16.2 SLA-breach transitions on (ARCH-007 §5, WP-6.12 follow-up /
+	// DEV-142). Wired through SetMetrics at the composition root; nil disables
+	// the recording.
+	reg *metrics.Registry
+
 	// ran reports whether the scheduler has run at least once; lastRun is the
 	// injected-clock instant of the last due tick. Together they gate the
 	// cadence: the first tick runs immediately, every later tick waits out one
@@ -52,6 +59,12 @@ type SlaSchedule struct {
 	ran     bool
 	lastRun time.Time
 }
+
+// SetMetrics wires the optional process registry the scheduler records the
+// §16.2 SLA-breach transitions on (ARCH-007 §5, DEV-142). A nil registry
+// disables the recording. It is called once at the composition root, before
+// the worker loop starts.
+func (s *SlaSchedule) SetMetrics(reg *metrics.Registry) { s.reg = reg }
 
 // NewSlaSchedule assembles the sla.evaluate scheduler. eval must not be nil (a
 // nil evaluator is a wiring error reported here); interval must be positive
@@ -89,6 +102,14 @@ func (s *SlaSchedule) Tick(ctx context.Context) error {
 	res, err := s.eval.EvaluateSla(ctx)
 	if err != nil {
 		return err
+	}
+	// Record the breach transitions of this pass (DEV-142): each unacknowledged
+	// signal the evaluation escalated is one SLA breach. Escalation is the
+	// exactly-once transition of a breach (the set-once escalated_at guard), so
+	// a breached clock is counted once and never re-counted on a later pass.
+	if s.reg != nil && res.Escalated > 0 {
+		s.reg.Counter(metrics.NameSignalsSLABreachesTotal, metrics.HelpSignalsSLABreachesTotal).
+			Add(float64(res.Escalated))
 	}
 	if res.Due > 0 || res.Escalated > 0 || res.Reminders > 0 {
 		s.logger.Info("sla.evaluate run complete",

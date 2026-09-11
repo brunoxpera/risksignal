@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/platform/metrics"
 )
 
 // stubPort is a NotifyPort whose outcome the test fixes.
@@ -89,5 +90,41 @@ func TestInAppPortDelivers(t *testing.T) {
 	}
 	if !receipt.Delivered || receipt.Channel != ChannelInApp {
 		t.Fatalf("receipt = %+v, want delivered in_app", receipt)
+	}
+}
+
+// TestDispatcherRecordsDeliveriesAndFailures proves the DEV-142 delivery
+// event recording: a successful delivery counts in
+// notifications_deliveries_total and every failure — a transport failure or
+// an unconfigured channel — counts in notifications_failures_total.
+func TestDispatcherRecordsDeliveriesAndFailures(t *testing.T) {
+	reg := metrics.New()
+	metrics.RegisterStandard(reg)
+
+	ok := &stubPort{receipt: DeliveryReceipt{Channel: ChannelInApp, Delivered: true}}
+	bad := &stubPort{err: errors.New("transport down")}
+	d := NewDispatcher(map[NotifyChannel]NotifyPort{ChannelInApp: ok, ChannelSMTP: bad})
+	d.SetMetrics(reg)
+
+	if _, err := d.Deliver(context.Background(), application.Notification{Channel: "in_app"}); err != nil {
+		t.Fatalf("Deliver(in_app): %v", err)
+	}
+	if _, err := d.Deliver(context.Background(), application.Notification{Channel: "smtp"}); err == nil {
+		t.Fatal("Deliver(smtp) = nil error, want the transport failure")
+	}
+	// An unconfigured channel is a failure too (no port = permanent).
+	if _, err := d.Deliver(context.Background(), application.Notification{Channel: "webhook"}); !IsPermanent(err) {
+		t.Fatalf("Deliver(webhook) = %v, want permanent", err)
+	}
+
+	got := map[string]float64{}
+	for _, s := range reg.Snapshot() {
+		got[s.Name] = s.Value
+	}
+	if got[metrics.NameNotificationsDeliveries] != 1 {
+		t.Errorf("notifications_deliveries_total = %v, want 1", got[metrics.NameNotificationsDeliveries])
+	}
+	if got[metrics.NameNotificationsFailures] != 2 {
+		t.Errorf("notifications_failures_total = %v, want 2", got[metrics.NameNotificationsFailures])
 	}
 }

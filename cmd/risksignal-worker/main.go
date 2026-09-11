@@ -59,7 +59,7 @@ import (
 // it only when the operator configured and enabled a target. An
 // enabled-but-incomplete channel is a wiring error — the config validation
 // already rejects that, so this is the defensive backstop.
-func buildNotifyPort(cfg *config.Config) (notify.NotifyPort, error) {
+func buildNotifyPort(cfg *config.Config) (*notify.Dispatcher, error) {
 	ports := map[notify.NotifyChannel]notify.NotifyPort{
 		notify.ChannelInApp: notify.NewInAppPort(),
 	}
@@ -204,6 +204,9 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	// observability.otlp_endpoint is set (empty = off, no SDK linked).
 	reg := metrics.New()
 	metrics.RegisterStandard(reg)
+	// Install the registry on the data-access layer (DEV-142) so the pgx query
+	// tracer and the error mapping of every pool record on it.
+	postgres.SetMetrics(reg)
 	tracer := tracing.New(otlpExporter(cfg, "risksignal-worker"))
 	if cfg.Observability.MetricsEnabled {
 		go func() {
@@ -397,6 +400,10 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	if err != nil {
 		return fmt.Errorf("configure notify port: %w", err)
 	}
+	// The notification adapter records its delivery outcomes on the process
+	// registry (DEV-142): a delivered notification in
+	// notifications_deliveries_total, a failed one in notifications_failures_total.
+	notifyPort.SetMetrics(reg)
 	notifyJobs, err := worker.NewNotifyJobs(worker.NotifyJobsDeps{
 		Notifications: repo.NewNotificationRepo(q),
 		SlaClocks:     repo.NewSlaClockRepo(q),
@@ -431,6 +438,9 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	if err != nil {
 		return fmt.Errorf("configure sla scheduler: %w", err)
 	}
+	// The evaluation scheduler records the SLA-breach transitions of each pass
+	// on the process registry (DEV-142).
+	slaSchedule.SetMetrics(reg)
 
 	// The I6 export/retention jobs (ARCH-007 §1.2/§2.2, WP-6.06 / DEV-118): the
 	// export.generate and retention.execute relay handlers (registered on the

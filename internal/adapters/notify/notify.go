@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/brunoxpera/risksignal/internal/application"
+	"github.com/brunoxpera/risksignal/internal/platform/metrics"
 )
 
 // NotifyChannel is one notification delivery channel (ARCH-004 §6.1): the
@@ -108,8 +109,16 @@ func IsPermanent(err error) bool {
 // which channels a notification uses, and the dispatcher resolves the
 // channel's adapter. A channel without a registered port is a wiring gap and
 // is reported as a permanent failure (it can never succeed by retrying).
+//
+// The dispatcher is also the notification adapter's delivery event point
+// (implementation concept ch. 16.2, ARCH-007 §5, WP-6.12 follow-up /
+// DEV-142): it records the outcome of every delivery attempt — a success in
+// notifications_deliveries_total, a failure (of any class) in
+// notifications_failures_total — on the optional process registry wired with
+// SetMetrics.
 type Dispatcher struct {
 	ports map[NotifyChannel]NotifyPort
+	reg   *metrics.Registry // nil: delivery metrics recording disabled
 }
 
 // NewDispatcher builds a dispatcher over the given per-channel ports. A nil
@@ -125,13 +134,51 @@ func NewDispatcher(ports map[NotifyChannel]NotifyPort) *Dispatcher {
 	return &Dispatcher{ports: clean}
 }
 
-// Deliver routes n to the port of its channel. An unknown or unconfigured
-// channel yields a PermanentError, never a retry loop.
+// SetMetrics wires the optional process registry the dispatcher records its
+// delivery outcomes on (ARCH-007 §5, DEV-142). A nil registry disables the
+// recording (the tests and the composition roots that do not expose
+// /metrics). It is called once at the composition root, before the relay
+// serves events.
+func (d *Dispatcher) SetMetrics(reg *metrics.Registry) { d.reg = reg }
+
+// Deliver routes n to the port of its channel and records the delivery
+// outcome on the wired registry. An unknown or unconfigured channel yields a
+// PermanentError, never a retry loop, and counts as a failure.
 func (d *Dispatcher) Deliver(ctx context.Context, n application.Notification) (DeliveryReceipt, error) {
 	ch := NotifyChannel(n.Channel)
 	port, ok := d.ports[ch]
 	if !ok {
-		return DeliveryReceipt{Channel: ch}, Permanent(fmt.Errorf("notify: no port configured for channel %q", n.Channel))
+		err := Permanent(fmt.Errorf("notify: no port configured for channel %q", n.Channel))
+		d.record(err)
+		return DeliveryReceipt{Channel: ch}, err
 	}
-	return port.Deliver(ctx, n)
+	receipt, err := port.Deliver(ctx, n)
+	d.record(err)
+	return receipt, err
+}
+
+// record counts one delivery attempt: err == nil is a delivery
+// (notifications_deliveries_total), any non-nil delivery error is a failure
+// (notifications_failures_total). The dispatcher is the single point every
+// channel's delivery passes, so the two families count each attempt exactly
+// once.
+func (d *Dispatcher) record(err error) {
+	if d.reg == nil {
+		return
+	}
+	if err == nil {
+		d.reg.Counter(metrics.NameNotificationsDeliveries, metrics.HelpNotificationsDeliveries).Inc()
+		return
+	}
+	d.reg.Counter(metrics.NameNotificationsFailures, metrics.HelpNotificationsFailures).Inc()
+}
+
+// MetricFamilies returns the §16.2 families the notification adapter records
+// on the process registry. It is the writer declaration the NFR-010 coverage
+// guard reads (DEV-142). The slice is a copy.
+func MetricFamilies() []string {
+	return []string{
+		metrics.NameNotificationsDeliveries,
+		metrics.NameNotificationsFailures,
+	}
 }

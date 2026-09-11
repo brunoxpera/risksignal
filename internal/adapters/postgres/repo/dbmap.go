@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
 	"github.com/brunoxpera/risksignal/internal/application"
 )
 
@@ -17,7 +18,10 @@ import (
 // untouched; pgx.ErrNoRows (a :one query without a row) is not-found; the
 // PostgreSQL error codes below classify the rest. Anything unrecognised is
 // infrastructure — the safe default for a caller mapping onto a protocol
-// response.
+// response — and is additionally counted in the §16.2
+// database_transaction_errors_total family (DEV-142): the adapter surfaces a
+// driver-level database failure it could not classify as an expected
+// (validation/conflict/not-found) outcome.
 func mapDBError(op string, err error) error {
 	if err == nil {
 		return nil
@@ -40,6 +44,7 @@ func mapDBError(op string, err error) error {
 			return application.ValidationError(op, err)
 		}
 	}
+	postgres.IncTransactionError()
 	return application.InfraError(op, err)
 }
 

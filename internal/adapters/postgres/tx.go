@@ -23,6 +23,8 @@ import (
 func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
+		// A begin failure is a transaction-boundary error (DEV-142).
+		IncTransactionError()
 		return fmt.Errorf("postgres: begin transaction: %w", err)
 	}
 	// Best-effort rollback on every path that does not commit: a failed fn,
@@ -34,6 +36,8 @@ func WithTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) e
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
+		// A commit failure is a transaction-boundary error (DEV-142).
+		IncTransactionError()
 		return fmt.Errorf("postgres: commit transaction: %w", err)
 	}
 	return nil

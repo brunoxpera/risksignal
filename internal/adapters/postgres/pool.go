@@ -61,6 +61,12 @@ func NewPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	cfg.MinConns = minConns
 	cfg.MaxConns = maxConns
 
+	// The pgx query tracer (DEV-142): every Query/QueryRow/Exec on a pool
+	// connection is observed in database_query_duration_seconds. It is a
+	// no-op until a registry is installed (SetMetrics), so the plain pool
+	// construction is unchanged for the tests.
+	cfg.ConnConfig.Tracer = queryTracer{}
+
 	// pgx scans timestamptz values into time.Time in the local time zone
 	// unless the timestamp codec carries an explicit scan location. The
 	// walking skeleton stores every timestamp as timestamptz UTC and reads
