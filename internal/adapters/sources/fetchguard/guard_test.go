@@ -70,7 +70,7 @@ func TestBlockedTargetsRefused(t *testing.T) {
 	for _, target := range targets {
 		resp, err := c.Get(target)
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		if err == nil {
 			t.Errorf("GET %s succeeded, want blocked", target)
@@ -88,7 +88,7 @@ func TestSchemeNotAllowed(t *testing.T) {
 	for _, target := range []string{"ftp://example.com/x", "file:///etc/passwd", "gopher://example.com/"} {
 		resp, err := c.Get(target)
 		if resp != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 		if !errors.Is(err, fetchguard.ErrSchemeNotAllowed) {
 			t.Errorf("GET %s error = %v, want ErrSchemeNotAllowed", target, err)
@@ -110,7 +110,7 @@ func TestAllowedPrivateTargetSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET %s with allow_private: %v", srv.URL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
 	}
@@ -127,7 +127,7 @@ func TestNilClientIsGuardedFailSecure(t *testing.T) {
 	c := fetchguard.Client(nil)
 	resp, err := c.Get(srv.URL)
 	if resp != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 	if !errors.Is(err, fetchguard.ErrBlockedTarget) {
 		t.Fatalf("GET %s error = %v, want ErrBlockedTarget", srv.URL, err)
@@ -147,7 +147,7 @@ func TestRedirectBlockedHopRejected(t *testing.T) {
 	c := fetchguard.Client(fetchguard.New(true))
 	resp, err := c.Get(srv.URL)
 	if resp != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 	if !errors.Is(err, fetchguard.ErrBlockedTarget) {
 		t.Fatalf("redirect to multicast error = %v, want ErrBlockedTarget", err)
@@ -165,7 +165,7 @@ func TestRedirectLimitExceeded(t *testing.T) {
 	c := fetchguard.Client(fetchguard.New(true))
 	resp, err := c.Get(srv.URL)
 	if resp != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 	if !errors.Is(err, fetchguard.ErrTooManyRedirects) {
 		t.Fatalf("self-redirecting loop error = %v, want ErrTooManyRedirects", err)
@@ -184,7 +184,7 @@ func TestRedirectToUnspecifiedRejected(t *testing.T) {
 	c := fetchguard.Client(fetchguard.New(true))
 	resp, err := c.Get(srv.URL)
 	if resp != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 	if !errors.Is(err, fetchguard.ErrBlockedTarget) {
 		t.Fatalf("redirect to 0.0.0.0 error = %v, want ErrBlockedTarget", err)
