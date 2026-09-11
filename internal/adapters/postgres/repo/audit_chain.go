@@ -4,15 +4,20 @@ package repo
 // the row-hash computation shared by AuditRepo.Append (stamping) and
 // AuditRepo.VerifyChain (verification), plus the end-to-end verifier.
 //
-// The chain is order (occurred_at, id) — the audit trail's stable order.
 // Each chained row stores prev_hash (the row_hash of its predecessor, NULL for
-// the first chained row) and row_hash = SHA-256(prev_hash ‖ canonical row
-// bytes). "Canonical row bytes" is a length-prefixed concatenation of the
-// row's immutable content columns (the database-assigned id is deliberately
-// excluded: it is not known before the insert, and every content column is
-// covered), with the timestamps rendered in UTC microseconds and the before/
-// after jsonb snapshots re-marshalled canonically so the value inserted and
-// the value read back hash identically.
+// the chain head) and row_hash = SHA-256(prev_hash ‖ canonical row bytes). The
+// chain's order is defined by these prev_hash links — the order the rows were
+// stamped in — and NOT by (occurred_at, id): under concurrent writers, a clock
+// skew, or an occurred_at tie broken by a random id, a row can be appended with
+// an occurred_at that sorts before its predecessor's, so a walk in
+// (occurred_at, id) order can reach a successor before the predecessor it
+// links to. VerifyChain therefore follows the prev_hash links it finds instead
+// of re-sorting the trail. "Canonical row bytes" is a length-prefixed
+// concatenation of the row's immutable content columns (the database-assigned
+// id is deliberately excluded: it is not known before the insert, and every
+// content column is covered), with the timestamps rendered in UTC microseconds
+// and the before/after jsonb snapshots re-marshalled canonically so the value
+// inserted and the value read back hash identically.
 
 import (
 	"bytes"
@@ -23,6 +28,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
 )
 
 // auditChainLockKey is the transaction-scoped advisory lock that serialises
@@ -122,8 +129,9 @@ type ChainMismatchError struct {
 	// Position is its zero-based index in the chain order.
 	Position int
 	// Reason describes the failure ("row_hash does not match the recomputed
-	// value" / "prev_hash does not link to the previous row_hash" / "row has
-	// no row_hash after the chain started").
+	// value" / "prev_hash does not link to the previous row_hash" / "chain has
+	// no head" / "chain is forked" / "chained row is unreachable from the
+	// chain head").
 	Reason string
 }
 
@@ -131,12 +139,23 @@ func (e *ChainMismatchError) Error() string {
 	return fmt.Sprintf("audit chain verification failed at row %s (position %d): %s", e.RowID, e.Position, e.Reason)
 }
 
-// VerifyChain walks the whole audit trail in chain order, recomputing every
-// chained row's SHA-256(prev_hash ‖ canonical row bytes) and checking that
-// each row links to its predecessor. It returns a ChainStatus and nil when the
-// chain is intact (an all-unchained trail — the chain never enabled — is
-// intact with Chained 0), or a *ChainMismatchError at the first divergence
-// (ARCH-007 §7 control 3b, §4 AT-015).
+// VerifyChain walks the chain's prev_hash links end-to-end, recomputing every
+// chained row's SHA-256(prev_hash ‖ canonical row bytes) and checking that each
+// row matches its stored hash and links to its predecessor. It returns a
+// ChainStatus and nil when the chain is intact (an all-unchained trail — the
+// chain never enabled — is intact with Chained 0), or a *ChainMismatchError at
+// the first divergence (ARCH-007 §7 control 3b, §4 AT-015).
+//
+// It walks the links, not the (occurred_at, id) row order, because that order
+// is not the append order the stamps were written in (concurrent writers, a
+// clock skew, or an occurred_at tie broken by a random id can append a row
+// whose occurred_at sorts before its predecessor's). It builds the row_hash →
+// row index over the chained rows, starts at the single head (the chained row
+// with a NULL prev_hash) and follows each row_hash → the row whose prev_hash is
+// that hash, so a successor is never visited before the predecessor it links
+// to. A missing head, a fork (two rows link to NULL, two rows share a
+// row_hash, or one predecessor has two successors), a dangling prev_hash, and a
+// chained row the walk never reaches are all reported as failures.
 //
 // It proves internal consistency — a row edited or removed after the chain
 // started breaks the links. Anchoring the chain against wholesale removal of
@@ -150,63 +169,129 @@ func (r *AuditRepo) VerifyChain(ctx context.Context) (ChainStatus, error) {
 	}
 
 	var st ChainStatus
-	started := false
-	prev := ""
-	for i, row := range rows {
-		st.Rows++
+	st.Rows = len(rows)
+
+	// Partition the trail into the chained rows (row_hash present) and the
+	// unchained prefix (row_hash NULL — written before the chain started). The
+	// (occurred_at, id) order ListAuditHashChain returns is deliberately not
+	// relied on; the chained rows are ordered by their links below. The
+	// occurred_at bounds look across every chained row, so they do not depend
+	// on the walk order either.
+	chained := make([]gen.AuditEvent, 0, len(rows))
+	for _, row := range rows {
 		if !row.RowHash.Valid {
-			if started {
-				return st, &ChainMismatchError{
-					RowID:    uuidString(row.ID),
-					Position: i,
-					Reason:   "row has no row_hash after the chain started",
-				}
-			}
 			st.Unchained++
 			continue
 		}
-
-		chained := auditChainRow{
-			AggregateType:    row.AggregateType,
-			AggregateID:      uuidString(row.AggregateID),
-			ActorType:        row.ActorType,
-			ActorID:          row.ActorID,
-			ActorDisplayName: textValue(row.ActorDisplayName),
-			Action:           row.Action,
-			OccurredAt:       tsTime(row.OccurredAt),
-			Before:           row.Before,
-			After:            row.After,
-			CorrelationID:    row.CorrelationID,
-		}
-
-		if !started {
-			// The first chained row anchors the chain; its recorded
-			// prev_hash is the (NULL) link it was written with.
-			started = true
-			prev = textValue(row.PrevHash)
-		} else if textValue(row.PrevHash) != prev {
-			return st, &ChainMismatchError{
-				RowID:    uuidString(row.ID),
-				Position: i,
-				Reason:   "prev_hash does not link to the previous row_hash",
-			}
-		}
-
-		if got, want := row.RowHash.String, auditRowHash(prev, chained); got != want {
-			return st, &ChainMismatchError{
-				RowID:    uuidString(row.ID),
-				Position: i,
-				Reason:   "row_hash does not match the recomputed value",
-			}
-		}
-
-		prev = row.RowHash.String
-		st.Chained++
+		chained = append(chained, row)
 		at := tsTime(row.OccurredAt)
-		if st.FirstChainedAt.IsZero() {
+		if st.FirstChainedAt.IsZero() || at.Before(st.FirstChainedAt) {
 			st.FirstChainedAt = at
 		}
-		st.LastChainedAt = at
+		if at.After(st.LastChainedAt) {
+			st.LastChainedAt = at
+		}
+	}
+	if len(chained) == 0 {
+		return st, nil // all-unchained trail (the chain never started): intact
+	}
+
+	// Index the chained rows by their own row_hash (the key a successor links
+	// through; a duplicate is a fork) and by the prev_hash each one links to
+	// (the edge the walk follows).
+	byRowHash := make(map[string]int, len(chained))
+	byPrev := make(map[string][]int, len(chained))
+	for i, row := range chained {
+		if _, dup := byRowHash[row.RowHash.String]; dup {
+			return st, chainMismatch(row, 0, "chain is forked: two rows share a row_hash")
+		}
+		byRowHash[row.RowHash.String] = i
+		prev := textValue(row.PrevHash)
+		byPrev[prev] = append(byPrev[prev], i)
+	}
+
+	// Every non-NULL prev_hash must link to a chained row: a prev_hash with no
+	// matching row_hash is a dangling link — a removed or rewritten predecessor,
+	// including a removed head (wholesale head removal is otherwise undetectable
+	// without the external anchor, §4).
+	for _, row := range chained {
+		if !row.PrevHash.Valid {
+			continue
+		}
+		if _, ok := byRowHash[row.PrevHash.String]; !ok {
+			return st, chainMismatch(row, 0, "prev_hash does not link to the previous row_hash")
+		}
+	}
+
+	// The chain starts at its single head — the one chained row whose prev_hash
+	// is NULL. No head (a cycle or a rewritten head) or more than one (a fork at
+	// the start) is a chain failure.
+	head := -1
+	for i := range chained {
+		if chained[i].PrevHash.Valid {
+			continue
+		}
+		if head != -1 {
+			return st, chainMismatch(chained[i], 0, "chain is forked: more than one row links to NULL")
+		}
+		head = i
+	}
+	if head == -1 {
+		return st, chainMismatch(chained[0], 0, "chain has no head: no chained row links to NULL")
+	}
+
+	// Walk the links from the head, recomputing each row's hash and checking it
+	// matches the stored one, then following row_hash → the row whose prev_hash
+	// is that hash. The walk must visit every chained row exactly once: a
+	// revisited row is a loop, a row with two successors is a fork, and a chained
+	// row the walk never reaches is unreachable (a fork or a gap).
+	visited := make([]bool, len(chained))
+	cur, pos := head, 0
+	for cur != -1 {
+		if visited[cur] {
+			return st, chainMismatch(chained[cur], pos, "chain is forked or loops: a row is reached twice")
+		}
+		visited[cur] = true
+		row := chained[cur]
+		if got, want := auditRowHash(textValue(row.PrevHash), chainRowOf(row)), row.RowHash.String; got != want {
+			return st, chainMismatch(row, pos, "row_hash does not match the recomputed value")
+		}
+		st.Chained++
+		succ := byPrev[row.RowHash.String]
+		if len(succ) > 1 {
+			return st, chainMismatch(row, pos, "chain is forked: two rows link to the same predecessor")
+		}
+		if len(succ) == 0 {
+			break
+		}
+		cur, pos = succ[0], pos+1
+	}
+	for i := range chained {
+		if !visited[i] {
+			return st, chainMismatch(chained[i], pos, "chained row is unreachable from the chain head")
+		}
 	}
 	return st, nil
+}
+
+// chainRowOf maps a stored audit row onto the immutable content the chain
+// hashes (it mirrors the insert params, not the database id).
+func chainRowOf(row gen.AuditEvent) auditChainRow {
+	return auditChainRow{
+		AggregateType:    row.AggregateType,
+		AggregateID:      uuidString(row.AggregateID),
+		ActorType:        row.ActorType,
+		ActorID:          row.ActorID,
+		ActorDisplayName: textValue(row.ActorDisplayName),
+		Action:           row.Action,
+		OccurredAt:       tsTime(row.OccurredAt),
+		Before:           row.Before,
+		After:            row.After,
+		CorrelationID:    row.CorrelationID,
+	}
+}
+
+// chainMismatch builds the typed verification failure for one row.
+func chainMismatch(row gen.AuditEvent, position int, reason string) *ChainMismatchError {
+	return &ChainMismatchError{RowID: uuidString(row.ID), Position: position, Reason: reason}
 }

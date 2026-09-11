@@ -131,6 +131,137 @@ func TestAuditHashChainDisabledLeavesRowsUnchained(t *testing.T) {
 	}
 }
 
+// TestAuditHashChainVerifiesOutOfOrderAppends is the DEV-124 regression: the
+// row that occurred LATER is appended (and commits) FIRST, so the chain links
+// A → B while the (occurred_at, id) order walks B before A. The verifier must
+// follow the prev_hash links and pass the untampered chain; the old
+// (occurred_at, id) walk reached B — whose prev_hash is A's — first and
+// reported a false "prev_hash does not link".
+func TestAuditHashChainVerifiesOutOfOrderAppends(t *testing.T) {
+	pool := newI4TestPool(t)
+	ctx := context.Background()
+	q := gen.New(pool)
+	repo := NewAuditRepoWithHashChain(q, true)
+	base := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+
+	appendAt := func(i int, occurredAt time.Time) {
+		ev := application.AuditEvent{
+			AggregateType: "risk_signal",
+			AggregateID:   fmt.Sprintf("00000000-0000-0000-0000-0000000000%02d", i),
+			ActorType:     "system",
+			ActorID:       "seed",
+			Action:        fmt.Sprintf("signal.action_%02d", i),
+			OccurredAt:    occurredAt,
+			CorrelationID: fmt.Sprintf("corr-%02d", i),
+		}
+		if err := postgres.WithTx(ctx, pool, func(tx pgx.Tx) error { return repo.Append(ctx, tx, ev) }); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	appendAt(0, base.Add(time.Minute)) // A: appended first, the chain head
+	appendAt(1, base)                  // B: links to A, but sorts before it
+
+	// Prove the link order really is the reverse of the row order: in
+	// (occurred_at, id) order the successor comes first and the head last.
+	rows, err := q.ListAuditHashChain(ctx)
+	if err != nil {
+		t.Fatalf("list chain: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	if !rows[0].PrevHash.Valid {
+		t.Fatalf("first row in (occurred_at, id) order has a NULL prev_hash; the regression does not exercise an out-of-order link")
+	}
+	if rows[1].PrevHash.Valid {
+		t.Fatalf("second row in (occurred_at, id) order is not the head; the regression does not exercise an out-of-order link")
+	}
+
+	st, err := repo.VerifyChain(ctx)
+	if err != nil {
+		t.Fatalf("VerifyChain on an untampered out-of-order chain: %v", err)
+	}
+	if st.Rows != 2 || st.Chained != 2 || st.Unchained != 0 {
+		t.Fatalf("chain status = %+v, want 2 rows / 2 chained / 0 unchained", st)
+	}
+}
+
+// TestAuditHashChainVerifiesOccurredAtTieWithReversedIDOrder is the second
+// DEV-124 regression: two rows share an occurred_at, shipped with an id order
+// that is the reverse of the link (commit) order. ListAuditHashChain orders
+// the tie by id, so it walks the linked successor before the head; the
+// verifier must follow the links and pass the untampered chain. The rows are
+// inserted by hand (rather than through Append) precisely so the ids, and thus
+// the (occurred_at, id) order, are deterministic.
+func TestAuditHashChainVerifiesOccurredAtTieWithReversedIDOrder(t *testing.T) {
+	pool := newI4TestPool(t)
+	ctx := context.Background()
+	q := gen.New(pool)
+	repo := NewAuditRepoWithHashChain(q, true)
+	base := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+
+	// Row A (id …02) is the head and is committed first; row B (id …01) links
+	// to A and is committed second — the id order reverses the link order.
+	rowA := auditChainRow{
+		AggregateType: "risk_signal",
+		AggregateID:   "00000000-0000-0000-0000-000000000001",
+		ActorType:     "system",
+		ActorID:       "seed",
+		Action:        "signal.action_a",
+		OccurredAt:    base,
+		CorrelationID: "corr-a",
+	}
+	rowB := auditChainRow{
+		AggregateType: "risk_signal",
+		AggregateID:   "00000000-0000-0000-0000-000000000001",
+		ActorType:     "system",
+		ActorID:       "seed",
+		Action:        "signal.action_b",
+		OccurredAt:    base,
+		CorrelationID: "corr-b",
+	}
+	hashA := auditRowHash("", rowA)
+	hashB := auditRowHash(hashA, rowB)
+
+	insert := func(id string, row auditChainRow, prev, rowHash string) {
+		var prevArg any
+		if prev != "" {
+			prevArg = prev
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO audit_events (id, aggregate_type, aggregate_id, actor_type, actor_id, action, occurred_at, correlation_id, prev_hash, row_hash)
+			VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10)`,
+			id, row.AggregateType, row.AggregateID, row.ActorType, row.ActorID, row.Action, row.OccurredAt, row.CorrelationID, prevArg, rowHash); err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+	}
+	insert("00000000-0000-0000-0000-000000000002", rowA, "", hashA) // head
+	insert("00000000-0000-0000-0000-000000000001", rowB, hashA, hashB)
+
+	// (occurred_at, id) order: …01 (B, the successor) before …02 (A, the head).
+	rows, err := q.ListAuditHashChain(ctx)
+	if err != nil {
+		t.Fatalf("list chain: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	if uuidString(rows[0].ID) != "00000000-0000-0000-0000-000000000001" || !rows[0].PrevHash.Valid {
+		t.Fatalf("first row in (occurred_at, id) order = %s (prev set %t), want the successor …01", uuidString(rows[0].ID), rows[0].PrevHash.Valid)
+	}
+	if rows[1].PrevHash.Valid {
+		t.Fatalf("last row in (occurred_at, id) order is not the head; the regression does not exercise a reversed id order")
+	}
+
+	st, err := repo.VerifyChain(ctx)
+	if err != nil {
+		t.Fatalf("VerifyChain on an untampered tie with reversed id order: %v", err)
+	}
+	if st.Rows != 2 || st.Chained != 2 || st.Unchained != 0 {
+		t.Fatalf("chain status = %+v, want 2 rows / 2 chained / 0 unchained", st)
+	}
+}
+
 // TestAuditAppendOnlyRoleDeniesUpdateDelete proves §7 control 3a: as the
 // application role (risksignal_app) SELECT and INSERT on audit_events are
 // allowed, while UPDATE and DELETE are denied with insufficient_privilege.
