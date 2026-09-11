@@ -28,6 +28,9 @@ var cliEnvKeys = []string{
 	"RISKSIGNAL_DATABASE_URL",
 	"RISKSIGNAL_OIDC_ISSUER",
 	"RISKSIGNAL_AUTH_BYPASS_ENABLED",
+	"RISKSIGNAL_BACKUP_ENCRYPTION_KEY_REF",
+	"RISKSIGNAL_BACKUP_DIR",
+	"RISKSIGNAL_BACKUP_RETAIN_DAYS",
 }
 
 // resetCLIEnv removes every CLI-relevant environment variable and restores
@@ -605,6 +608,18 @@ const goldenDiagnoseConfigJSON = `{
     },
     "observability.otlp_endpoint": {
       "set": true,
+      "source": "default"
+    },
+    "backup.encryption_key_ref": {
+      "set": true,
+      "source": "default"
+    },
+    "backup.dir": {
+      "value": "var/backups",
+      "source": "default"
+    },
+    "backup.retain_days": {
+      "value": 14,
       "source": "default"
     }
   },

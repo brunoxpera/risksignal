@@ -26,7 +26,7 @@ import (
 func runMaintenance(e *cmdEnv, args []string) int {
 	if len(args) < 1 {
 		return e.emit("maintenance", e.fail(exitValidation, classValidation,
-			"missing subcommand (supported: migrate, identity-lookup, identity-pseudonymize, retention, recompute)"))
+			"missing subcommand (supported: migrate, identity-lookup, identity-pseudonymize, retention, backup, recompute)"))
 	}
 	command := "maintenance " + args[0]
 	switch args[0] {
@@ -38,11 +38,13 @@ func runMaintenance(e *cmdEnv, args []string) int {
 		return e.emit(command, e.cmdIdentityPseudonymize(args[1:]))
 	case "retention":
 		return e.emit(command, e.cmdRetention(args[1:]))
+	case "backup":
+		return e.emit(command, e.cmdBackup(args[1:]))
 	case "recompute":
 		return e.emit(command, e.cmdNotImplemented(args[1:]))
 	default:
 		return e.emit(command, e.fail(exitValidation, classValidation,
-			"unknown subcommand (supported: migrate, identity-lookup, identity-pseudonymize, retention, recompute)"))
+			"unknown subcommand (supported: migrate, identity-lookup, identity-pseudonymize, retention, backup, recompute)"))
 	}
 }
 

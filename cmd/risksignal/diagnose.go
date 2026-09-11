@@ -22,7 +22,7 @@ import (
 func runDiagnose(e *cmdEnv, args []string) int {
 	if len(args) < 1 {
 		return e.emit("diagnose", e.fail(exitValidation, classValidation,
-			"missing subcommand (supported: config, connectivity, health)"))
+			"missing subcommand (supported: config, connectivity, health, backup, restore-test)"))
 	}
 	command := "diagnose " + args[0]
 	switch args[0] {
@@ -32,9 +32,13 @@ func runDiagnose(e *cmdEnv, args []string) int {
 		return e.emit(command, e.cmdDiagnoseConnectivity(args[1:]))
 	case "health":
 		return e.emit(command, e.cmdDiagnoseHealth(args[1:]))
+	case "backup":
+		return e.emit(command, e.cmdBackup(args[1:]))
+	case "restore-test":
+		return e.emit(command, e.cmdRestoreTest(args[1:]))
 	default:
 		return e.emit(command, e.fail(exitValidation, classValidation,
-			"unknown subcommand (supported: config, connectivity, health)"))
+			"unknown subcommand (supported: config, connectivity, health, backup, restore-test)"))
 	}
 }
 

@@ -296,6 +296,7 @@ commands:
                                     destructive: --reason + --yes), which
                                     enqueues the retention.execute job
   maintenance recompute             recompute derived signals (not yet implemented)
+  maintenance backup                alias of 'diagnose backup'
   export create                     schedule an asynchronous CSV/JSON export
         --format csv|json            (exports.create); the frozen ch. 10.4
         [filter flags]               filter flags freeze the context
@@ -316,6 +317,16 @@ commands:
                                     (sources, never secret values)
   diagnose connectivity             probe TCP reachability of the database host
   diagnose health                   report process and database connectivity
+  diagnose backup                   run the encrypted (age) off-host logical
+                                    pg_dump -Fc backup once (backup.dir,
+                                    backup.encryption_key_ref,
+                                    backup.retain_days)
+  diagnose restore-test             decrypt the newest backup, restore it into
+        [--backup <file>]           a throwaway empty database, run the
+        [--target-database <dsn>]    checksum-guarded migrations, assert
+        [--keep] [--reason <t>]      schema/counts/hashes/open-signals/audit-
+        [--as <subject>]             chain and record the backup.restored
+                                    audit event (AT-015)
   demo seed                         register the synthetic source, seed the
                                     demo inventory, run the source once and
                                     write the deterministic P1-P4 I4 fixture
