@@ -40,6 +40,27 @@ Migration `00013` creates two NOLOGIN **group** roles:
 - **`risksignal_migrator`** — owns schema changes (`USAGE`/`CREATE` on `public`,
   `ALL` on existing tables/sequences).
 
+Migration `00014` grants `risksignal_app` least-privilege access to the tables
+that already existed when `00013` ran (the default-privilege rule only covers
+objects created afterwards). The per-table matrix, traced from
+`db/queries/*.sql`, is:
+
+| Privileges | Tables |
+|---|---|
+| `SELECT`, `INSERT`, `UPDATE`, `DELETE` | `comments`, `notifications`, `risk_signals`, `sla_clocks` |
+| `SELECT`, `INSERT`, `DELETE` | `matches`, `user_roles` |
+| `SELECT`, `INSERT`, `UPDATE` | `alias_rules`, `assets`, `components`, `decision_rules`, `exports`, `inventory_imports`, `legal_holds`, `outbox`, `quarantine`, `retention_runs`, `source_runs`, `sources`, `users`, `vulnerabilities` |
+| `SELECT`, `INSERT`, `TRUNCATE` | `epss_current` (the atomic `TRUNCATE` + `COPY` swap) |
+| `SELECT`, `INSERT` | `evidences`, `raw_records`, `priority_rules`, `epss_history` |
+| `SELECT`, `INSERT` (unchanged) | `audit_events` |
+| *(none)* | `schema_migration_log` (migration bookkeeping only) |
+
+`risksignal_app` is never granted DDL, schema `CREATE`/`USAGE`, `REFERENCES` or
+`TRIGGER`; it reaches `public` through `PUBLIC`'s default `USAGE`. There are no
+sequences (every primary key is a uuid via `gen_random_uuid()`). A login granted
+only `risksignal_app` can therefore boot the server and worker against a fresh
+schema while the audit trail stays append-only.
+
 Neither role carries a password (credentials are runtime-injected, ch. 3.3).
 The operator creates a login and grants the group to it:
 
