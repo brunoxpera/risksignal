@@ -139,6 +139,20 @@ func normaliseJSONNumbers(v any) any {
 	}
 }
 
+// PostgreSQL numeric format limits (verified against the live PostgreSQL 16):
+// jsonb's numeric type holds at most 131072 digits before the decimal point
+// (1e131071 is accepted, 1e131072 overflows) and 16383 digits after it
+// (1e-16383 is accepted, 1e-16384 overflows). numeric_in rejects anything
+// larger with "value overflows numeric format", so such a value never
+// persists and the chain never hashes it; these bounds exist only to keep the
+// exponent expansion below from allocating a multi-gigabyte string.
+const (
+	// maxNumericIntegerDigits bounds the digits before the decimal point.
+	maxNumericIntegerDigits = 131072
+	// maxNumericScale bounds the digits after the decimal point.
+	maxNumericScale = 16383
+)
+
 // normaliseJSONNumber renders a JSON number in the canonical decimal form
 // PostgreSQL's jsonb (the numeric type) stores and prints: no exponent, no
 // leading zeros, no sign on zero, and the input's scale preserved (a trailing
@@ -147,6 +161,12 @@ func normaliseJSONNumbers(v any) any {
 // the exponent, clamped at zero — and numeric_out's plain-decimal rendering,
 // so a value that round-trips through a jsonb column hashes identically before
 // and after the round trip.
+//
+// A number whose canonical form would exceed PostgreSQL numeric's limits is
+// returned unchanged. Such a value is rejected by jsonb at insert, so it never
+// persists and the stamp- and verify-time byte strings are never compared for
+// it; the early return only stops the expansion of an extreme exponent (e.g.
+// 1e999999999) from materialising a giant string first.
 func normaliseJSONNumber(n json.Number) json.Number {
 	s := n.String()
 	neg := false
@@ -167,6 +187,16 @@ func normaliseJSONNumber(n json.Number) json.Number {
 	}
 	digits := intPart + fracPart
 	scale := len(fracPart) - exp
+	// Bound the expansion to PostgreSQL numeric's limits before either
+	// strings.Repeat below can allocate. scale > maxNumericScale is a negative
+	// exponent past the scale limit (1e-16384); a negative scale whose trimmed
+	// integer part exceeds maxNumericIntegerDigits is a positive exponent past
+	// the weight limit (1e131072). Leading zeros do not count toward the weight
+	// (numeric trims them), so the integer digits are measured after TrimLeft.
+	if scale > maxNumericScale ||
+		(scale < 0 && len(strings.TrimLeft(digits, "0"))-scale > maxNumericIntegerDigits) {
+		return n
+	}
 	if scale < 0 {
 		digits += strings.Repeat("0", -scale)
 		scale = 0

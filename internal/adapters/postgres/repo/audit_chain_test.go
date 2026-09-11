@@ -93,3 +93,69 @@ func TestCanonicalJSONStable(t *testing.T) {
 		}
 	}
 }
+
+// TestNormaliseJSONNumberExponentBound pins the guard around the exponent
+// expansion (DEV-127). PostgreSQL numeric accepts at most 131072 digits before
+// the decimal point and 16383 after; anything larger is rejected by jsonb at
+// insert ("value overflows numeric format"), so it never persists and the
+// chain never hashes it. The expansion must therefore stay bounded for such
+// input — expanding 1e999999999 would otherwise allocate roughly a gigabyte —
+// while the accepted boundaries must still render exactly as jsonb prints them.
+func TestNormaliseJSONNumberExponentBound(t *testing.T) {
+	// Out-of-range values: rejected by jsonb at insert, so normalisation
+	// returns the raw lexeme unchanged and never allocates. The bound is the
+	// absence of a multi-gigabyte string; a short lexeme is the proof.
+	outOfRange := []string{
+		"1e999999999",  // positive exponent ~1 GB if expanded
+		"1e-999999999", // negative exponent, megabyte-scale scale
+		"1e131072",     // one digit past the integer limit (131072 accepted)
+		"1e-131072",    // integer-scale negative exponent
+		"1e-16384",     // one digit past the scale limit (16383 accepted)
+	}
+	for _, in := range outOfRange {
+		t.Run("bounded "+in, func(t *testing.T) {
+			got := normaliseJSONNumber(json.Number(in)).String()
+			if got != in {
+				t.Fatalf("normaliseJSONNumber(%s) = %s, want the raw lexeme unchanged", in, got)
+			}
+			if len(got) > 64 {
+				t.Fatalf("normaliseJSONNumber(%s) returned %d bytes, want a bounded result", in, len(got))
+			}
+		})
+	}
+
+	// Accepted boundaries: one step inside PostgreSQL numeric's limits, these
+	// must still expand to the exact plain-decimal form jsonb stores.
+	if got, want := normaliseJSONNumber(json.Number("1e-16383")).String(), "0."+strings.Repeat("0", 16382)+"1"; got != want {
+		t.Fatalf("normaliseJSONNumber(1e-16383) = %s, want %s", got, want)
+	}
+	if got, want := normaliseJSONNumber(json.Number("1e131071")).String(), "1"+strings.Repeat("0", 131071); got != want {
+		t.Fatalf("normaliseJSONNumber(1e131071) = %s, want %s", got, want)
+	}
+
+	// The guard must not fire for leading zeros that numeric trims: 0.1e131072
+	// is the in-range value 1e131071 and must expand (PostgreSQL accepts it).
+	if got, want := normaliseJSONNumber(json.Number("0.1e131072")).String(), "1"+strings.Repeat("0", 131071); got != want {
+		t.Fatalf("normaliseJSONNumber(0.1e131072) = %s, want %s", got, want)
+	}
+}
+
+// TestCanonicalJSONExponentBound drives the guard through the public entry
+// point: an out-of-range exponent inside a jsonb snapshot must yield a bounded
+// canonical form (not a gigabyte of zeros) and stay valid JSON.
+func TestCanonicalJSONExponentBound(t *testing.T) {
+	for _, in := range []string{
+		`{"n":1e999999999}`,
+		`{"n":1e-999999999}`,
+		`{"n":1e131072}`,
+		`{"n":1e-16384}`,
+	} {
+		out := canonicalJSON([]byte(in))
+		if len(out) > 64 {
+			t.Fatalf("canonicalJSON(%s) produced %d bytes, want a bounded result", in, len(out))
+		}
+		if !json.Valid(out) {
+			t.Fatalf("canonicalJSON(%s) = %s, not valid JSON", in, out)
+		}
+	}
+}
