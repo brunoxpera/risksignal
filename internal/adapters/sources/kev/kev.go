@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brunoxpera/risksignal/internal/adapters/sources/fetchguard"
 	"github.com/brunoxpera/risksignal/internal/application"
 )
 
@@ -50,12 +51,16 @@ type Adapter struct {
 }
 
 // New returns the KEV adapter. rt is the injectable RoundTripper of the
-// fetch client; nil selects the standard transport. The adapter is
-// endpoint-less on purpose — the catalog URL arrives per fetch through the
-// resolved source descriptor (FetchInput.Source.Endpoint) — so one adapter
-// instance serves every configured KEV source row.
+// fetch client; nil selects the standard transport. The client is built
+// through fetchguard.Client, so the SSRF allowlist (scheme + resolve/IP check
+// + ≤5 re-checked redirects, ARCH-007 §7 control 1) always applies: pass a
+// *fetchguard.Transport (created with sources.allow_private) to relax it for
+// the local mock sources. The adapter is endpoint-less on purpose — the
+// catalog URL arrives per fetch through the resolved source descriptor
+// (FetchInput.Source.Endpoint) — so one adapter instance serves every
+// configured KEV source row.
 func New(rt http.RoundTripper) *Adapter {
-	return &Adapter{hc: &http.Client{Transport: rt}}
+	return &Adapter{hc: fetchguard.Client(rt)}
 }
 
 // Type identifies the adapter (ARCH-002 §1).

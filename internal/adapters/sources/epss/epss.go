@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brunoxpera/risksignal/internal/adapters/sources/fetchguard"
 	"github.com/brunoxpera/risksignal/internal/application"
 	"github.com/brunoxpera/risksignal/internal/platform/clock"
 )
@@ -55,16 +56,20 @@ type Adapter struct {
 }
 
 // New returns the EPSS adapter. rt is the injectable RoundTripper of the
-// fetch client; nil selects the standard transport. clk is the injectable
-// clock the daily file date derives from; nil selects the real clock. The
-// adapter is endpoint-less on purpose — the base URL arrives per fetch
-// through the resolved source descriptor (FetchInput.Source.Endpoint) — so
-// one adapter instance serves every configured EPSS source row.
+// fetch client; nil selects the standard transport. The client is built
+// through fetchguard.Client, so the SSRF allowlist (scheme + resolve/IP check
+// + ≤5 re-checked redirects, ARCH-007 §7 control 1) always applies: pass a
+// *fetchguard.Transport (created with sources.allow_private) to relax it for
+// the local mock sources. clk is the injectable clock the daily file date
+// derives from; nil selects the real clock. The adapter is endpoint-less on
+// purpose — the base URL arrives per fetch through the resolved source
+// descriptor (FetchInput.Source.Endpoint) — so one adapter instance serves
+// every configured EPSS source row.
 func New(rt http.RoundTripper, clk clock.Clock) *Adapter {
 	if clk == nil {
 		clk = clock.RealClock{}
 	}
-	return &Adapter{hc: &http.Client{Transport: rt}, clock: clk}
+	return &Adapter{hc: fetchguard.Client(rt), clock: clk}
 }
 
 // Type identifies the adapter (ARCH-002 §1).

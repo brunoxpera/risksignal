@@ -36,6 +36,7 @@ import (
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
 	"github.com/brunoxpera/risksignal/internal/adapters/sources/epss"
+	"github.com/brunoxpera/risksignal/internal/adapters/sources/fetchguard"
 	"github.com/brunoxpera/risksignal/internal/adapters/sources/kev"
 	"github.com/brunoxpera/risksignal/internal/adapters/sources/nvd"
 	"github.com/brunoxpera/risksignal/internal/adapters/worker"
@@ -235,10 +236,16 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 			return postgres.WithTx(ctx, pool, fn)
 		},
 	})
+	// The source adapters share one SSRF-guarded transport (ARCH-007 §7
+	// control 1, WP-6.10 / DEV-123): the scheme allowlist, the resolve + IP
+	// check and the ≤5 re-checked redirects apply to every fetch. The guard
+	// is relaxed for the local environment's mock sources only
+	// (sources.allow_private; demo/production refuse it — config.Validate).
+	guard := fetchguard.New(cfg.Sources.AllowPrivate)
 	adapters := map[application.SourceType]application.SourcePort{
-		application.SourceTypeNVD:  nvd.New(nil),
-		application.SourceTypeKEV:  kev.New(nil),
-		application.SourceTypeEPSS: epss.New(nil, clock.RealClock{}),
+		application.SourceTypeNVD:  nvd.New(guard),
+		application.SourceTypeKEV:  kev.New(guard),
+		application.SourceTypeEPSS: epss.New(guard, clock.RealClock{}),
 	}
 	// The run-loop metrics registry (DEV-043, ch. 16.2): the source job
 	// handlers record every completed fetch/normalize pass on it — the
