@@ -735,3 +735,108 @@ func errsContain(errs []error, key string) bool {
 	}
 	return false
 }
+
+// TestRetentionDefaults pins the built-in retention vocabulary (ARCH-007 §10):
+// a five-year period, pseudonymisation defaulting to the retention period
+// (0 = inherit), the §14.1 batch size and the monthly cadence.
+func TestRetentionDefaults(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Retention.ClosedSignalYears != 5 {
+		t.Errorf("Retention.ClosedSignalYears = %d, want 5", cfg.Retention.ClosedSignalYears)
+	}
+	if cfg.Retention.PseudonymiseYears != 0 {
+		t.Errorf("Retention.PseudonymiseYears = %d, want 0 (= closed_signal_years)", cfg.Retention.PseudonymiseYears)
+	}
+	if cfg.Retention.BatchSize != 500 {
+		t.Errorf("Retention.BatchSize = %d, want 500", cfg.Retention.BatchSize)
+	}
+	if cfg.Retention.Schedule != 30*24*time.Hour {
+		t.Errorf("Retention.Schedule = %s, want 720h", cfg.Retention.Schedule)
+	}
+}
+
+// TestLoadRetentionFromEnv resolves every retention key from RISKSIGNAL_*
+// environment variables.
+func TestLoadRetentionFromEnv(t *testing.T) {
+	env := validEnv()
+	env["retention.closed_signal_years"] = "7"
+	env["retention.pseudonymise_years"] = "3"
+	env["retention.batch_size"] = "250"
+	env["retention.schedule"] = "1h"
+	cfg := mustLoad(t, "", env)
+	if cfg.Retention.ClosedSignalYears != 7 || cfg.Retention.PseudonymiseYears != 3 || cfg.Retention.BatchSize != 250 || cfg.Retention.Schedule != time.Hour {
+		t.Fatalf("retention = %+v, want 7/3/250/1h", cfg.Retention)
+	}
+	line := summaryLine(cfg.Summary(), "retention.schedule")
+	if !strings.Contains(line, "1h0m0s (source=env)") {
+		t.Errorf("Summary() retention.schedule line %q does not render the env value with its source", line)
+	}
+}
+
+// TestLoadRetentionFromFile resolves the retention keys from the config file.
+func TestLoadRetentionFromFile(t *testing.T) {
+	file := writeConfigFile(t, `{
+		"database": {"url": "postgres://file@127.0.0.1/db"},
+		"oidc": {"issuer": "https://issuer.file.example/"},
+		"retention": {"closed_signal_years": 6, "batch_size": 100, "schedule": "48h"}
+	}`)
+	cfg := mustLoad(t, file, nil)
+	if cfg.Retention.ClosedSignalYears != 6 || cfg.Retention.BatchSize != 100 || cfg.Retention.Schedule != 48*time.Hour {
+		t.Fatalf("retention = %+v, want 6/100/48h", cfg.Retention)
+	}
+}
+
+// TestValidateRetentionRejectsNonPositive is the pure-validation matrix for
+// the retention keys: a non-positive period/batch/schedule and a negative
+// pseudonymisation period are invalid.
+func TestValidateRetentionRejectsNonPositive(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+		key    string
+	}{
+		{"closed_signal_years", func(c *Config) { c.Retention.ClosedSignalYears = 0 }, "retention.closed_signal_years"},
+		{"pseudonymise_years", func(c *Config) { c.Retention.PseudonymiseYears = -1 }, "retention.pseudonymise_years"},
+		{"batch_size", func(c *Config) { c.Retention.BatchSize = 0 }, "retention.batch_size"},
+		{"schedule", func(c *Config) { c.Retention.Schedule = 0 }, "retention.schedule"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Defaults()
+			cfg.Database.URL = "postgres://u@h/db"
+			cfg.OIDC.Issuer = "https://auth.local.example/"
+			tc.mutate(&cfg)
+			errs := Validate(&cfg)
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e.Error(), tc.key) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("Validate() errors %v do not reject %s", errs, tc.key)
+			}
+		})
+	}
+}
+
+// TestLoadInvalidRetentionValues rejects unparsable retention values without
+// echoing the offending value.
+func TestLoadInvalidRetentionValues(t *testing.T) {
+	t.Run("batch_size", func(t *testing.T) {
+		env := validEnv()
+		env["retention.batch_size"] = "many"
+		err := mustFailErr(t, "", env, "retention.batch_size")
+		if strings.Contains(err.Error(), "many") {
+			t.Errorf("Load() error echoes the offending value: %v", err)
+		}
+	})
+	t.Run("schedule", func(t *testing.T) {
+		env := validEnv()
+		env["retention.schedule"] = "soon"
+		err := mustFailErr(t, "", env, "retention.schedule")
+		if strings.Contains(err.Error(), "soon") {
+			t.Errorf("Load() error echoes the offending value: %v", err)
+		}
+	})
+}

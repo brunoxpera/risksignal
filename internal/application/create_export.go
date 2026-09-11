@@ -47,12 +47,18 @@ type CreateExportInput struct {
 }
 
 // CreateExportResult reports the created export: its id and initial status,
-// the frozen creation instant and the command's correlation id (which links
-// the export.generate outbox row to the command).
+// the frozen creation instant, the stored row (its frozen filter and format,
+// so the HTTP layer renders the full ExportRecord without a second read) and
+// the command's correlation id (which links the export.generate outbox row to
+// the command).
 type CreateExportResult struct {
-	ExportID      string
-	Status        ExportStatus
-	CreatedAt     time.Time
+	ExportID  string
+	Status    ExportStatus
+	CreatedAt time.Time
+	// Export is the stored row the command inserted: the frozen filter (with
+	// the object-scope owner injection applied) and the 'pending' generation
+	// stamps. The API adapter renders it as the created ExportRecord.
+	Export        Export
 	CorrelationID string
 }
 
@@ -164,6 +170,7 @@ func (s *Service) CreateExport(ctx context.Context, in CreateExportInput) (Creat
 		ExportID:      stored.ID,
 		Status:        stored.Status,
 		CreatedAt:     stored.CreatedAt,
+		Export:        stored,
 		CorrelationID: correlationID,
 	}, nil
 }

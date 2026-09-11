@@ -346,7 +346,7 @@ func TestRunOutputFlagValidation(t *testing.T) {
 }
 
 func TestRunNotImplementedCommandsExitGeneric(t *testing.T) {
-	for _, sub := range []string{"retention", "recompute"} {
+	for _, sub := range []string{"recompute"} {
 		args := []string{"maintenance", sub}
 		code, stdout, stderr := runCLI(t, cliValidEnv(), args...)
 		if code != exitGeneric {
@@ -372,7 +372,7 @@ func TestRunNotImplementedCommandsExitGeneric(t *testing.T) {
 
 	// A stub accepts no options yet — even --yes is rejected until the real
 	// implementation defines its contract.
-	code, stdout, stderr := runCLI(t, cliValidEnv(), "maintenance", "retention", "--yes")
+	code, stdout, stderr := runCLI(t, cliValidEnv(), "maintenance", "recompute", "--yes")
 	assertValidationFailure(t, code, stdout, stderr, "unexpected argument")
 }
 
@@ -531,10 +531,6 @@ const goldenDiagnoseConfigJSON = `{
       "value": "1h0m0s",
       "source": "default"
     },
-    "worker.retention_schedule": {
-      "value": "720h0m0s",
-      "source": "default"
-    },
     "worker.export_sweep_interval": {
       "value": "24h0m0s",
       "source": "default"
@@ -549,6 +545,22 @@ const goldenDiagnoseConfigJSON = `{
     },
     "export.max_rows": {
       "value": 100000,
+      "source": "default"
+    },
+    "retention.closed_signal_years": {
+      "value": 5,
+      "source": "default"
+    },
+    "retention.pseudonymise_years": {
+      "value": 0,
+      "source": "default"
+    },
+    "retention.batch_size": {
+      "value": 500,
+      "source": "default"
+    },
+    "retention.schedule": {
+      "value": "720h0m0s",
       "source": "default"
     },
     "notify.p2_active": {

@@ -532,6 +532,55 @@ func (q *Queries) ListRetentionCandidates(ctx context.Context, cutoff pgtype.Tim
 	return items, nil
 }
 
+const listRetentionRuns = `-- name: ListRetentionRuns :many
+SELECT id, policy_id, stage, cutoff, partition_key, status, dry_run, approved_by, approved_at, approval_reason, started_at, finished_at, pseudonymised_count, deleted_count, failed_count, last_error
+FROM retention_runs
+ORDER BY cutoff DESC, id
+`
+
+// ListRetentionRuns returns every stored run — the operator report read
+// behind GET /retention/runs (ARCH-007 §2.2 step 4). The rows survive the
+// deletion they report on; they are the operational record (§13.4 step 5)
+// and carry counts only. Ordered newest-cutoff first (cutoff DESC, then id)
+// so an operator sees the most recent proposal first; no run yields no rows,
+// never an error.
+func (q *Queries) ListRetentionRuns(ctx context.Context) ([]RetentionRun, error) {
+	rows, err := q.db.Query(ctx, listRetentionRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RetentionRun
+	for rows.Next() {
+		var i RetentionRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.PolicyID,
+			&i.Stage,
+			&i.Cutoff,
+			&i.PartitionKey,
+			&i.Status,
+			&i.DryRun,
+			&i.ApprovedBy,
+			&i.ApprovedAt,
+			&i.ApprovalReason,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.PseudonymisedCount,
+			&i.DeletedCount,
+			&i.FailedCount,
+			&i.LastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markRetentionRunApproved = `-- name: MarkRetentionRunApproved :one
 UPDATE retention_runs
 SET status          = 'approved',

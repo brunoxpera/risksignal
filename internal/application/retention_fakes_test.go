@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -403,6 +404,19 @@ func (f *fakeRetentionRepo) GetRun(_ context.Context, id string) (application.Re
 		return r, nil
 	}
 	return application.RetentionRun{}, application.NotFoundError("retention.get_run", fmt.Errorf("run %s not found", id))
+}
+
+func (f *fakeRetentionRepo) ListRuns(_ context.Context) ([]application.RetentionRun, error) {
+	out := make([]application.RetentionRun, len(f.db.retentionRuns))
+	copy(out, f.db.retentionRuns)
+	// Mirror the SQL order: newest cutoff first (cutoff DESC, then id).
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].Cutoff.Equal(out[j].Cutoff) {
+			return out[i].Cutoff.After(out[j].Cutoff)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
 func (f *fakeRetentionRepo) mutateRun(tx application.Tx, id string, mutate func(*application.RetentionRun) error) (application.RetentionRun, error) {

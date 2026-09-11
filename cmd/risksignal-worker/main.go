@@ -190,14 +190,18 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 		// export CRUD + streaming read + spool the export.generate job runs on,
 		// and the retention repo the retention.execute handler and the monthly
 		// dry-run scheduler drive. ExportTTL/ExportMaxRows come from the export
-		// config (export.ttl/export.max_rows); the retention period and batch
-		// size take the ARCH-007 §2.4 defaults (5 years, 500).
-		Exports:       repo.NewExportRepo(q),
-		ExportStore:   export.NewSpool(cfg.Export.Dir),
-		SignalExport:  repo.NewSignalExportSource(q),
-		ExportTTL:     cfg.Export.TTL,
-		ExportMaxRows: cfg.Export.MaxRows,
-		Retention:     repo.NewRetentionRepo(q),
+		// config (export.ttl/export.max_rows); the retention period, batch size
+		// and pseudonymisation period come from the retention config
+		// (retention.closed_signal_years/batch_size/pseudonymise_years, §10).
+		Exports:                    repo.NewExportRepo(q),
+		ExportStore:                export.NewSpool(cfg.Export.Dir),
+		SignalExport:               repo.NewSignalExportSource(q),
+		ExportTTL:                  cfg.Export.TTL,
+		ExportMaxRows:              cfg.Export.MaxRows,
+		Retention:                  repo.NewRetentionRepo(q),
+		RetentionClosedSignalYears: cfg.Retention.ClosedSignalYears,
+		RetentionBatchSize:         cfg.Retention.BatchSize,
+		RetentionPseudonymiseYears: cfg.Retention.PseudonymiseYears,
 		RunTx: func(ctx context.Context, fn func(tx application.Tx) error) error {
 			return postgres.WithTx(ctx, pool, fn)
 		},
@@ -321,7 +325,7 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	// — the daily export sweep and the monthly retention dry-run proposal. The
 	// schedulers gate their cadence on the injected clock, so a production
 	// worker sweeps once per worker.export_sweep_interval and proposes a
-	// retention dry-run once per worker.retention_schedule, while a test drives
+	// retention dry-run once per retention.schedule, while a test drives
 	// them with a FakeClock without real waiting. Registering the handlers makes
 	// the rows the CreateExport/ApproveRetentionRun commands enqueue consumable
 	// — without them those rows would dead-letter ("no handler registered").
@@ -332,7 +336,7 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 	if err := exportJobs.RegisterHandlers(relay); err != nil {
 		return fmt.Errorf("configure export jobs: %w", err)
 	}
-	retentionJobs, err := worker.NewRetentionJobs(svc, svc, clock.RealClock{}, cfg.Worker.RetentionSchedule, logger)
+	retentionJobs, err := worker.NewRetentionJobs(svc, svc, clock.RealClock{}, cfg.Retention.Schedule, logger)
 	if err != nil {
 		return fmt.Errorf("configure retention jobs: %w", err)
 	}

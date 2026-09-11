@@ -99,6 +99,28 @@ func (r *RetentionRepo) GetRun(ctx context.Context, id string) (application.Rete
 	return retentionRunFromRow(op, row)
 }
 
+// ListRuns implements application.RetentionRepo: every stored run, newest
+// cutoff first (cutoff DESC, id) — the operator report read behind
+// GET /retention/runs (ARCH-007 §2.2 step 4). The rows survive the deletion
+// they report on. No run yields an empty slice, never an error.
+func (r *RetentionRepo) ListRuns(ctx context.Context) ([]application.RetentionRun, error) {
+	const op = "retention.list_runs"
+
+	rows, err := r.q.ListRetentionRuns(ctx)
+	if err != nil {
+		return nil, mapDBError(op, err)
+	}
+	out := make([]application.RetentionRun, 0, len(rows))
+	for _, row := range rows {
+		run, err := retentionRunFromRow(op, row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	return out, nil
+}
+
 // ApproveRun implements application.RetentionRepo: the dry_run → approved
 // four-eyes approval. The `status = 'dry_run'` guard makes it set-once; a run
 // not in dry_run is a conflict Error, never a partial write.

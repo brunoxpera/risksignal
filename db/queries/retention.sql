@@ -127,6 +127,17 @@ SELECT *
 FROM retention_runs
 WHERE id = @id;
 
+-- ListRetentionRuns returns every stored run — the operator report read
+-- behind GET /retention/runs (ARCH-007 §2.2 step 4). The rows survive the
+-- deletion they report on; they are the operational record (§13.4 step 5)
+-- and carry counts only. Ordered newest-cutoff first (cutoff DESC, then id)
+-- so an operator sees the most recent proposal first; no run yields no rows,
+-- never an error.
+-- name: ListRetentionRuns :many
+SELECT *
+FROM retention_runs
+ORDER BY cutoff DESC, id;
+
 -- MarkRetentionRunApproved records the four-eyes approval (§2.2 step 2): the
 -- approving principal (the Product Owner holding settings.approve), the
 -- approval instant and the mandatory reason, flipping dry_run → approved. The

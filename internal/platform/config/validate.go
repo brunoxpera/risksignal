@@ -117,14 +117,28 @@ func Validate(c *Config) []error {
 		errs = append(errs, errors.New("worker.sla_reminder_cadence: must be a positive duration (set it via a config file or RISKSIGNAL_WORKER_SLA_REMINDER_CADENCE)"))
 	}
 
-	// worker.retention_schedule and worker.export_sweep_interval must be
-	// positive: a non-positive cadence would make the retention/sweep
-	// schedulers spin or never fire (ARCH-007 §2.4/§1.2, WP-6.06).
-	if c.Worker.RetentionSchedule <= 0 {
-		errs = append(errs, errors.New("worker.retention_schedule: must be a positive duration (set it via a config file or RISKSIGNAL_WORKER_RETENTION_SCHEDULE)"))
+	// retention.schedule and worker.export_sweep_interval must be positive: a
+	// non-positive cadence would make the retention/sweep schedulers spin or
+	// never fire (ARCH-007 §2.4/§1.2, WP-6.06/6.07).
+	if c.Retention.Schedule <= 0 {
+		errs = append(errs, errors.New("retention.schedule: must be a positive duration (set it via a config file or RISKSIGNAL_RETENTION_SCHEDULE)"))
 	}
 	if c.Worker.ExportSweepInterval <= 0 {
 		errs = append(errs, errors.New("worker.export_sweep_interval: must be a positive duration (set it via a config file or RISKSIGNAL_WORKER_EXPORT_SWEEP_INTERVAL)"))
+	}
+
+	// The retention run (ARCH-007 §2.4/§10): a positive retention period, a
+	// non-negative pseudonymisation period (0 = the retention period) and a
+	// positive batch size. A non-positive period would retain nothing or
+	// forever; a non-positive batch would loop.
+	if c.Retention.ClosedSignalYears <= 0 {
+		errs = append(errs, errors.New("retention.closed_signal_years: must be a positive integer (set it via a config file or RISKSIGNAL_RETENTION_CLOSED_SIGNAL_YEARS)"))
+	}
+	if c.Retention.PseudonymiseYears < 0 {
+		errs = append(errs, errors.New("retention.pseudonymise_years: must not be negative (0 defaults to retention.closed_signal_years)"))
+	}
+	if c.Retention.BatchSize <= 0 {
+		errs = append(errs, errors.New("retention.batch_size: must be a positive integer (set it via a config file or RISKSIGNAL_RETENTION_BATCH_SIZE)"))
 	}
 
 	// The export spool (ARCH-007 §1.2): a positive TTL, a positive max-rows

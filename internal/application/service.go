@@ -113,6 +113,12 @@ type Service struct {
 	// deterministic (NFR-015).
 	retentionYears     int
 	retentionBatchSize int
+	// retentionPseudonymiseYears is the pseudonymisation period in years
+	// (retention.pseudonymise_years): the cutoff of a pseudonymise-stage
+	// dry-run (now − this many years). It defaults to retentionYears when the
+	// configured value is <= 0 (the MVP: pseudonymisation and deletion run in
+	// the same pass, ARCH-007 §2.4).
+	retentionPseudonymiseYears int
 	// slaProfile is the injected (priority, target) → reaction-time duration
 	// profile (ARCH-004 §4.2/§4.3). The triage commands read it to decide
 	// which SLA clocks a transition fulfils or resets; it defaults to the
@@ -216,9 +222,13 @@ type ServiceDeps struct {
 	// (retention.closed_signal_years); zero/negative takes
 	// DefaultRetentionClosedSignalYears. RetentionBatchSize is the bounded
 	// batch size (retention.batch_size); zero/negative takes
-	// DefaultRetentionBatchSize.
+	// DefaultRetentionBatchSize. RetentionPseudonymiseYears is the
+	// pseudonymisation period (retention.pseudonymise_years); zero/negative
+	// takes RetentionClosedSignalYears (the MVP default — pseudonymisation and
+	// deletion share the period).
 	RetentionClosedSignalYears int
 	RetentionBatchSize         int
+	RetentionPseudonymiseYears int
 	// SlaTimeProfile is the injectable (priority, target) → reaction-time
 	// duration profile the I4 triage commands read to decide which SLA
 	// clocks a status change fulfils or resets (ARCH-004 §4.2/§4.3,
@@ -304,6 +314,12 @@ func NewService(deps ServiceDeps) *Service {
 	if retentionBatchSize <= 0 {
 		retentionBatchSize = DefaultRetentionBatchSize
 	}
+	// The pseudonymisation period defaults to the retention period when absent
+	// (ARCH-007 §2.4: the MVP runs both stages with one period).
+	retentionPseudonymiseYears := deps.RetentionPseudonymiseYears
+	if retentionPseudonymiseYears <= 0 {
+		retentionPseudonymiseYears = retentionYears
+	}
 	// The export TTL and max-rows bound are optional: absent means the
 	// built-in defaults (ARCH-007 §1.2), so a Service keeps a defined export
 	// vocabulary even without a configured value.
@@ -316,40 +332,41 @@ func NewService(deps ServiceDeps) *Service {
 		exportMaxRows = DefaultExportMaxRows
 	}
 	return &Service{
-		signals:            deps.Signals,
-		audit:              deps.Audit,
-		outbox:             deps.Outbox,
-		vulns:              deps.Vulnerabilities,
-		matches:            deps.Matches,
-		runs:               deps.SourceRuns,
-		raws:               deps.RawRecords,
-		sources:            deps.Sources,
-		quarantine:         deps.Quarantine,
-		comps:              deps.Components,
-		inventory:          deps.Inventory,
-		epssHist:           deps.EpssHistory,
-		signalTriage:       deps.SignalTriage,
-		comments:           deps.Comments,
-		slaClocks:          deps.SlaClocks,
-		priorityRules:      deps.PriorityRules,
-		factorSource:       deps.FactorSource,
-		users:              deps.Users,
-		assets:             deps.Assets,
-		inventoryReader:    deps.InventoryReader,
-		imports:            deps.InventoryImports,
-		userAdmin:          deps.UserAdmin,
-		sourceMonitor:      deps.SourceMonitor,
-		exports:            deps.Exports,
-		exportStore:        deps.ExportStore,
-		signalExport:       deps.SignalExport,
-		exportTTL:          exportTTL,
-		exportMaxRows:      exportMaxRows,
-		retention:          deps.Retention,
-		retentionYears:     retentionYears,
-		retentionBatchSize: retentionBatchSize,
-		slaProfile:         slaProfile,
-		slaReminderCadence: slaReminderCadence,
-		clock:              deps.Clock,
-		runTx:              deps.RunTx,
+		signals:                    deps.Signals,
+		audit:                      deps.Audit,
+		outbox:                     deps.Outbox,
+		vulns:                      deps.Vulnerabilities,
+		matches:                    deps.Matches,
+		runs:                       deps.SourceRuns,
+		raws:                       deps.RawRecords,
+		sources:                    deps.Sources,
+		quarantine:                 deps.Quarantine,
+		comps:                      deps.Components,
+		inventory:                  deps.Inventory,
+		epssHist:                   deps.EpssHistory,
+		signalTriage:               deps.SignalTriage,
+		comments:                   deps.Comments,
+		slaClocks:                  deps.SlaClocks,
+		priorityRules:              deps.PriorityRules,
+		factorSource:               deps.FactorSource,
+		users:                      deps.Users,
+		assets:                     deps.Assets,
+		inventoryReader:            deps.InventoryReader,
+		imports:                    deps.InventoryImports,
+		userAdmin:                  deps.UserAdmin,
+		sourceMonitor:              deps.SourceMonitor,
+		exports:                    deps.Exports,
+		exportStore:                deps.ExportStore,
+		signalExport:               deps.SignalExport,
+		exportTTL:                  exportTTL,
+		exportMaxRows:              exportMaxRows,
+		retention:                  deps.Retention,
+		retentionYears:             retentionYears,
+		retentionBatchSize:         retentionBatchSize,
+		retentionPseudonymiseYears: retentionPseudonymiseYears,
+		slaProfile:                 slaProfile,
+		slaReminderCadence:         slaReminderCadence,
+		clock:                      deps.Clock,
+		runTx:                      deps.RunTx,
 	}
 }

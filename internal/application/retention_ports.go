@@ -274,6 +274,12 @@ type RetentionRepo interface {
 	// use cases. A missing id is a not-found Error.
 	GetRun(ctx context.Context, id string) (RetentionRun, error)
 
+	// ListRuns returns every stored retention run — the operator report read
+	// behind GET /retention/runs (ARCH-007 §2.2 step 4). Ordered newest-cutoff
+	// first (cutoff DESC, then id) so an operator sees the most recent
+	// proposal first; no run yields an empty slice, never an error.
+	ListRuns(ctx context.Context) ([]RetentionRun, error)
+
 	// ApproveRun records the four-eyes approval (dry_run → approved) with the
 	// approving principal, the approval instant and the mandatory reason. The
 	// dry_run guard makes the approval set-once; a run not in dry_run is a

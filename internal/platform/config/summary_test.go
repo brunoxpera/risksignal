@@ -93,11 +93,14 @@ func TestJSONSummaryIsDeterministic(t *testing.T) {
 		`"worker.interval":{"value":"30s","source":"default"},` +
 		`"worker.sla_evaluate_interval":{"value":"1m0s","source":"default"},` +
 		`"worker.sla_reminder_cadence":{"value":"1h0m0s","source":"default"},` +
-		`"worker.retention_schedule":{"value":"720h0m0s","source":"default"},` +
 		`"worker.export_sweep_interval":{"value":"24h0m0s","source":"default"},` +
 		`"export.dir":{"value":"var/exports","source":"default"},` +
 		`"export.ttl":{"value":"168h0m0s","source":"default"},` +
 		`"export.max_rows":{"value":100000,"source":"default"},` +
+		`"retention.closed_signal_years":{"value":5,"source":"default"},` +
+		`"retention.pseudonymise_years":{"value":0,"source":"default"},` +
+		`"retention.batch_size":{"value":500,"source":"default"},` +
+		`"retention.schedule":{"value":"720h0m0s","source":"default"},` +
 		`"notify.p2_active":{"value":true,"source":"default"},` +
 		`"notify.smtp.enabled":{"value":false,"source":"default"},` +
 		`"notify.smtp.addr":{"set":true,"source":"default"},` +

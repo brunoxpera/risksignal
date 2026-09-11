@@ -551,3 +551,69 @@ func TestLegalHoldLifecycleAndGate(t *testing.T) {
 		t.Fatalf("active holds after release = %+v, want none", holds)
 	}
 }
+
+// TestListRetentionRunsReportsTheReport: the operator read returns every
+// stored run, newest cutoff first, and writes nothing (no audit row).
+func TestListRetentionRunsReportsTheReport(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.users.add("admin", "Admin", domain.RoleAdministrator)
+
+	later := application.RetentionRun{
+		ID: "run-later", PolicyID: application.RetentionPolicyClosedSignals, Stage: application.RetentionStageDelete,
+		Cutoff: fixedNow.AddDate(-5, 0, 0), PartitionKey: "later", Status: application.RetentionStatusCompleted,
+	}
+	earlier := application.RetentionRun{
+		ID: "run-earlier", PolicyID: application.RetentionPolicyClosedSignals, Stage: application.RetentionStageDelete,
+		Cutoff: fixedNow.AddDate(-6, 0, 0), PartitionKey: "earlier", Status: application.RetentionStatusDryRun,
+	}
+	h.db.retentionRuns = append(h.db.retentionRuns, earlier, later)
+
+	runs, err := h.svc.ListRetentionRuns(ctx, application.ListRetentionRunsInput{Actor: userActor("admin")})
+	if err != nil {
+		t.Fatalf("ListRetentionRuns: %v", err)
+	}
+	if len(runs) != 2 || runs[0].ID != "run-later" || runs[1].ID != "run-earlier" {
+		t.Fatalf("runs = %+v, want the later cutoff first (run-later, run-earlier)", runs)
+	}
+	if len(h.db.auditEvents) != 0 {
+		t.Fatalf("list wrote %d audit rows, want 0", len(h.db.auditEvents))
+	}
+}
+
+// TestListRetentionRunsDenied: a principal without retention.manage is denied
+// before any read.
+func TestListRetentionRunsDenied(t *testing.T) {
+	h := newHarness(t)
+	h.users.add("analyst", "Analyst", domain.RoleSecurityAnalyst)
+	if _, err := h.svc.ListRetentionRuns(context.Background(), application.ListRetentionRunsInput{Actor: userActor("analyst")}); err == nil {
+		t.Fatal("ListRetentionRuns with an analyst actor succeeded, want forbidden")
+	} else if kind, _ := application.ErrorKindOf(err); kind != application.KindForbidden {
+		t.Fatalf("error kind = %s, want forbidden", kind)
+	}
+}
+
+// TestGetRetentionRunHappyAndNotFound: the single-run read returns the stored
+// report and maps an unknown id to not-found.
+func TestGetRetentionRunHappyAndNotFound(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.users.add("admin", "Admin", domain.RoleAdministrator)
+	h.db.retentionRuns = append(h.db.retentionRuns, application.RetentionRun{
+		ID: "run-1", PolicyID: application.RetentionPolicyClosedSignals, Stage: application.RetentionStageDelete,
+		Cutoff: fixedNow.AddDate(-5, 0, 0), PartitionKey: "2021-09", Status: application.RetentionStatusDryRun,
+	})
+
+	got, err := h.svc.GetRetentionRun(ctx, application.GetRetentionRunInput{RunID: "run-1", Actor: userActor("admin")})
+	if err != nil {
+		t.Fatalf("GetRetentionRun: %v", err)
+	}
+	if got.ID != "run-1" || got.Status != application.RetentionStatusDryRun {
+		t.Fatalf("run = %+v, want run-1 dry_run", got)
+	}
+	if _, err := h.svc.GetRetentionRun(ctx, application.GetRetentionRunInput{RunID: "missing", Actor: userActor("admin")}); err == nil {
+		t.Fatal("GetRetentionRun of an unknown id succeeded, want not-found")
+	} else if kind, _ := application.ErrorKindOf(err); kind != application.KindNotFound {
+		t.Fatalf("error kind = %s, want not_found", kind)
+	}
+}

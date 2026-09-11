@@ -38,13 +38,13 @@ func workerTestConfig(interval time.Duration) *config.Config {
 			Interval:            interval,
 			SLAEvaluateInterval: time.Minute,
 			SLAReminderCadence:  time.Hour,
-			// The I6 cadences (WP-6.06): required positive values; the export
-			// sweep/retention scheduler never reach the spool in this test (the
-			// database URL is unreachable, so the cycle fails before them).
-			RetentionSchedule:   30 * 24 * time.Hour,
+			// The I6 export sweep cadence (WP-6.06): a required positive value;
+			// the sweep scheduler never reaches the spool in this test (the
+			// database URL is unreachable, so the cycle fails before it).
 			ExportSweepInterval: 24 * time.Hour,
 		},
-		Export: config.Export{Dir: "var/exports", TTL: 7 * 24 * time.Hour, MaxRows: 100000},
+		Export:    config.Export{Dir: "var/exports", TTL: 7 * 24 * time.Hour, MaxRows: 100000},
+		Retention: config.Retention{ClosedSignalYears: 5, BatchSize: 500, Schedule: 30 * 24 * time.Hour},
 	}
 }
 

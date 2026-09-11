@@ -22,6 +22,12 @@ import (
 // download (ARCH-007 §1.1/§10.4: "download … time-limited; audited").
 const EventTypeExportDownloaded = "export.downloaded"
 
+// ErrExportExpired marks a download whose artifact TTL elapsed (checked against
+// the injected clock, NFR-015). It is wrapped in a conflict-class Error so the
+// HTTP layer can answer the declared 410 (Gone) distinctly from the 409 of an
+// export that is not completed yet.
+var ErrExportExpired = errors.New("export artifact has expired")
+
 // DownloadExportInput is the DownloadExport act with the authenticated
 // principal. CorrelationID links the download's audit row to the request;
 // empty generates one.
@@ -85,7 +91,7 @@ func (s *Service) DownloadExport(ctx context.Context, in DownloadExportInput) (D
 	now := s.clock.Now()
 	if !row.ExpiresAt.IsZero() && !now.Before(row.ExpiresAt) {
 		return DownloadExportResult{}, ConflictError(op, fmt.Errorf(
-			"export %s expired at %s", row.ID, row.ExpiresAt.UTC().Format(time.RFC3339)))
+			"export %s expired at %s: %w", row.ID, row.ExpiresAt.UTC().Format(time.RFC3339), ErrExportExpired))
 	}
 	if s.exportStore == nil {
 		return DownloadExportResult{}, InfraError(op, errors.New("export artifact store is not wired"))

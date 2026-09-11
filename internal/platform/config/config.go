@@ -45,6 +45,13 @@ const envVarPrefix = "RISKSIGNAL_"
 // monthly retention dry-run cadence, the daily export-sweep cadence and the
 // server-local export spool root.
 const (
+	// defaultRetentionClosedSignalYears is the default retention period in
+	// years (retention.closed_signal_years): a signal is due for retention when
+	// closed_at <= now − this many years (ARCH-007 §2.4).
+	defaultRetentionClosedSignalYears = 5
+	// defaultRetentionBatchSize is the default bounded retention batch size
+	// (retention.batch_size, the §14.1 recompute Richtwert).
+	defaultRetentionBatchSize = 500
 	// defaultRetentionSchedule is the monthly retention dry-run cadence
 	// (retention.schedule).
 	defaultRetentionSchedule = 30 * 24 * time.Hour
@@ -74,15 +81,16 @@ const (
 // (oidc.issuer, oidc.client_secret_ref, oidc.redirect_url) are never rendered
 // with their content — neither in validation errors nor in Summary.
 type Config struct {
-	SchemaVersion int      `json:"schema_version"`
-	Env           string   `json:"env"` // local | demo | production
-	HTTP          HTTP     `json:"http"`
-	Database      Database `json:"database"`
-	OIDC          OIDC     `json:"oidc"`
-	Auth          Auth     `json:"auth"`
-	Worker        Worker   `json:"worker"`
-	Notify        Notify   `json:"notify"`
-	Export        Export   `json:"export"`
+	SchemaVersion int       `json:"schema_version"`
+	Env           string    `json:"env"` // local | demo | production
+	HTTP          HTTP      `json:"http"`
+	Database      Database  `json:"database"`
+	OIDC          OIDC      `json:"oidc"`
+	Auth          Auth      `json:"auth"`
+	Worker        Worker    `json:"worker"`
+	Notify        Notify    `json:"notify"`
+	Export        Export    `json:"export"`
+	Retention     Retention `json:"retention"`
 
 	// sources records the provenance of every leaf key; populated by Load.
 	sources map[string]Source
@@ -162,12 +170,6 @@ type Worker struct {
 	// once per cadence window. It is configuration, never table state.
 	SLAReminderCadence time.Duration `json:"sla_reminder_cadence"`
 
-	// RetentionSchedule is the cadence of the monthly retention dry-run
-	// proposal (ARCH-007 §2.4, retention.schedule; WP-6.06 / DEV-118): the
-	// worker proposes one dry-run run per cadence on the injected clock. It is
-	// configuration, never table state. The default is monthly (30 days).
-	RetentionSchedule time.Duration `json:"retention_schedule"`
-
 	// ExportSweepInterval is the cadence of the daily export expiry sweep
 	// (ARCH-007 §1.2; WP-6.06 / DEV-118): the worker deletes the expired
 	// artifacts and marks their rows 'expired' once per cadence on the
@@ -190,6 +192,31 @@ type Export struct {
 	// of §12.3): a filter matching more rows is a validation error, never a
 	// silent truncation. The default is 100000.
 	MaxRows int `json:"max_rows"`
+}
+
+// Retention carries the I6 retention configuration (ARCH-007 §2.4/§10,
+// WP-6.07 / DEV-119). It is the config-not-table-state vocabulary of the
+// governed retention run: the five-year period, the pseudonymisation period,
+// the bounded batch size and the monthly dry-run cadence.
+type Retention struct {
+	// ClosedSignalYears is the retention period in years
+	// (retention.closed_signal_years): a closed signal is due when
+	// closed_at <= now − this many years. The default is 5.
+	ClosedSignalYears int `json:"closed_signal_years"`
+	// PseudonymiseYears is the pseudonymisation period in years
+	// (retention.pseudonymise_years): the standalone/run pseudonymisation
+	// cutoff. Zero means "same as closed_signal_years" (the MVP default —
+	// pseudonymisation and deletion run in the same pass; configurable shorter
+	// per TD-08).
+	PseudonymiseYears int `json:"pseudonymise_years"`
+	// BatchSize is the bounded retention batch size (retention.batch_size, the
+	// §14.1 recompute Richtwert). The default is 500.
+	BatchSize int `json:"batch_size"`
+	// Schedule is the cadence of the monthly retention dry-run proposal
+	// (retention.schedule): the worker proposes one dry-run run per cadence on
+	// the injected clock. It is configuration, never table state. The default
+	// is monthly (30 days).
+	Schedule time.Duration `json:"schedule"`
 }
 
 // Notify carries the I4 notification-channel configuration (ARCH-004 §6.1,
@@ -267,7 +294,6 @@ func Defaults() Config {
 			SLAReminderCadence:  time.Hour,
 			// The retention dry-run is proposed monthly and the export sweep
 			// runs daily without configuration (ARCH-007 §2.4/§1.2).
-			RetentionSchedule:   defaultRetentionSchedule,
 			ExportSweepInterval: defaultExportSweepInterval,
 		},
 		Notify: Notify{
@@ -286,6 +312,18 @@ func Defaults() Config {
 			Dir:     defaultExportDir,
 			TTL:     7 * 24 * time.Hour,
 			MaxRows: 100000,
+		},
+		Retention: Retention{
+			// The governed retention run defaults to a five-year period, the
+			// §14.1 bounded batch size and a monthly dry-run cadence
+			// (ARCH-007 §2.4: retention.closed_signal_years/batch_size/schedule).
+			// pseudonymise_years defaults to 0 = the same period as
+			// closed_signal_years (pseudonymisation and deletion run in the
+			// same pass for the MVP).
+			ClosedSignalYears: defaultRetentionClosedSignalYears,
+			PseudonymiseYears: 0,
+			BatchSize:         defaultRetentionBatchSize,
+			Schedule:          defaultRetentionSchedule,
 		},
 	}
 }
@@ -371,12 +409,36 @@ var envBindings = []struct {
 		c.Worker.SLAReminderCadence = d
 		return nil
 	}},
-	{"worker.retention_schedule", func(c *Config, v string) error {
+	{"retention.closed_signal_years", func(c *Config, v string) error {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("retention.closed_signal_years: %s: must be an integer", envName("retention.closed_signal_years"))
+		}
+		c.Retention.ClosedSignalYears = n
+		return nil
+	}},
+	{"retention.pseudonymise_years", func(c *Config, v string) error {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("retention.pseudonymise_years: %s: must be an integer", envName("retention.pseudonymise_years"))
+		}
+		c.Retention.PseudonymiseYears = n
+		return nil
+	}},
+	{"retention.batch_size", func(c *Config, v string) error {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("retention.batch_size: %s: must be an integer", envName("retention.batch_size"))
+		}
+		c.Retention.BatchSize = n
+		return nil
+	}},
+	{"retention.schedule", func(c *Config, v string) error {
 		d, err := time.ParseDuration(strings.TrimSpace(v))
 		if err != nil {
-			return fmt.Errorf("worker.retention_schedule: %s: must be a Go duration such as 720h", envName("worker.retention_schedule"))
+			return fmt.Errorf("retention.schedule: %s: must be a Go duration such as 720h", envName("retention.schedule"))
 		}
-		c.Worker.RetentionSchedule = d
+		c.Retention.Schedule = d
 		return nil
 	}},
 	{"worker.export_sweep_interval", func(c *Config, v string) error {
@@ -526,15 +588,16 @@ func applyEnv(cfg *Config, prov map[string]Source) error {
 // configFile mirrors Config with pointers so that loaders can tell a present
 // JSON key apart from an absent one, and can apply strict unknown-key checks.
 type configFile struct {
-	SchemaVersion *int          `json:"schema_version"`
-	Env           *string       `json:"env"`
-	HTTP          *fileHTTP     `json:"http"`
-	Database      *fileDatabase `json:"database"`
-	OIDC          *fileOIDC     `json:"oidc"`
-	Auth          *fileAuth     `json:"auth"`
-	Worker        *fileWorker   `json:"worker"`
-	Notify        *fileNotify   `json:"notify"`
-	Export        *fileExport   `json:"export"`
+	SchemaVersion *int           `json:"schema_version"`
+	Env           *string        `json:"env"`
+	HTTP          *fileHTTP      `json:"http"`
+	Database      *fileDatabase  `json:"database"`
+	OIDC          *fileOIDC      `json:"oidc"`
+	Auth          *fileAuth      `json:"auth"`
+	Worker        *fileWorker    `json:"worker"`
+	Notify        *fileNotify    `json:"notify"`
+	Export        *fileExport    `json:"export"`
+	Retention     *fileRetention `json:"retention"`
 }
 
 type fileHTTP struct {
@@ -567,7 +630,6 @@ type fileWorker struct {
 	Interval            *string `json:"interval"`              // Go duration, e.g. "30s"
 	SLAEvaluateInterval *string `json:"sla_evaluate_interval"` // Go duration, e.g. "1m"
 	SLAReminderCadence  *string `json:"sla_reminder_cadence"`  // Go duration, e.g. "1h"
-	RetentionSchedule   *string `json:"retention_schedule"`    // Go duration, e.g. "720h" (monthly)
 	ExportSweepInterval *string `json:"export_sweep_interval"` // Go duration, e.g. "24h"
 }
 
@@ -575,6 +637,13 @@ type fileExport struct {
 	Dir     *string `json:"dir"`
 	TTL     *string `json:"ttl"` // Go duration, e.g. "168h"
 	MaxRows *int    `json:"max_rows"`
+}
+
+type fileRetention struct {
+	ClosedSignalYears *int    `json:"closed_signal_years"`
+	PseudonymiseYears *int    `json:"pseudonymise_years"`
+	BatchSize         *int    `json:"batch_size"`
+	Schedule          *string `json:"schedule"` // Go duration, e.g. "720h" (monthly)
 }
 
 type fileNotify struct {
@@ -721,14 +790,6 @@ func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
 		cfg.Worker.SLAReminderCadence = d
 		prov["worker.sla_reminder_cadence"] = SourceFile
 	}
-	if fc.Worker != nil && fc.Worker.RetentionSchedule != nil {
-		d, err := time.ParseDuration(strings.TrimSpace(*fc.Worker.RetentionSchedule))
-		if err != nil {
-			return fmt.Errorf("config file %s: worker.retention_schedule: invalid duration (expected a Go duration such as 720h)", path)
-		}
-		cfg.Worker.RetentionSchedule = d
-		prov["worker.retention_schedule"] = SourceFile
-	}
 	if fc.Worker != nil && fc.Worker.ExportSweepInterval != nil {
 		d, err := time.ParseDuration(strings.TrimSpace(*fc.Worker.ExportSweepInterval))
 		if err != nil {
@@ -753,6 +814,28 @@ func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
 		if fc.Export.MaxRows != nil {
 			cfg.Export.MaxRows = *fc.Export.MaxRows
 			prov["export.max_rows"] = SourceFile
+		}
+	}
+	if fc.Retention != nil {
+		if fc.Retention.ClosedSignalYears != nil {
+			cfg.Retention.ClosedSignalYears = *fc.Retention.ClosedSignalYears
+			prov["retention.closed_signal_years"] = SourceFile
+		}
+		if fc.Retention.PseudonymiseYears != nil {
+			cfg.Retention.PseudonymiseYears = *fc.Retention.PseudonymiseYears
+			prov["retention.pseudonymise_years"] = SourceFile
+		}
+		if fc.Retention.BatchSize != nil {
+			cfg.Retention.BatchSize = *fc.Retention.BatchSize
+			prov["retention.batch_size"] = SourceFile
+		}
+		if fc.Retention.Schedule != nil {
+			d, err := time.ParseDuration(strings.TrimSpace(*fc.Retention.Schedule))
+			if err != nil {
+				return fmt.Errorf("config file %s: retention.schedule: invalid duration (expected a Go duration such as 720h)", path)
+			}
+			cfg.Retention.Schedule = d
+			prov["retention.schedule"] = SourceFile
 		}
 	}
 	if fc.Notify != nil {

@@ -23,10 +23,14 @@ import (
 
 // RunRetentionDryRunInput is the dry-run command. PolicyID defaults to the
 // MVP policy (closed-signals-5y); Stage defaults to the delete stage;
-// PartitionKey defaults to the cutoff's month bucket.
+// PartitionKey defaults to the cutoff's month bucket. Cutoff overrides the
+// clock-derived retention cutoff (now − retention.closed_signal_years) when
+// set — the operator's explicit proposal; nil keeps the deterministic
+// clock-derived cutoff (NFR-015).
 type RunRetentionDryRunInput struct {
 	PolicyID      string
 	Stage         RetentionStage
+	Cutoff        *time.Time
 	PartitionKey  string
 	Actor         Actor
 	CorrelationID string
@@ -34,13 +38,16 @@ type RunRetentionDryRunInput struct {
 
 // RetentionDryRunResult is the stored dry-run report plus the operator view of
 // the blocked candidates. Held carries the documented hold reasons for the
-// review; it is never stored (the row keeps counts only).
+// review; it is never stored (the row keeps counts only). Run is the stored
+// status='dry_run' row the command persisted — the wire report the HTTP layer
+// renders.
 type RetentionDryRunResult struct {
 	RunID  string
 	Status RetentionRunStatus
 	Cutoff time.Time
 	Counts RetentionCounts
 	Held   []RetentionCandidate
+	Run    RetentionRun
 }
 
 // RunRetentionDryRun scans the retention candidates and stores a counts-only
@@ -81,7 +88,21 @@ func (s *Service) RunRetentionDryRun(ctx context.Context, in RunRetentionDryRunI
 	}
 
 	now := s.clock.Now()
-	cutoff := now.AddDate(-s.retentionYears, 0, 0)
+	// The cutoff follows the run's stage: the pseudonymise stage uses
+	// retention.pseudonymise_years, the delete stage
+	// retention.closed_signal_years (the two coincide by default, ARCH-007
+	// §2.4).
+	years := s.retentionYears
+	if stage == RetentionStagePseudonymise {
+		years = s.retentionPseudonymiseYears
+	}
+	cutoff := now.AddDate(-years, 0, 0)
+	// An explicit cutoff overrides the clock-derived retention deadline (the
+	// operator's proposal, ARCH-007 §2.2); nil keeps it deterministic
+	// (NFR-015: no wall clock).
+	if in.Cutoff != nil {
+		cutoff = in.Cutoff.UTC()
+	}
 	partitionKey := in.PartitionKey
 	if partitionKey == "" {
 		partitionKey = cutoff.UTC().Format("2006-01")
@@ -124,6 +145,7 @@ func (s *Service) RunRetentionDryRun(ctx context.Context, in RunRetentionDryRunI
 		Cutoff: cutoff,
 		Counts: counts,
 		Held:   held,
+		Run:    stored,
 	}, nil
 }
 
