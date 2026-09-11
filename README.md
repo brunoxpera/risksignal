@@ -258,6 +258,20 @@ For example, run the provider as an administrator:
 
     MOCK_OIDC_ROLES="security_analyst, administrator" go run ./cmd/mock-oidc
 
+### Private demo deployment
+
+The hardened single-host demo topology (reverse proxy in front of the server,
+worker and PostgreSQL; only the proxy's HTTPS listener published) lives in
+`deploy/demo`:
+
+    cp deploy/demo/.env.example deploy/demo/.env   # then edit the placeholders
+    docker compose -f deploy/demo/compose.yaml up -d --build
+
+It runs with `env=demo` — OIDC mandatory, roles mapped from claims, no local
+authentication bypass — and wires the off-host backup sidecar (ARCH-007 §8,
+WP-6.11 / DEV-131). See `deploy/demo/README.md` for the published-port surface
+and the backup cadence.
+
 ### Lint and generate
 
     make lint      # architecture gate (go-arch-lint check) plus gofmt check plus go vet

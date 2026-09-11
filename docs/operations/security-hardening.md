@@ -171,4 +171,6 @@ Every response carries `X-Content-Type-Options: nosniff`,
 online modes (`demo`, `production`) the server additionally forces
 `Strict-Transport-Security: max-age=31536000; includeSubDomains`; `local`
 (plain HTTP over loopback) leaves it off. TLS itself terminates at the demo
-reverse proxy (§8, WP-6.11).
+reverse proxy (`deploy/demo`, §8, WP-6.11 / DEV-131): the Caddy edge forces
+HSTS and redirects clear-text HTTP to HTTPS. See
+`deploy/demo/README.md` for the published-port surface.

@@ -28,7 +28,9 @@ server, never the reverse).
 The backup is **not** part of the application process. In a deployment it runs
 from a containerised sidecar/cron — see `deploy/backup/Containerfile` and
 `scripts/backup.sh`, driven by a cron/systemd timer with the runtime
-configuration. The demo overlay that wires the sidecar is WP-6.11.
+configuration. The demo deployment wires the sidecar as the one-shot `backup`
+service (`deploy/demo/compose.yaml`, WP-6.11 / DEV-131), writing to the
+off-host `backups` volume.
 
 For local runs the `make` targets put `scripts/pg-client` first on `PATH`, so
 `pg_dump`/`pg_restore` execute inside the compose `db` service and their major
