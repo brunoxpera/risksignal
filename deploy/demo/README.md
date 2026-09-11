@@ -87,3 +87,16 @@ off-host path or NFS in a real deployment, never the database data volume). The
 `age` identity is runtime-injected: `backup.encryption_key_ref` names the
 environment variable (`RISKSIGNAL_BACKUP_AGE_IDENTITY`), presence-only, and no
 secret is committed.
+
+## Export spool
+
+Exports are user-triggered and asynchronous (ARCH-007 §1.2): the create command
+schedules the work, the worker's `export.generate` job materialises a file into
+the server-local spool and the server streams the download back. The spool
+(`export.dir`) is a named `exports` volume both the server and the worker mount
+at `/var/exports` — the `export.dir` default, which the distroless non-root
+image ships writable (uid `65532`). It is deliberately a separate volume: the
+artifacts self-expire after `export.ttl` (default `7d`) and stay out of the
+database, the audit trail and the backup retention path. It never needs an
+off-host mount; the spool is a time-limited business-content copy, not a record
+of record.

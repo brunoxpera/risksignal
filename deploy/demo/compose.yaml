@@ -18,6 +18,13 @@
 # retention DSN wiring (DEV-129) mirrors the root compose.yaml so the demo
 # worker opens the dedicated retention connection the same way.
 #
+# The export spool (DEV-136, ARCH-007 §1.2) is a named volume shared by the
+# server and the worker: the worker's export.generate job materialises the
+# artifact into it and the server streams the download back out. Both mount
+# it at /var/exports — the export.dir default, which the image ships writable
+# for the distroless non-root runtime — so the spool is never the image layer
+# (unwritable as uid 65532) and never a database bytea.
+#
 # Bring it up with:
 #
 #   cp deploy/demo/.env.example deploy/demo/.env    # then edit the placeholders
@@ -69,6 +76,12 @@ services:
       # risksignal_retention_login; the operator provisions that login's
       # password (see README.md and docs/operations/security-hardening.md).
       RISKSIGNAL_DATABASE_RETENTION_URL: "postgres://risksignal_retention_login:${DEMO_RETENTION_PASSWORD:-risksignal_retention}@db:5432/risksignal?sslmode=disable"
+      # DEV-136: the export spool (export.dir). A server-local filesystem root
+      # the worker's export.generate job writes artifacts into and the
+      # download streams back from, shared through the `exports` volume
+      # (ARCH-007 §1.2). /var/exports is the export.dir default and the path
+      # the image ships writable for the non-root runtime.
+      RISKSIGNAL_EXPORT_DIR: /var/exports
       # OIDC is mandatory in demo mode (ARCH-007 §8): roles are mapped from the
       # issuer's claims, the local bypass stays off and private source targets
       # stay refused. No bypass env is set.
@@ -83,6 +96,10 @@ services:
       RISKSIGNAL_AUTH_BYPASS_ENABLED: "false"
       RISKSIGNAL_SOURCES_ALLOW_PRIVATE: "false"
       DEMO_OIDC_CLIENT_SECRET: "${DEMO_OIDC_CLIENT_SECRET:-}"
+    volumes:
+      # DEV-136: the shared export spool (see RISKSIGNAL_EXPORT_DIR above);
+      # the server streams the artifact the worker materialised.
+      - exports:/var/exports
     networks:
       - internal
       - data
@@ -99,6 +116,10 @@ services:
       RISKSIGNAL_DATABASE_URL: "postgres://risksignal:${DEMO_DB_PASSWORD:-risksignal}@db:5432/risksignal?sslmode=disable"
       # DEV-129: the dedicated retention connection (see the server comment).
       RISKSIGNAL_DATABASE_RETENTION_URL: "postgres://risksignal_retention_login:${DEMO_RETENTION_PASSWORD:-risksignal_retention}@db:5432/risksignal?sslmode=disable"
+      # DEV-136: the export spool (export.dir); the export.generate job
+      # materialises the artifact into the shared `exports` volume the server
+      # also mounts (ARCH-007 §1.2). Same path as the server.
+      RISKSIGNAL_EXPORT_DIR: /var/exports
       RISKSIGNAL_OIDC_ISSUER: "${DEMO_OIDC_ISSUER:-https://id.demo.example/realms/risksignal}"
       RISKSIGNAL_OIDC_CLIENT_ID: "${DEMO_OIDC_CLIENT_ID:-risksignal-demo}"
       RISKSIGNAL_OIDC_CLIENT_SECRET_REF: DEMO_OIDC_CLIENT_SECRET
@@ -106,6 +127,9 @@ services:
       RISKSIGNAL_AUTH_BYPASS_ENABLED: "false"
       RISKSIGNAL_SOURCES_ALLOW_PRIVATE: "false"
       DEMO_OIDC_CLIENT_SECRET: "${DEMO_OIDC_CLIENT_SECRET:-}"
+    volumes:
+      # DEV-136: the shared export spool (see RISKSIGNAL_EXPORT_DIR above).
+      - exports:/var/exports
     networks:
       - internal
       - data
@@ -186,5 +210,9 @@ networks:
 volumes:
   pgdata:
   backups:
+  # DEV-136: the export spool, shared by the server and the worker
+  # (ARCH-007 §1.2). Mount an off-host path or NFS in a real deployment only
+  # if the artifact durability needs it; the spool self-expires (export.ttl).
+  exports:
   caddy_data:
   caddy_config:

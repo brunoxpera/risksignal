@@ -123,3 +123,52 @@ func TestDemoOverlayCarriesNoBypassEnv(t *testing.T) {
 		}
 	}
 }
+
+// TestDemoOverlayWiresSharedExportSpool is the DEV-136 overlay guard (ARCH-007
+// §1.2/§8): the private demo overlay must give the server and the worker a
+// shared export spool. The worker's export.generate job materialises an
+// artifact into it and the server streams the download back out, so both
+// services must resolve export.dir to the same mounted volume — otherwise the
+// distroless non-root runtime has no writable spool and the export fails.
+// Like the lockdown guard this is a textual guard (no YAML dependency) over
+// the committed overlay.
+func TestDemoOverlayWiresSharedExportSpool(t *testing.T) {
+	raw, err := os.ReadFile(filepath.FromSlash(overlayPath))
+	if err != nil {
+		t.Fatalf("read %s: %v", overlayPath, err)
+	}
+	body := string(raw)
+
+	// The spool is a declared named volume, not a bind into the image layer.
+	if !regexp.MustCompile(`(?m)^  exports:\s*$`).MatchString(body) {
+		t.Errorf("%s: no 'exports' volume declared under 'volumes:' — the export spool is unwired (DEV-136)", overlayPath)
+	}
+
+	const wantDir = "RISKSIGNAL_EXPORT_DIR: /var/exports"
+	mount := regexp.MustCompile(`(?m)^\s*-\s*exports:/var/exports\s*$`)
+	for _, svc := range []string{"server", "worker"} {
+		block := demoServiceBlock(body, svc)
+		if block == "" {
+			t.Fatalf("%s: service %q not found", overlayPath, svc)
+		}
+		if !strings.Contains(block, wantDir) {
+			t.Errorf("%s: service %q does not set %q (DEV-136)", overlayPath, svc, wantDir)
+		}
+		if !mount.MatchString(block) {
+			t.Errorf("%s: service %q does not mount the shared 'exports' volume at /var/exports (DEV-136)", overlayPath, svc)
+		}
+	}
+}
+
+// demoServiceBlock returns the body of one 2-space-indented service block of a
+// compose file (its lines after the "  name:" header up to the next service
+// header), or "" when the service is absent. Container keys are indented more
+// than two spaces, so a line matching `^  <lowercase>:` is the next service.
+func demoServiceBlock(body, name string) string {
+	re := regexp.MustCompile(`(?ms)^  ` + regexp.QuoteMeta(name) + `:\n(.*?)(?:\n  [a-z][a-z0-9_-]*:\n|\z)`)
+	m := re.FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}

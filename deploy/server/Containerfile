@@ -36,6 +36,13 @@ RUN CGO_ENABLED=0 go build -trimpath \
         -X github.com/brunoxpera/risksignal/internal/platform/buildinfo.BuildTime=${BUILD_TIME}" \
     -o /out/risksignal-server ./cmd/risksignal-server
 
+# The export spool root (export.dir, default var/exports). Copying it into the
+# runtime image owned by the non-root user (65532) makes export.dir writable
+# out of the box and, because Docker seeds a fresh named volume from the
+# image path, lets the demo overlay mount a writable volume over it (DEV-136,
+# ARCH-007 §1.2/§8).
+RUN mkdir -p /out/exports
+
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 # Redeclared so the OCI labels below see the values passed with --build-arg.
@@ -51,4 +58,8 @@ LABEL org.opencontainers.image.title="risksignal-server" \
 
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/risksignal-server /usr/local/bin/risksignal-server
+# The export spool root, owned by the non-root runtime user (see the build
+# stage): a named volume mounted here inherits 65532:65532 and stays writable
+# (DEV-136).
+COPY --from=build --chown=65532:65532 /out/exports /var/exports
 ENTRYPOINT ["/usr/local/bin/risksignal-server"]
