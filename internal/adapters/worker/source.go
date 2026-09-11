@@ -56,6 +56,7 @@ import (
 
 	"github.com/brunoxpera/risksignal/internal/application"
 	"github.com/brunoxpera/risksignal/internal/platform/metrics"
+	"github.com/brunoxpera/risksignal/internal/platform/tracing"
 )
 
 // Metric names of the source run-loop completion points (concept ch. 16.2,
@@ -107,6 +108,7 @@ type SourceJobs struct {
 	sources  SourceResolver
 	adapters map[application.SourceType]application.SourcePort
 	metrics  *metrics.Registry // nil: run-loop metrics recording disabled
+	tracer   *tracing.Tracer   // nil: source-fetch span recording disabled
 	logger   *slog.Logger
 }
 
@@ -138,6 +140,12 @@ func NewSourceJobs(svc SourceJobRunner, sources SourceResolver, adapters map[app
 		logger:   logger,
 	}, nil
 }
+
+// SetTracer wires the optional tracer the fetch handler opens the
+// source.fetch span on (ARCH-007 §5, WP-6.08 / DEV-120). A nil tracer
+// disables the span. It is called once at the composition root, before the
+// scheduler loop starts.
+func (j *SourceJobs) SetTracer(tracer *tracing.Tracer) { j.tracer = tracer }
 
 // RegisterHandlers binds the source.fetch and source.normalize handlers to
 // their outbox types on the relay's dispatch registry (ARCH-002 §5). A
@@ -173,6 +181,14 @@ func (j *SourceJobs) handleFetch(ctx context.Context, event ClaimedEvent) error 
 	// document advances source_records_total, a rate-limited response sets
 	// the source_rate_limited gauge (a non-rate-limited outcome clears it).
 	started := time.Now()
+	if j.tracer != nil {
+		// The source-fetch span (ARCH-007 §5): a child of the job-dispatch
+		// span when one is active, sharing its trace id.
+		var span *tracing.Span
+		ctx, span = j.tracer.Start(ctx, "source.fetch")
+		span.SetAttr("source.id", payload.SourceID)
+		defer span.End()
+	}
 	res, err := j.svc.FetchSource(ctx, application.FetchSourceInput{SourceID: payload.SourceID, Adapter: adapter})
 	labels := sourceMetricLabels(payload.SourceID, adapter.Type())
 	if err != nil {

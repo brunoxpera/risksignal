@@ -21,10 +21,15 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+
+	"github.com/brunoxpera/risksignal/internal/platform/logging"
+	"github.com/brunoxpera/risksignal/internal/platform/metrics"
+	"github.com/brunoxpera/risksignal/internal/platform/tracing"
 )
 
 // claimBatchSize bounds one drain to the ARCH-001 §2 guide of 50 rows. The
@@ -113,6 +118,13 @@ type Relay struct {
 	store    OutboxStore
 	logger   *slog.Logger
 	handlers map[string]Handler // dispatch registry, keyed by outbox.type
+
+	// Observability (ARCH-007 §5, WP-6.08 / DEV-120), both optional: the
+	// in-process metrics registry the dispatch completion points are recorded
+	// on and the tracer opening the job-dispatch span. Wired through
+	// SetObservability at the composition root; nil disables each.
+	reg    *metrics.Registry
+	tracer *tracing.Tracer
 }
 
 // NewRelay builds an outbox relay on store. A nil logger falls back to a
@@ -129,6 +141,15 @@ func NewRelay(store OutboxStore, logger *slog.Logger) (*Relay, error) {
 		logger:   logger,
 		handlers: make(map[string]Handler),
 	}, nil
+}
+
+// SetObservability wires the optional metrics registry and tracer the relay
+// records job dispatch on (ARCH-007 §5, WP-6.08 / DEV-120). Either may be nil
+// to disable that half. It is called once at the composition root, before the
+// scheduler loop starts.
+func (r *Relay) SetObservability(reg *metrics.Registry, tracer *tracing.Tracer) {
+	r.reg = reg
+	r.tracer = tracer
 }
 
 // Register binds handler to eventType in the dispatch registry. Registering
@@ -173,6 +194,11 @@ func (r *Relay) Drain(ctx context.Context) error {
 	if len(events) == 0 {
 		return nil
 	}
+	if r.reg != nil {
+		// Best-effort queue depth: the claimed batch of this drain (a lower
+		// bound on the due backlog).
+		r.reg.Gauge(metrics.NameJobsQueueDepth, metrics.HelpJobsQueueDepth).Set(float64(len(events)))
+	}
 
 	delivered, deadLettered := 0, 0
 	for _, event := range events {
@@ -199,6 +225,25 @@ func (r *Relay) Drain(ctx context.Context) error {
 // returned only for a store failure; handler outcomes are terminal states
 // of the row, not errors of the drain.
 func (r *Relay) dispatch(ctx context.Context, event ClaimedEvent) (drainOutcome, error) {
+	// The job-dispatch span (ARCH-007 §5, WP-6.08): the correlation id carried
+	// by the job payload (when present) joins the request's trace and log
+	// scope, so a request -> job -> audit trail shares one correlation id.
+	if cid := correlationIDFromPayload(event.Payload); cid != "" {
+		if _, ok := logging.CorrelationIDFrom(ctx); !ok {
+			ctx = logging.WithCorrelationID(ctx, cid)
+		}
+	}
+	var span *tracing.Span
+	if r.tracer != nil {
+		ctx, span = r.tracer.Start(ctx, "job.dispatch")
+		span.SetAttr("job.type", event.Type)
+		span.SetAttr("job.event_id", event.ID)
+	}
+	defer span.End() // nil-safe when no tracer is wired
+	if r.reg != nil {
+		r.reg.Counter(metrics.NameJobsAttemptsTotal, metrics.HelpJobsAttemptsTotal).Inc()
+	}
+
 	handler, ok := r.handlers[event.Type]
 	if !ok {
 		// An unknown type must not crash the drain: treat it as a permanent
@@ -232,12 +277,31 @@ func (r *Relay) dispatch(ctx context.Context, event ClaimedEvent) (drainOutcome,
 	return outcomeDelivered, nil
 }
 
+// correlationIDFromPayload reads the correlation_id field of a job payload
+// (the signal-command envelope carries it; source jobs carry identities only).
+// An absent or malformed payload yields "" — best-effort, never fatal.
+func correlationIDFromPayload(payload []byte) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var envelope struct {
+		CorrelationID string `json:"correlation_id"`
+	}
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return ""
+	}
+	return envelope.CorrelationID
+}
+
 // deadLetter marks event permanently failed: claimed -> dead_letter with
 // the handler error text recorded as last_error (guarded in the store, so a
 // terminal row is never overwritten).
 func (r *Relay) deadLetter(ctx context.Context, event ClaimedEvent, cause error) (drainOutcome, error) {
 	if err := r.store.DeadLetter(ctx, event.ID, cause.Error()); err != nil {
 		return 0, fmt.Errorf("worker: outbox relay: dead-letter %s: %w", event.ID, err)
+	}
+	if r.reg != nil {
+		r.reg.Counter(metrics.NameJobsDeadLettersTotal, metrics.HelpJobsDeadLettersTotal).Inc()
 	}
 	r.logger.Warn("outbox delivery failed permanently; dead-lettered",
 		slog.String("event_id", event.ID),
