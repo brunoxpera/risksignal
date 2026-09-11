@@ -111,7 +111,10 @@ func TestJSONSummaryIsDeterministic(t *testing.T) {
 		`"notify.webhook.secret":{"set":true,"source":"default"},` +
 		`"observability.metrics_enabled":{"value":false,"source":"default"},` +
 		`"observability.metrics_addr":{"set":true,"source":"default"},` +
-		`"observability.otlp_endpoint":{"set":true,"source":"default"}}`
+		`"observability.otlp_endpoint":{"set":true,"source":"default"},` +
+		`"backup.encryption_key_ref":{"set":true,"source":"default"},` +
+		`"backup.dir":{"value":"var/backups","source":"default"},` +
+		`"backup.retain_days":{"value":14,"source":"default"}}`
 	if string(first) != want {
 		t.Fatalf("JSONSummary rendered %s, want %s", first, want)
 	}

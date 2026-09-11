@@ -31,6 +31,9 @@ var envKeys = []string{
 	envName("observability.metrics_enabled"),
 	envName("observability.metrics_addr"),
 	envName("observability.otlp_endpoint"),
+	envName("backup.encryption_key_ref"),
+	envName("backup.dir"),
+	envName("backup.retain_days"),
 }
 
 // resetEnv removes every loader input so each test starts from pure
@@ -742,6 +745,80 @@ func errsContain(errs []error, key string) bool {
 // TestRetentionDefaults pins the built-in retention vocabulary (ARCH-007 §10):
 // a five-year period, pseudonymisation defaulting to the retention period
 // (0 = inherit), the §14.1 batch size and the monthly cadence.
+// TestBackupDefaults pins the encrypted off-host backup defaults (ARCH-007 §4).
+func TestBackupDefaults(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Backup.Dir != "var/backups" {
+		t.Errorf("Backup.Dir = %q, want var/backups", cfg.Backup.Dir)
+	}
+	if cfg.Backup.RetainDays != 14 {
+		t.Errorf("Backup.RetainDays = %d, want 14", cfg.Backup.RetainDays)
+	}
+	if cfg.Backup.EncryptionKeyRef != "" {
+		t.Errorf("Backup.EncryptionKeyRef = %q, want empty (runtime-injected)", cfg.Backup.EncryptionKeyRef)
+	}
+}
+
+// TestLoadBackupFromEnv resolves every backup key from RISKSIGNAL_*, and the
+// encryption-key reference stays presence-only in the summary.
+func TestLoadBackupFromEnv(t *testing.T) {
+	env := validEnv()
+	env["backup.dir"] = "/off/host/backups"
+	env["backup.retain_days"] = "21"
+	env["backup.encryption_key_ref"] = "RS_BACKUP_KEY"
+	cfg := mustLoad(t, "", env)
+	if cfg.Backup.Dir != "/off/host/backups" || cfg.Backup.RetainDays != 21 || cfg.Backup.EncryptionKeyRef != "RS_BACKUP_KEY" {
+		t.Fatalf("backup = %+v, want /off/host/backups/21/RS_BACKUP_KEY", cfg.Backup)
+	}
+	line := summaryLine(cfg.Summary(), "backup.encryption_key_ref")
+	if !strings.Contains(line, "set (source=env)") {
+		t.Errorf("Summary() backup.encryption_key_ref line %q does not report presence only", line)
+	}
+}
+
+// TestLoadBackupFromFile resolves the backup keys from the config file.
+func TestLoadBackupFromFile(t *testing.T) {
+	file := writeConfigFile(t, `{
+		"database": {"url": "postgres://file@127.0.0.1/db"},
+		"oidc": {"issuer": "https://issuer.file.example/"},
+		"backup": {"dir": "/mnt/offhost", "retain_days": 30, "encryption_key_ref": "RS_KEY"}
+	}`)
+	cfg := mustLoad(t, file, nil)
+	if cfg.Backup.Dir != "/mnt/offhost" || cfg.Backup.RetainDays != 30 || cfg.Backup.EncryptionKeyRef != "RS_KEY" {
+		t.Fatalf("backup = %+v, want the file values", cfg.Backup)
+	}
+}
+
+// TestValidateBackupRetainDaysFloorAndDir rejects a retention floor below the
+// ARCH-007 §4 minimum and an empty off-host root.
+func TestValidateBackupRetainDaysFloorAndDir(t *testing.T) {
+	base := Defaults()
+	base.Database.URL = "postgres://u@h/db"
+	base.OIDC.Issuer = "https://auth.local.example/"
+
+	cfg := base
+	cfg.Backup.RetainDays = 13
+	if !errorsReference(Validate(&cfg), "backup.retain_days") {
+		t.Errorf("retain_days=13 not rejected by backup.retain_days")
+	}
+
+	cfg = base
+	cfg.Backup.Dir = "  "
+	if !errorsReference(Validate(&cfg), "backup.dir") {
+		t.Errorf("empty dir not rejected by backup.dir")
+	}
+}
+
+// errorsReference reports whether any error names the given key.
+func errorsReference(errs []error, key string) bool {
+	for _, e := range errs {
+		if strings.Contains(e.Error(), key) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRetentionDefaults(t *testing.T) {
 	cfg := Defaults()
 	if cfg.Retention.ClosedSignalYears != 5 {

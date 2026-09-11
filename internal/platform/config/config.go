@@ -65,6 +65,17 @@ const (
 	// public: local binds loopback, demo/production an internal-only address
 	// (ARCH-007 §5/§10, WP-6.08 / DEV-120).
 	defaultMetricsAddr = "127.0.0.1:9091"
+	// defaultBackupDir is the off-host (or separate-volume) root the encrypted
+	// logical backups are written to and pruned from (backup.dir). It is
+	// deliberately not the export spool and never the database data directory
+	// (ARCH-007 §4: "ausserhalb des Laufzeithosts").
+	defaultBackupDir = "var/backups"
+	// defaultBackupRetainDays is the minimum number of daily backup states kept
+	// before pruning (backup.retain_days). ARCH-007 §4 requires at least 14.
+	defaultBackupRetainDays = 14
+	// minBackupRetainDays is the floor the startup validation enforces on
+	// backup.retain_days (ARCH-007 §4: "≥14 daily states").
+	minBackupRetainDays = 14
 )
 
 // envVarConfigFile selects the optional JSON configuration file. It is not a
@@ -96,6 +107,7 @@ type Config struct {
 	Notify        Notify    `json:"notify"`
 	Export        Export    `json:"export"`
 	Retention     Retention `json:"retention"`
+	Backup        Backup    `json:"backup"`
 
 	Observability Observability `json:"observability"`
 
@@ -224,6 +236,34 @@ type Retention struct {
 	// the injected clock. It is configuration, never table state. The default
 	// is monthly (30 days).
 	Schedule time.Duration `json:"schedule"`
+}
+
+// Backup carries the I6 encrypted off-host backup configuration (ARCH-007
+// §4/§10, WP-6.09 / DEV-122). The backup job is the daily logical `pg_dump
+// -Fc` of the whole database, encrypted with `age` and written off-host; it is
+// a containerised sidecar/cron, never part of the application process.
+//
+// EncryptionKeyRef is the only secret-capable member: it names the
+// runtime-injected `age` identity (the private key), never the key itself —
+// Summary/JSONSummary report presence and provenance only, never content
+// (§7 control 6). The `age` recipient used for encryption is derived from the
+// identity, so one referenced secret covers both directions.
+//
+// All three keys are additive to schema v1 (ARCH-007 §10); the schema version
+// is unchanged.
+type Backup struct {
+	// EncryptionKeyRef names the runtime-injected secret that holds the `age`
+	// identity (backup.encryption_key_ref). It is a reference, never the key;
+	// presence-only in Summary. The empty default means "not configured" — the
+	// backup/restore commands then fail with a key-only validation error rather
+	// than the process refusing to start (the server/worker never back up).
+	EncryptionKeyRef string `json:"encryption_key_ref"`
+	// Dir is the off-host (or separate-volume) backup root the encrypted
+	// artifacts are written to and pruned from (backup.dir).
+	Dir string `json:"dir"`
+	// RetainDays is the number of daily backup states kept before pruning
+	// (backup.retain_days). ARCH-007 §4 requires at least 14.
+	RetainDays int `json:"retain_days"`
 }
 
 // Observability carries the I6 observability configuration (ARCH-007 §5/§10,
@@ -365,6 +405,16 @@ func Defaults() Config {
 			MetricsEnabled: false,
 			MetricsAddr:    defaultMetricsAddr,
 			OTLPEndpoint:   "",
+		},
+		Backup: Backup{
+			// The off-host backup root defaults to var/backups and keeps at
+			// least 14 daily states (ARCH-007 §4/§10: backup.dir/
+			// backup.retain_days). The age identity is runtime-injected and
+			// has no baked-in reference (backup.encryption_key_ref stays empty
+			// until an operator names the secret).
+			EncryptionKeyRef: "",
+			Dir:              defaultBackupDir,
+			RetainDays:       defaultBackupRetainDays,
 		},
 	}
 }
@@ -523,6 +573,19 @@ var envBindings = []struct {
 		c.Observability.OTLPEndpoint = strings.TrimSpace(v)
 		return nil
 	}},
+	{"backup.encryption_key_ref", func(c *Config, v string) error {
+		c.Backup.EncryptionKeyRef = strings.TrimSpace(v)
+		return nil
+	}},
+	{"backup.dir", func(c *Config, v string) error { c.Backup.Dir = strings.TrimSpace(v); return nil }},
+	{"backup.retain_days", func(c *Config, v string) error {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("backup.retain_days: %s: must be an integer", envName("backup.retain_days"))
+		}
+		c.Backup.RetainDays = n
+		return nil
+	}},
 	{"notify.p2_active", func(c *Config, v string) error {
 		b, err := strconv.ParseBool(strings.TrimSpace(v))
 		if err != nil {
@@ -584,30 +647,33 @@ func trimEach(in []string) []string {
 func Load() (*Config, error) {
 	cfg := Defaults()
 	prov := map[string]Source{
-		"schema_version":           SourceDefault,
-		"env":                      SourceDefault,
-		"http.addr":                SourceDefault,
-		"database.url":             SourceDefault,
-		"oidc.issuer":              SourceDefault,
-		"oidc.client_id":           SourceDefault,
-		"oidc.client_secret_ref":   SourceDefault,
-		"oidc.redirect_url":        SourceDefault,
-		"oidc.scopes":              SourceDefault,
-		"oidc.roles_claim":         SourceDefault,
-		"oidc.role_mappings":       SourceDefault,
-		"oidc.audience":            SourceDefault,
-		"oidc.session_cookie_name": SourceDefault,
-		"oidc.session_ttl":         SourceDefault,
-		"auth.bypass_enabled":      SourceDefault,
-		"auth.bypass_principal":    SourceDefault,
-		"notify.p2_active":         SourceDefault,
-		"notify.smtp.enabled":      SourceDefault,
-		"notify.smtp.addr":         SourceDefault,
-		"notify.smtp.from":         SourceDefault,
-		"notify.smtp.to":           SourceDefault,
-		"notify.webhook.enabled":   SourceDefault,
-		"notify.webhook.url":       SourceDefault,
-		"notify.webhook.secret":    SourceDefault,
+		"schema_version":            SourceDefault,
+		"env":                       SourceDefault,
+		"http.addr":                 SourceDefault,
+		"database.url":              SourceDefault,
+		"oidc.issuer":               SourceDefault,
+		"oidc.client_id":            SourceDefault,
+		"oidc.client_secret_ref":    SourceDefault,
+		"oidc.redirect_url":         SourceDefault,
+		"oidc.scopes":               SourceDefault,
+		"oidc.roles_claim":          SourceDefault,
+		"oidc.role_mappings":        SourceDefault,
+		"oidc.audience":             SourceDefault,
+		"oidc.session_cookie_name":  SourceDefault,
+		"oidc.session_ttl":          SourceDefault,
+		"auth.bypass_enabled":       SourceDefault,
+		"auth.bypass_principal":     SourceDefault,
+		"notify.p2_active":          SourceDefault,
+		"notify.smtp.enabled":       SourceDefault,
+		"notify.smtp.addr":          SourceDefault,
+		"notify.smtp.from":          SourceDefault,
+		"notify.smtp.to":            SourceDefault,
+		"notify.webhook.enabled":    SourceDefault,
+		"notify.webhook.url":        SourceDefault,
+		"notify.webhook.secret":     SourceDefault,
+		"backup.encryption_key_ref": SourceDefault,
+		"backup.dir":                SourceDefault,
+		"backup.retain_days":        SourceDefault,
 	}
 
 	if path := os.Getenv(envVarConfigFile); path != "" {
@@ -655,7 +721,14 @@ type configFile struct {
 	Notify        *fileNotify        `json:"notify"`
 	Export        *fileExport        `json:"export"`
 	Retention     *fileRetention     `json:"retention"`
+	Backup        *fileBackup        `json:"backup"`
 	Observability *fileObservability `json:"observability"`
+}
+
+type fileBackup struct {
+	EncryptionKeyRef *string `json:"encryption_key_ref"`
+	Dir              *string `json:"dir"`
+	RetainDays       *int    `json:"retain_days"`
 }
 
 type fileHTTP struct {
@@ -900,6 +973,20 @@ func applyConfigFile(cfg *Config, path string, prov map[string]Source) error {
 			}
 			cfg.Retention.Schedule = d
 			prov["retention.schedule"] = SourceFile
+		}
+	}
+	if fc.Backup != nil {
+		if fc.Backup.EncryptionKeyRef != nil {
+			cfg.Backup.EncryptionKeyRef = strings.TrimSpace(*fc.Backup.EncryptionKeyRef)
+			prov["backup.encryption_key_ref"] = SourceFile
+		}
+		if fc.Backup.Dir != nil {
+			cfg.Backup.Dir = strings.TrimSpace(*fc.Backup.Dir)
+			prov["backup.dir"] = SourceFile
+		}
+		if fc.Backup.RetainDays != nil {
+			cfg.Backup.RetainDays = *fc.Backup.RetainDays
+			prov["backup.retain_days"] = SourceFile
 		}
 	}
 	if fc.Observability != nil {

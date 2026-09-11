@@ -211,6 +211,18 @@ func Validate(c *Config) []error {
 		}
 	}
 
+	// The encrypted off-host backup (ARCH-007 §4/§10, WP-6.09): the off-host
+	// root must be named and the retention floor is 14 daily states. The
+	// encryption-key reference is runtime-injected and deliberately not
+	// required at startup (the server/worker never back up); the backup and
+	// restore commands enforce its presence at command time.
+	if strings.TrimSpace(c.Backup.Dir) == "" {
+		errs = append(errs, errors.New("backup.dir: must not be empty (the off-host backup root)"))
+	}
+	if c.Backup.RetainDays < minBackupRetainDays {
+		errs = append(errs, errors.New("backup.retain_days: must be at least 14 (ARCH-007 §4 keeps ≥14 daily states)"))
+	}
+
 	return errs
 }
 

@@ -81,6 +81,9 @@ func (c *Config) summaryRows() []summaryRow {
 		{key: "observability.metrics_enabled", state: strconv.FormatBool(c.Observability.MetricsEnabled), source: src("observability.metrics_enabled")},
 		{key: "observability.metrics_addr", state: "set", source: src("observability.metrics_addr")},
 		{key: "observability.otlp_endpoint", state: "set", source: src("observability.otlp_endpoint")},
+		{key: "backup.encryption_key_ref", state: "set", source: src("backup.encryption_key_ref")},
+		{key: "backup.dir", state: c.Backup.Dir, source: src("backup.dir")},
+		{key: "backup.retain_days", state: strconv.Itoa(c.Backup.RetainDays), source: src("backup.retain_days")},
 	}
 }
 
@@ -132,6 +135,10 @@ type JSONSummary struct {
 	ObservabilityMetricsEnabled ScalarSummary[bool] `json:"observability.metrics_enabled"`
 	ObservabilityMetricsAddr    PresenceSummary     `json:"observability.metrics_addr"`
 	ObservabilityOTLPEndpoint   PresenceSummary     `json:"observability.otlp_endpoint"`
+
+	BackupEncryptionKeyRef PresenceSummary       `json:"backup.encryption_key_ref"`
+	BackupDir              ScalarSummary[string] `json:"backup.dir"`
+	BackupRetainDays       ScalarSummary[int]    `json:"backup.retain_days"`
 }
 
 // ScalarSummary reports the value and provenance of a leaf that cannot carry
@@ -199,5 +206,9 @@ func (c *Config) JSONSummary() JSONSummary {
 		ObservabilityMetricsEnabled: ScalarSummary[bool]{Value: c.Observability.MetricsEnabled, Source: c.sourceOf("observability.metrics_enabled")},
 		ObservabilityMetricsAddr:    PresenceSummary{Set: true, Source: c.sourceOf("observability.metrics_addr")},
 		ObservabilityOTLPEndpoint:   PresenceSummary{Set: true, Source: c.sourceOf("observability.otlp_endpoint")},
+
+		BackupEncryptionKeyRef: PresenceSummary{Set: true, Source: c.sourceOf("backup.encryption_key_ref")},
+		BackupDir:              ScalarSummary[string]{Value: c.Backup.Dir, Source: c.sourceOf("backup.dir")},
+		BackupRetainDays:       ScalarSummary[int]{Value: c.Backup.RetainDays, Source: c.sourceOf("backup.retain_days")},
 	}
 }
