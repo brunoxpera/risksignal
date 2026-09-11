@@ -73,6 +73,43 @@ GRANT risksignal_app TO risksignal_runtime;
 The `database.url` of the server/worker must then connect as the runtime login.
 A regression that tries to rewrite the audit trail fails with SQLSTATE `42501`.
 
+#### Dedicated retention role
+
+Migration `00015` adds the governed retention and pseudonymisation path's own
+least-privilege role (ARCH-007 §7 control 3a amendment, DEV-128). The retention
+acts delete and redact rows `risksignal_app` may not touch, so widening the
+runtime role would break the append-only guarantee; instead they run on a
+separate connection:
+
+- **`risksignal_retention`** — a NOLOGIN group role with the retention grants.
+- **`risksignal_retention_login`** — a LOGIN role granted `risksignal_retention`
+  (never the runtime login). Its password is runtime-injected; the retention
+  path never uses `SET ROLE`.
+
+| Privileges | Tables |
+|---|---|
+| `SELECT`, `INSERT`, `UPDATE`, `DELETE` | `audit_events` |
+| `SELECT`, `UPDATE`, `DELETE` | `risk_signals`, `comments` |
+| `SELECT`, `DELETE` | `sla_clocks`, `matches`, `notifications` |
+| `SELECT`, `UPDATE` | `retention_runs` |
+| `SELECT` | `legal_holds` |
+
+`SELECT` is granted alongside the delete privileges because PostgreSQL checks
+`SELECT` on the columns a statement reads — including those named in an
+`UPDATE`/`DELETE` `WHERE` clause — so it is required, not a convenience.
+Everything else is revoked: nothing on `users`, `outbox`, `epss_current` or
+`schema_migration_log`; no `TRUNCATE`/`REFERENCES`/`TRIGGER`; no `CREATE` on
+`public`; not a superuser.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `database.retention_url` (`RISKSIGNAL_DATABASE_RETENTION_URL`) | *unset* | The separate DSN the retention and pseudonymisation commits authenticate as the dedicated retention login on. Optional and credential-redacted (presence-only in `Summary`/`diagnose config`). When **unset** the commit paths fail closed: the worker's `retention.execute` handler refuses (the job dead-letters) and `risksignal maintenance identity-pseudonymize --commit` is refused, rather than falling back to the application role. |
+
+The `retention.execute` worker job and the `identity-pseudonymize --commit`
+path drive a retention-bound application service on this pool; the dry-run
+preview, the monthly dry-run scheduler and every other job keep the app-role
+pool. See `docs/operations/security-hardening.md` and ARCH-007 §7 control 3a.
+
 ### Optional audit hash chain (§7 control 3b)
 
 | Key | Default | Meaning |
