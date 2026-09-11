@@ -82,7 +82,7 @@ SBOM_DIR := $(ARTIFACT_DIR)/sbom
 SCAN_DIR := $(ARTIFACT_DIR)/scan
 
 .PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
-	verify-connectivity ci-lint ci-test test-exit-criteria test-i5a-exit-criteria test-i5b-exit-criteria test-contract ci-build demo check-gofmt vet lint-golangci \
+	verify-connectivity ci-lint ci-test test-exit-criteria test-i5a-exit-criteria test-i5b-exit-criteria test-contract ci-build demo demo-smoke check-gofmt vet lint-golangci \
 	lint-licenses lint-secrets lint-openapi-validate lint-openapi-diff up-db image sbom scan sign backup restore-test \
 	provision-retention-login
 
@@ -204,6 +204,21 @@ ci-build: build
 ##       RISKSIGNAL_HTTP_ADDR).
 demo: build
 	@scripts/demo.sh
+
+## demo-smoke: DEV-132 / ARCH-007 §8 proofs + §4.4 step-5 smoke. Two parts:
+##             (a) the §8 negative-startup proof — the risksignal-server
+##             binary is started with env=demo and auth.bypass_enabled=true
+##             (and, separately, sources.allow_private=true) and must exit
+##             non-zero before binding; (b) the §4.4 step-5 flow — login (mock
+##             OIDC) → GET /api/v1/signals → source monitor → one signal read
+##             — driven by TestDemoSmokeStep5Flow over the real server stack
+##             against the compose PostgreSQL. The step-5 smoke runs as a
+##             documented loopback approximation (no container/TLS e2e); the
+##             private demo overlay's posture is asserted by
+##             arch007_demo_lockdown_test.go. See scripts/demo-smoke.sh.
+##             Requires go + docker compose (`make up-db`).
+demo-smoke:
+	@scripts/demo-smoke.sh
 
 ## image: build the production container images (WP-1a.13) from the
 ##        deploy/server and deploy/worker Containerfiles — multi-stage, non-root
