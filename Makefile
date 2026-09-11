@@ -209,7 +209,7 @@ test-exit-criteria: up-db
 ##          path (a smoke subset, not the full evidence profile). The
 ##          integration proofs skip cleanly without a reachable database.
 test-i6-exit-criteria: up-db
-	$(GO) test -race -count=1 -run 'I6ExitCriteria' ./internal/application ./internal/application/export ./internal/platform/metrics ./internal/platform/tracing ./internal/platform/config ./internal/adapters/httpapi ./internal/adapters/worker ./internal/adapters/sources/fetchguard ./internal/adapters/postgres/repo ./cmd/risksignal ./cmd/risksignal-server
+	$(GO) test -race -count=1 -run 'I6ExitCriteria' ./internal/application ./internal/application/export ./internal/platform/metrics ./internal/platform/tracing ./internal/platform/config ./internal/adapters/httpapi ./internal/adapters/observability ./internal/adapters/worker ./internal/adapters/sources/fetchguard ./internal/adapters/postgres/repo ./cmd/risksignal ./cmd/risksignal-server
 	$(MAKE) perf
 
 ## test-contract: run only the WP-1b.09 contract suite (ADR-011 gate 3,

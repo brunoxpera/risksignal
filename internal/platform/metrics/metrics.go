@@ -209,6 +209,32 @@ func (r *Registry) update(name string, labels Labels, fn func(*Series)) {
 	fn(s)
 }
 
+// Family describes one declared metric family — its name, help text and
+// kind — without its series. It is the declared vocabulary of the registry:
+// the exposition-contract tests read it to assert every §16.2 family is
+// declared, and the coverage guard (DEV-138) reads it to prove no declared
+// gauge family is left without a writer.
+type Family struct {
+	Name string
+	Help string
+	Kind Kind
+}
+
+// Families returns the declared families in stable name order. A declared
+// family is returned even before its first write (the declaration is the
+// contract), so the set is exactly what RegisterStandard put on the
+// registry.
+func (r *Registry) Families() []Family {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	families := make([]Family, 0, len(r.families))
+	for _, fam := range r.families {
+		families = append(families, Family{Name: fam.name, Help: fam.help, Kind: fam.kind})
+	}
+	sort.Slice(families, func(i, j int) bool { return families[i].Name < families[j].Name })
+	return families
+}
+
 // Sample is one point-in-time reading of a metric series: the current
 // value and, for a KindSeconds series, the observation count and sum.
 type Sample struct {

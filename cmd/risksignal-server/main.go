@@ -36,6 +36,7 @@ import (
 
 	"github.com/brunoxpera/risksignal/db/migrations"
 	"github.com/brunoxpera/risksignal/internal/adapters/httpapi"
+	"github.com/brunoxpera/risksignal/internal/adapters/observability"
 	"github.com/brunoxpera/risksignal/internal/adapters/oidc"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
@@ -133,13 +134,18 @@ func serve(cfg *config.Config, logger *slog.Logger) error {
 	// The internal metrics exposition (ARCH-007 §5, WP-6.08 / DEV-120): served
 	// on its own listener (observability.metrics_addr, never public — config
 	// validation enforces loopback in local and a non-wildcard host outside)
-	// and only when observability.metrics_enabled is set.
+	// and only when observability.metrics_enabled is set. The gauge sampler
+	// (WP-6.12 follow-up / DEV-138) populates the DB-derived §16.2 gauges the
+	// event recorders cannot, so the exposition carries a value for every
+	// declared family.
 	if cfg.Observability.MetricsEnabled {
 		go func() {
 			if err := httpapi.ServeMetrics(ctx, cfg.Observability.MetricsAddr, reg, logger); err != nil {
 				logger.Error("metrics listener stopped", slog.Any("error", err))
 			}
 		}()
+		collector := observability.NewCollector(pool, reg, logger)
+		go collector.Run(ctx, observability.DefaultCollectInterval)
 	}
 
 	serveErr := make(chan error, 1)

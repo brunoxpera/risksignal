@@ -32,6 +32,7 @@ import (
 
 	"github.com/brunoxpera/risksignal/internal/adapters/httpapi"
 	"github.com/brunoxpera/risksignal/internal/adapters/notify"
+	"github.com/brunoxpera/risksignal/internal/adapters/observability"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/gen"
 	"github.com/brunoxpera/risksignal/internal/adapters/postgres/repo"
@@ -210,6 +211,8 @@ func runWithContext(ctx context.Context, cfg *config.Config, logger *slog.Logger
 				logger.Error("metrics listener stopped", slog.Any("error", err))
 			}
 		}()
+		collector := observability.NewCollector(pool, reg, logger)
+		go collector.Run(ctx, observability.DefaultCollectInterval)
 	}
 
 	relay, err := worker.NewRelay(repo.NewOutboxRelay(q), logger)
