@@ -18,6 +18,11 @@
 # WP-1a.10 scheduler loop — heartbeat and one scheduler run per
 # worker.interval (default 30s) — since WP-1a.10.
 # db, mail and oidc are the services that must stay up.
+#
+# The dedicated retention connection (database.retention_url, DEV-129)
+# authenticates as the migration-created risksignal_retention_login; run
+# `make provision-retention-login` after `make migrate` once to inject that
+# login's local development password (the migrations deliberately carry none).
 
 name: risksignal
 
@@ -66,6 +71,12 @@ services:
       # Valid local configuration so the WP-1a.02 startup validation passes
       # (the skeleton exits 0; it does not connect yet — WP-1a.05).
       RISKSIGNAL_DATABASE_URL: "postgres://risksignal:risksignal@db:5432/risksignal?sslmode=disable"
+      # DEV-129: the dedicated retention/pseudonymisation connection (ARCH-007
+      # §7 control 3a amendment). It authenticates as the migration-created
+      # risksignal_retention_login; inject that login's local development
+      # password with `make provision-retention-login` once, after the
+      # migrations that create the roles. Loopback dev credentials only.
+      RISKSIGNAL_DATABASE_RETENTION_URL: "postgres://risksignal_retention_login:risksignal_retention@db:5432/risksignal?sslmode=disable"
       RISKSIGNAL_OIDC_ISSUER: "http://oidc:9000/oidc"
     depends_on:
       db:
@@ -77,6 +88,8 @@ services:
       dockerfile: deploy/worker/Containerfile
     environment:
       RISKSIGNAL_DATABASE_URL: "postgres://risksignal:risksignal@db:5432/risksignal?sslmode=disable"
+      # DEV-129: the dedicated retention connection (see the server comment).
+      RISKSIGNAL_DATABASE_RETENTION_URL: "postgres://risksignal_retention_login:risksignal_retention@db:5432/risksignal?sslmode=disable"
       RISKSIGNAL_OIDC_ISSUER: "http://oidc:9000/oidc"
     depends_on:
       db:

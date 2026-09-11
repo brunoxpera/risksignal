@@ -83,7 +83,8 @@ SCAN_DIR := $(ARTIFACT_DIR)/scan
 
 .PHONY: build test test-arch lint lint-arch generate validate-openapi migrate up down \
 	verify-connectivity ci-lint ci-test test-exit-criteria test-i5a-exit-criteria test-i5b-exit-criteria test-contract ci-build demo check-gofmt vet lint-golangci \
-	lint-licenses lint-secrets lint-openapi-validate lint-openapi-diff up-db image sbom scan sign backup restore-test
+	lint-licenses lint-secrets lint-openapi-validate lint-openapi-diff up-db image sbom scan sign backup restore-test \
+	provision-retention-login
 
 ## build: compile all three binaries into bin/ with build metadata injected
 build:
@@ -504,3 +505,19 @@ down:
 ##     service name db:5432. Requires the environment to be up (make up).
 verify-connectivity:
 	$(COMPOSE) run --rm --no-deps -e PGPASSWORD=risksignal --entrypoint psql db -h db -p 5432 -U risksignal -d risksignal -tAc 'SELECT 1'
+
+## provision-retention-login: DEV-129 — inject the local development password
+##     into the migration-created retention login (risksignal_retention_login)
+##     and (re-)assert its grant of the risksignal_retention group role, so the
+##     compose server/worker can open the dedicated retention connection
+##     (database.retention_url) for the governed retention/pseudonymisation
+##     commits. The group role and the grant matrix belong to migration 00015,
+##     so this runs after the migrations (it depends on up-db migrate) and only
+##     sets the runtime-injected password the migration deliberately omits
+##     (concept ch. 3.3). Idempotent; the password defaults to the loopback dev
+##     placeholder and can be overridden with RETENTION_PASSWORD.
+provision-retention-login: up-db migrate
+	$(COMPOSE) exec -T db psql -v ON_ERROR_STOP=1 \
+	  -v retention_password="$${RETENTION_PASSWORD:-risksignal_retention}" \
+	  -U risksignal -d risksignal < scripts/db/provision-retention-login.sql
+	@echo "retention login provisioned: risksignal_retention_login (database.retention_url)"
