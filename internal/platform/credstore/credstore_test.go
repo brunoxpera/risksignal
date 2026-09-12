@@ -76,7 +76,10 @@ func TestFileStoreOwnerOnlyPermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX file modes are not enforced on Windows")
 	}
-	path := filepath.Join(t.TempDir(), "credentials.json")
+	// The store's parent directory does not exist yet, so Save must create it
+	// on demand; assert the mode it creates it with rather than relying on
+	// t.TempDir(), whose mode is umask-dependent.
+	path := filepath.Join(t.TempDir(), "nested", "credentials.json")
 	s := OpenPath(path)
 	if err := s.Save(Credential{Issuer: "https://idp.example", AccessToken: "at"}); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -92,7 +95,8 @@ func TestFileStoreOwnerOnlyPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat dir: %v", err)
 	}
-	// t.TempDir() is 0700 by default; the store must not widen it.
+	// The store creates its parent directory 0700 (umask-independent); it
+	// must not leave any group/other access.
 	if perm := dirInfo.Mode().Perm(); perm&0o077 != 0 {
 		t.Fatalf("store directory permissions = %o, want no group/other access", perm)
 	}
